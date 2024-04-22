@@ -18,12 +18,12 @@ epub: $(EPUBFILES)
 	@printf "Generating $@\n"
 	@$(MAKEINFO) --no-split $< -o $@
 
-dir: magit.info magit-section.info
+dir: majjik.info majjik-section.info
 	@printf "Generating dir\n"
 	@echo $^ | xargs -n 1 $(INSTALL_INFO) --dir=$@
 
 HTML_FIXUP_CSS    = '/<link rel="stylesheet" type="text\/css" href="\/assets\/page.css">/a\
-<link rel="icon" href="/assets/magit_alt1.ico">\
+<link rel="icon" href="/assets/majjik_alt1.ico">\
 \n<link class="s-css-s--style" rel="stylesheet"           title="Default"               href="/assets/themes/default.css">\
 \n<link class="s-css-s--style" rel="stylesheet alternate" title="Default high contrast" href="/assets/themes/default-high-contrast.css">\
 \n<link class="s-css-s--style" rel="stylesheet alternate" title="Solarized dark xterm"  href="/assets/themes/solarized-dark-xterm.css">\
@@ -38,14 +38,14 @@ HTML_FIXUP_MENU   = '/<\/body>/i<div id="s-css-s--menu"><\/div>'
 	@sed -i -e $(HTML_FIXUP_CSS) -e $(HTML_FIXUP_ONLOAD) -e $(HTML_FIXUP_MENU) $@
 
 html-dir: $(TEXIFILES)
-	@printf "Generating magit/*.html\n"
-	@$(MAKEINFO) --html -o $(PKG)/ $(MANUAL_HTML_ARGS) magit.texi
-	@for f in $$(find magit -name '*.html') ; do \
+	@printf "Generating majjik/*.html\n"
+	@$(MAKEINFO) --html -o $(PKG)/ $(MANUAL_HTML_ARGS) majjik.texi
+	@for f in $$(find majjik -name '*.html') ; do \
 	sed -i -e $(HTML_FIXUP_CSS) -e $(HTML_FIXUP_ONLOAD) -e $(HTML_FIXUP_MENU) $$f ; \
 	done
-	@printf "Generating magit-section/*.html\n"
-	@$(MAKEINFO) --html -o $(PKG)-section/ $(MANUAL_HTML_ARGS) magit-section.texi
-	@for f in $$(find magit-section -name '*.html') ; do \
+	@printf "Generating majjik-section/*.html\n"
+	@$(MAKEINFO) --html -o $(PKG)-section/ $(MANUAL_HTML_ARGS) majjik-section.texi
+	@for f in $$(find majjik-section -name '*.html') ; do \
 	sed -i -e $(HTML_FIXUP_CSS) -e $(HTML_FIXUP_ONLOAD) -e $(HTML_FIXUP_MENU) $$f ; \
 	done
 
@@ -93,7 +93,7 @@ ORG_EVAL += --funcall org-texinfo-export-to-texinfo
 texi:
 	@printf "Generating $(PKG).texi\n"
 	@$(EMACS) $(ORG_ARGS) $(PKG).org $(ORG_EVAL)
-	@$(EMACS) $(ORG_ARGS) magit-section.org $(ORG_EVAL)
+	@$(EMACS) $(ORG_ARGS) majjik-section.org $(ORG_EVAL)
 
 authors: AUTHORS.md
 
@@ -126,10 +126,10 @@ publish: $(PUBLISH_TARGETS)
 	@aws s3 cp $(PKG).pdf  $(PUBLISH_TARGET)
 	@printf "upload: ./$(PKG)/* to $(PUBLISH_TARGET)*\n"
 	@aws s3 sync --delete $(PKG) $(PUBLISH_TARGET)$(PKG)/ > /dev/null
-	@aws s3 cp magit-section.html $(PUBLISH_TARGET)
-	@aws s3 cp magit-section.pdf  $(PUBLISH_TARGET)
-	@printf "upload: ./magit-section/* to $(PUBLISH_TARGET)*\n"
-	@aws s3 sync --delete magit-section $(PUBLISH_TARGET)magit-section/ > /dev/null
+	@aws s3 cp majjik-section.html $(PUBLISH_TARGET)
+	@aws s3 cp majjik-section.pdf  $(PUBLISH_TARGET)
+	@printf "upload: ./majjik-section/* to $(PUBLISH_TARGET)*\n"
+	@aws s3 sync --delete majjik-section $(PUBLISH_TARGET)majjik-section/ > /dev/null
 	@printf "Generating CDN invalidation\n"
 	@aws cloudfront create-invalidation --distribution-id $(CFRONT_DIST) --paths \
 	"$(subst $(space),$(comma),$(addprefix $(PUBLISH_PATH),$(CFRONT_PATHS)))" > /dev/null
@@ -140,10 +140,10 @@ release: $(PUBLISH_TARGETS)
 	@aws s3 cp $(PKG).pdf  $(RELEASE_TARGET)
 	@printf "upload: ./$(PKG)/* to $(RELEASE_TARGET)*\n"
 	@aws s3 sync --delete $(PKG) $(RELEASE_TARGET)$(PKG)/ > /dev/null
-	@aws s3 cp magit-section.html $(RELEASE_TARGET)
-	@aws s3 cp magit-section.pdf  $(RELEASE_TARGET)
-	@printf "upload: ./magit-section/* to $(RELEASE_TARGET)*\n"
-	@aws s3 sync --delete magit-section $(RELEASE_TARGET)magit-section/ > /dev/null
+	@aws s3 cp majjik-section.html $(RELEASE_TARGET)
+	@aws s3 cp majjik-section.pdf  $(RELEASE_TARGET)
+	@printf "upload: ./majjik-section/* to $(RELEASE_TARGET)*\n"
+	@aws s3 sync --delete majjik-section $(RELEASE_TARGET)majjik-section/ > /dev/null
 	@aws s3 cp $(PUBLISH_TARGET)dir.html $(RELEASE_TARGET)dir.html
 	@aws s3 cp $(PUBLISH_TARGET)dir/index.html $(RELEASE_TARGET)dir/index.html
 	@printf "Generating CDN invalidation\n"
@@ -166,10 +166,10 @@ stats-upload:
 
 # Lisp ###############################################################
 
-# When making changes here, then also adjust the copy in magit-base.el.
+# When making changes here, then also adjust the copy in majjik-base.el.
 define ORG_MAN_EXPORT
-(advice-add 'org-man-export :around 'org-man-export--magit-gitman)
-(defun org-man-export--magit-gitman (fn link description format)
+(advice-add 'org-man-export :around 'org-man-export--majjik-gitman)
+(defun org-man-export--majjik-gitman (fn link description format)
   (if (and (eq format 'texinfo) ;'
            (string-match-p "\\`git" link))
       (replace-regexp-in-string "%s" link "
@@ -192,30 +192,17 @@ export ORG_MAN_EXPORT
 # Templates ##########################################################
 
 define AUTHORS_HEADER
-The following people have contributed to Magit.
-For statistics see https://magit.vc/stats/magit/authors.html.
+The following people have contributed to Majjik.
 
 Authors
 -------
 
-- Marius Vollmer
-- Jonas Bernoulli
+- Zoey Hewll
 
 Active Maintainers
 ------------------
 
-- Jonas Bernoulli
-- Kyle Meyer
-
-Former Maintainers
-------------------
-
-- Nicolas Dudebout
-- Noam Postavsky
-- Peter J. Weisberg
-- Phil Jackson
-- Rémi Vanicat
-- Yann Hodique
+- Zoey Hewll
 
 All Contributors
 ----------------
