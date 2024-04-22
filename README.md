@@ -27,7 +27,7 @@ Please be patient.
 ### Getting Started
 
 If you are new to Majjik, but know [Magit], then it should already be familiar.
-If not, a lot of the information in Magit's [Getting Started](https://github.com/magit/magit#getting-started) may be useful.
+If not, a lot of the information in [Magit's Getting Started page](https://github.com/magit/magit#getting-started) may be useful.
 
 ***
 
