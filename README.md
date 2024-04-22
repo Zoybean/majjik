@@ -14,7 +14,7 @@ Please be patient.
 
 ### Project Status
 - [x] Fork Magit
-- [ ] Find and replace magit -> majjik in filenames
+- [x] Find and replace magit -> majjik in filenames
 - [ ] Find and replace magit -> majjik in identifiers
 - [ ] Replace backend git lib with jj lib
 - [ ] Replace frontend git commands with jj commands
