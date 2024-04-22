@@ -1,17 +1,14 @@
 blank_issues_enabled: false
 contact_links:
   - name: "💡 Suggest a feature"
-    url: https://github.com/magit/magit/discussions
+    url: https://github.com/Zoybean/majjic/discussions
     about: Start a discussion suggest an improvement or a new feature.
-  - name: "🆘 Ask the community for support"
-    url: https://www.reddit.com/r/emacs
-    about: Please also consider supporting others.
-  - name: "🆘 Ask the maintainers for support"
-    url: https://github.com/magit/magit/discussions
+  - name: "🆘 Ask the Majjic maintainers for support"
+    url: https://github.com/Zoybean/majjic/discussions
     about: Please keep in mind that our bandwidth is limited.
   - name: "ℹ️ Magit FAQ"
     url: https://magit.vc/manual/magit/FAQ.html
-    about: Others might have had the same question before.
+    about: Magit users might have had the same question before.
   - name: "ℹ️ Magit Manual"
     url: https://magit.vc/manual/magit/#Top
-    about: The fine manual may also be of use.
+    about: The Magit manual may also be of use.
