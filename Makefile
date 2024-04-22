@@ -5,10 +5,10 @@ include default.mk
 
 .PHONY: lisp docs \
 	install install-lisp install-docs install-info \
-	test test-interactive magit \
+	test test-interactive majjik \
 	clean clean-lisp clean-docs clean-archives \
 	stats bump-versions bump-snapshots \
-	dist versionlib magit-$(VERSION).tar.gz
+	dist versionlib majjik-$(VERSION).tar.gz
 
 all: lisp docs
 
@@ -52,7 +52,7 @@ help:
 	$(info )
 	$(info make test             - run tests)
 	$(info make test-interactive - run tests interactively)
-	$(info make emacs-Q          - run emacs -Q plus Magit)
+	$(info make emacs-Q          - run emacs -Q plus Majjik)
 	$(info make check-declare    - check function declarations)
 	$(info )
 	$(info Release Management)
@@ -119,8 +119,8 @@ test-interactive:
 emacs-Q: clean-lisp
 	@$(EMACS) -Q $(LOAD_PATH) --debug-init --eval "(progn\
 	(setq debug-on-error t)\
-	(require 'magit)\
-	(global-set-key \"\\C-xg\" 'magit-status))"
+	(require 'majjik)\
+	(global-set-key \"\\C-xg\" 'majjik-status))"
 
 check-declare:
 	@$(MAKE) -C lisp check-declare
@@ -131,7 +131,7 @@ clean: clean-lisp clean-docs clean-archives
 	@printf "Cleaning...\n"
 	@$(RM) *.elc $(ELGS) # temporary cleanup kludge
 	@$(RM) docs/*.texi~ docs/*.info-1 docs/*.info-2
-	@$(RM) magit-pkg.el test/magit-tests.elc
+	@$(RM) majjik-pkg.el test/majjik-tests.elc
 
 clean-lisp:
 	@$(MAKE) -C lisp clean
@@ -140,8 +140,8 @@ clean-docs:
 	@$(MAKE) -C docs clean
 
 clean-archives:
-	@$(RM) *.tar.gz *.tar lisp/magit-version.el
-	@$(RMDIR) magit-$(VERSION)
+	@$(RM) *.tar.gz *.tar lisp/majjik-version.el
+	@$(RMDIR) majjik-$(VERSION)
 
 clean-all: clean clean-stats
 
@@ -162,28 +162,28 @@ publish:
 release:
 	@$(MAKE) -C docs release
 
-dist: magit-$(VERSION).tar.gz
+dist: majjik-$(VERSION).tar.gz
 
 versionlib:
 	@$(MAKE) -C lisp versionlib
 
 DIST_ROOT_FILES = LICENSE default.mk Makefile README.md
-DIST_LISP_FILES = $(addprefix lisp/,$(ELS) magit-version.el Makefile)
+DIST_LISP_FILES = $(addprefix lisp/,$(ELS) majjik-version.el Makefile)
 DIST_DOCS_FILES = $(addprefix docs/,$(TEXIPAGES) AUTHORS.md Makefile)
 ifneq ("$(wildcard docs/RelNotes/$(VERSION).txt)","")
   DIST_DOCS_FILES += docs/RelNotes/$(VERSION).txt
 endif
 
-magit-$(VERSION).tar.gz: lisp versionlib info
+majjik-$(VERSION).tar.gz: lisp versionlib info
 	@printf "Packing $@\n"
-	@$(MKDIR) magit-$(VERSION)
-	@$(CP) $(DIST_ROOT_FILES) magit-$(VERSION)
-	@$(MKDIR) magit-$(VERSION)/lisp
-	@$(CP) $(DIST_LISP_FILES) magit-$(VERSION)/lisp
-	@$(MKDIR) magit-$(VERSION)/docs
-	@$(CP) $(DIST_DOCS_FILES) magit-$(VERSION)/docs
-	@$(TAR) cz --mtime=./magit-$(VERSION) -f magit-$(VERSION).tar.gz magit-$(VERSION)
-	@$(RMDIR) magit-$(VERSION)
+	@$(MKDIR) majjik-$(VERSION)
+	@$(CP) $(DIST_ROOT_FILES) majjik-$(VERSION)
+	@$(MKDIR) majjik-$(VERSION)/lisp
+	@$(CP) $(DIST_LISP_FILES) majjik-$(VERSION)/lisp
+	@$(MKDIR) majjik-$(VERSION)/docs
+	@$(CP) $(DIST_DOCS_FILES) majjik-$(VERSION)/docs
+	@$(TAR) cz --mtime=./majjik-$(VERSION) -f majjik-$(VERSION).tar.gz majjik-$(VERSION)
+	@$(RMDIR) majjik-$(VERSION)
 
 define set_package_requires_nongnu
 
@@ -211,24 +211,24 @@ define set_package_requires_nongnu
   (transient ,transient-version)
   (with-editor ,with-editor-version)))
 
-(--update-package "lisp/magit.el" "$(MAGIT_SECTION_VERSION)"
+(--update-package "lisp/majjik.el" "$(MAJJIK_SECTION_VERSION)"
 `((emacs ,emacs-version) ;`
   (compat ,compat-version)
   (dash ,dash-version)
   (git-commit ,git-commit-version)
-  (magit-section ,magit-section-version)
+  (majjik-section ,majjik-section-version)
   (seq ,seq-version)
   (transient ,transient-version)
   (with-editor ,with-editor-version)))
 
-(--update-package "lisp/magit-libgit.el" "$(MAGIT_LIBGIT_VERSION)"
+(--update-package "lisp/majjik-libgit.el" "$(MAJJIK_LIBGIT_VERSION)"
 `((emacs "$(LIBGIT_EMACS_VERSION)") ;`
   (compat ,compat-version)
   (libgit ,libgit-version)
   (seq ,seq-version)
-  (magit ,magit-version)))
+  (majjik ,majjik-version)))
 
-(--update-package "lisp/magit-section.el" "$(MAGIT_SECTION_VERSION)"
+(--update-package "lisp/majjik-section.el" "$(MAJJIK_SECTION_VERSION)"
 `((emacs ,emacs-version) ;`
   (compat ,compat-version)
   (dash ,dash-version)
@@ -253,15 +253,15 @@ define set_package_requires_melpa
     transient-version
     with-editor-version)))
 
-(with-temp-file "lisp/magit-pkg.el"
+(with-temp-file "lisp/majjik-pkg.el"
   (insert (format
-"(define-package \"magit\" \"$(MAGIT_VERSION)$(DEV_SUFFIX)\"
+"(define-package \"majjik\" \"$(MAJJIK_VERSION)$(DEV_SUFFIX)\"
   \"A Git porcelain inside Emacs.\"
   '((emacs         %S)
     (compat        %S)
     (dash          %S)
     (git-commit    %S)
-    (magit-section %S)
+    (majjik-section %S)
     (seq           %S)
     (transient     %S)
     (with-editor   %S))
@@ -271,29 +271,29 @@ define set_package_requires_melpa
     compat-version
     dash-version
     git-commit-version
-    magit-section-version
+    majjik-section-version
     seq-version
     transient-version
     with-editor-version)))
 
-(with-temp-file "lisp/magit-libgit-pkg.el"
+(with-temp-file "lisp/majjik-libgit-pkg.el"
   (insert (format
-"(define-package \"magit-libgit\" \"$(MAGIT_LIBGIT_VERSION)$(DEV_SUFFIX)\"
-  \"(POC) Teach Magit to use Libgit2.\"
+"(define-package \"majjik-libgit\" \"$(MAJJIK_LIBGIT_VERSION)$(DEV_SUFFIX)\"
+  \"(POC) Teach Majjik to use Libgit2.\"
   '((emacs  %S)
     (compat %S)
     (libgit %S)
-    (magit  %S))
+    (majjik  %S))
   :homepage \"https://magit.vc\"
   :keywords '(\"git\" \"tools\" \"vc\"))
 "   emacs-version
     compat-version
     libgit-version
-    magit-version)))
+    majjik-version)))
 
-(with-temp-file "lisp/magit-section-pkg.el"
+(with-temp-file "lisp/majjik-section-pkg.el"
   (insert (format
-"(define-package \"magit-section\" \"$(MAGIT_SECTION_VERSION)$(DEV_SUFFIX)\"
+"(define-package \"majjik-section\" \"$(MAJJIK_SECTION_VERSION)$(DEV_SUFFIX)\"
   \"Sections for read-only buffers.\"
   '((emacs  %S)
     (compat %S)
@@ -312,9 +312,9 @@ define set_package_versions
 (dash-version "$(DASH_VERSION)")
 (git-commit-version "$(GIT_COMMIT_VERSION)")
 (libgit-version "$(LIBGIT_VERSION)")
-(magit-version "$(MAGIT_VERSION)")
-(magit-libgit-version "$(MAGIT_LIBGIT_VERSION)")
-(magit-section-version "$(MAGIT_SECTION_VERSION)")
+(majjik-version "$(MAJJIK_VERSION)")
+(majjik-libgit-version "$(MAJJIK_LIBGIT_VERSION)")
+(majjik-section-version "$(MAJJIK_SECTION_VERSION)")
 (seq-version "$(SEQ_VERSION)")
 (transient-version "$(TRANSIENT_VERSION)")
 (with-editor-version "$(WITH_EDITOR_VERSION)")
@@ -327,9 +327,9 @@ define set_package_snapshots
 (dash-version "$(DASH_MELPA_SNAPSHOT)")
 (git-commit-version "$(GIT_COMMIT_MELPA_SNAPSHOT)")
 (libgit-version "$(LIBGIT_MELPA_SNAPSHOT)")
-(magit-version "$(MAGIT_MELPA_SNAPSHOT)")
-(magit-libgit-version "$(MAGIT_LIBGIT_MELPA_SNAPSHOT)")
-(magit-section-version "$(MAGIT_SECTION_MELPA_SNAPSHOT)")
+(majjik-version "$(MAJJIK_MELPA_SNAPSHOT)")
+(majjik-libgit-version "$(MAJJIK_LIBGIT_MELPA_SNAPSHOT)")
+(majjik-section-version "$(MAJJIK_SECTION_MELPA_SNAPSHOT)")
 (seq-version "$(SEQ_MELPA_SNAPSHOT)")
 (transient-version "$(TRANSIENT_MELPA_SNAPSHOT)")
 (with-editor-version "$(WITH_EDITOR_MELPA_SNAPSHOT)")

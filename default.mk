@@ -15,9 +15,9 @@ TOP := $(dir $(lastword $(MAKEFILE_LIST)))
 
 PREFIX   ?= /usr/local
 sharedir ?= $(PREFIX)/share
-lispdir  ?= $(sharedir)/emacs/site-lisp/magit
+lispdir  ?= $(sharedir)/emacs/site-lisp/majjik
 infodir  ?= $(sharedir)/info
-docdir   ?= $(sharedir)/doc/magit
+docdir   ?= $(sharedir)/doc/majjik
 
 CP       ?= install -p -m 644
 MKDIR    ?= install -p -m 755 -d
@@ -40,12 +40,12 @@ GITSTATS_DIR  ?= $(TOP)docs/stats
 GITSTATS_ARGS ?= -c style=https://magit.vc/assets/stats.css \
                  -c max_authors=180 -c graph_max_authors=7
 
-BUILD_MAGIT_LIBGIT ?= false
+BUILD_MAJJIK_LIBGIT ?= false
 
 ## Files #############################################################
 
-PKG       = magit
-PACKAGES  = magit magit-section git-commit
+PKG       = majjik
+PACKAGES  = majjik majjik-section git-commit
 
 TEXIPAGES = $(addsuffix .texi,$(filter-out git-commit,$(PACKAGES)))
 INFOPAGES = $(addsuffix .info,$(filter-out git-commit,$(PACKAGES)))
@@ -55,57 +55,57 @@ PDFFILES  = $(addsuffix .pdf,$(filter-out git-commit,$(PACKAGES)))
 EPUBFILES = $(addsuffix .epub,$(filter-out git-commit,$(PACKAGES)))
 
 ELS  = git-commit.el
-ELS += magit-section.el
-ELS += magit-base.el
-ifeq "$(BUILD_MAGIT_LIBGIT)" "true"
-ELS += magit-libgit.el
+ELS += majjik-section.el
+ELS += majjik-base.el
+ifeq "$(BUILD_MAJJIK_LIBGIT)" "true"
+ELS += majjik-libgit.el
 endif
-ELS += magit-git.el
-ELS += magit-mode.el
-ELS += magit-margin.el
-ELS += magit-process.el
-ELS += magit-transient.el
-ELS += magit-autorevert.el
-ELS += magit-core.el
-ELS += magit-diff.el
-ELS += magit-log.el
-ELS += magit-wip.el
-ELS += magit-reflog.el
-ELS += magit-apply.el
-ELS += magit-repos.el
-ELS += magit.el
-ELS += magit-status.el
-ELS += magit-refs.el
-ELS += magit-files.el
-ELS += magit-reset.el
-ELS += magit-branch.el
-ELS += magit-merge.el
-ELS += magit-tag.el
-ELS += magit-worktree.el
-ELS += magit-notes.el
-ELS += magit-sequence.el
-ELS += magit-commit.el
-ELS += magit-remote.el
-ELS += magit-clone.el
-ELS += magit-fetch.el
-ELS += magit-pull.el
-ELS += magit-push.el
-ELS += magit-patch.el
-ELS += magit-bisect.el
-ELS += magit-stash.el
-ELS += magit-blame.el
-ELS += magit-sparse-checkout.el
-ELS += magit-submodule.el
-ELS += magit-subtree.el
-ELS += magit-ediff.el
-ELS += magit-gitignore.el
-ELS += magit-bundle.el
-ELS += magit-extras.el
+ELS += majjik-git.el
+ELS += majjik-mode.el
+ELS += majjik-margin.el
+ELS += majjik-process.el
+ELS += majjik-transient.el
+ELS += majjik-autorevert.el
+ELS += majjik-core.el
+ELS += majjik-diff.el
+ELS += majjik-log.el
+ELS += majjik-wip.el
+ELS += majjik-reflog.el
+ELS += majjik-apply.el
+ELS += majjik-repos.el
+ELS += majjik.el
+ELS += majjik-status.el
+ELS += majjik-refs.el
+ELS += majjik-files.el
+ELS += majjik-reset.el
+ELS += majjik-branch.el
+ELS += majjik-merge.el
+ELS += majjik-tag.el
+ELS += majjik-worktree.el
+ELS += majjik-notes.el
+ELS += majjik-sequence.el
+ELS += majjik-commit.el
+ELS += majjik-remote.el
+ELS += majjik-clone.el
+ELS += majjik-fetch.el
+ELS += majjik-pull.el
+ELS += majjik-push.el
+ELS += majjik-patch.el
+ELS += majjik-bisect.el
+ELS += majjik-stash.el
+ELS += majjik-blame.el
+ELS += majjik-sparse-checkout.el
+ELS += majjik-submodule.el
+ELS += majjik-subtree.el
+ELS += majjik-ediff.el
+ELS += majjik-gitignore.el
+ELS += majjik-bundle.el
+ELS += majjik-extras.el
 ELS += git-rebase.el
-ELS += magit-bookmark.el
+ELS += majjik-bookmark.el
 ELCS = $(ELS:.el=.elc)
-ELMS = magit.el $(filter-out $(addsuffix .el,$(PACKAGES)),$(ELS))
-ELGS = magit-autoloads.el magit-version.el
+ELMS = majjik.el $(filter-out $(addsuffix .el,$(PACKAGES)),$(ELS))
+ELGS = majjik-autoloads.el majjik-version.el
 
 ## Versions ##########################################################
 
@@ -117,9 +117,9 @@ COMPAT_VERSION        = 29.1.4.4
 DASH_VERSION          = 2.19.1
 GIT_COMMIT_VERSION    = $(VERSION)
 LIBGIT_VERSION        = 0
-MAGIT_VERSION         = $(VERSION)
-MAGIT_LIBGIT_VERSION  = $(VERSION)
-MAGIT_SECTION_VERSION = $(VERSION)
+MAJJIK_VERSION         = $(VERSION)
+MAJJIK_LIBGIT_VERSION  = $(VERSION)
+MAJJIK_SECTION_VERSION = $(VERSION)
 SEQ_VERSION           = 2.24
 TRANSIENT_VERSION     = 0.5.0
 WITH_EDITOR_VERSION   = 3.3.2
@@ -128,9 +128,9 @@ COMPAT_SNAPSHOT              = $(COMPAT_VERSION)
 DASH_MELPA_SNAPSHOT          = 20221013
 GIT_COMMIT_MELPA_SNAPSHOT    = 20231030
 LIBGIT_MELPA_SNAPSHOT        = 0
-MAGIT_MELPA_SNAPSHOT         = 20231202
-MAGIT_LIBGIT_MELPA_SNAPSHOT  = 20230924
-MAGIT_SECTION_MELPA_SNAPSHOT = 20231202
+MAJJIK_MELPA_SNAPSHOT         = 20231202
+MAJJIK_LIBGIT_MELPA_SNAPSHOT  = 20230924
+MAJJIK_SECTION_MELPA_SNAPSHOT = 20231202
 SEQ_MELPA_SNAPSHOT           = $(SEQ_VERSION)
 TRANSIENT_MELPA_SNAPSHOT     = 20231204
 WITH_EDITOR_MELPA_SNAPSHOT   = 20230917
@@ -148,7 +148,7 @@ endif
 
 ## Load-Path #########################################################
 
-# Remember to also update magit-emacs-Q-command!
+# Remember to also update majjik-emacs-Q-command!
 
 ifndef LOAD_PATH
 
@@ -204,8 +204,8 @@ ifeq "$(WITH_EDITOR_DIR)" ""
   WITH_EDITOR_DIR = $(TOP)../with-editor/lisp
 endif
 
-MAGIT_SECTION_DIR ?= $(shell \
-  find -L $(ELPA_DIR) -maxdepth 1 -regex '.*/magit-section-[.0-9]*' 2> /dev/null | \
+MAJJIK_SECTION_DIR ?= $(shell \
+  find -L $(ELPA_DIR) -maxdepth 1 -regex '.*/majjik-section-[.0-9]*' 2> /dev/null | \
   sort | tail -n 1)
 
 SYSTYPE := $(shell $(EMACS) -Q --batch --eval "(princ system-type)")
@@ -217,7 +217,7 @@ LOAD_PATH = -L $(TOP)lisp
 
 # When making changes here, then don't forget to adjust "Makefile",
 # ".github/workflows/test.yml", ".github/ISSUE_TEMPLATE/bug_report.md",
-# `magit-emacs-Q-command' and the "Installing from the Git Repository"
+# `majjik-emacs-Q-command' and the "Installing from the Git Repository"
 # info node accordingly.  Also don't forget to "rgrep \b<pkg>\b".
 
 ifdef CYGPATH
@@ -227,8 +227,8 @@ ifdef CYGPATH
   LOAD_PATH += -L $(shell cygpath --mixed $(SEQ_DIR))
   LOAD_PATH += -L $(shell cygpath --mixed $(TRANSIENT_DIR))
   LOAD_PATH += -L $(shell cygpath --mixed $(WITH_EDITOR_DIR))
-  ifneq "$(MAGIT_SECTION_DIR)" ""
-    LOAD_PATH += -L $(shell cygpath --mixed $(MAGIT_SECTION_DIR))
+  ifneq "$(MAJJIK_SECTION_DIR)" ""
+    LOAD_PATH += -L $(shell cygpath --mixed $(MAJJIK_SECTION_DIR))
   endif
 else
   LOAD_PATH += -L $(COMPAT_DIR)
@@ -237,8 +237,8 @@ else
   LOAD_PATH += -L $(SEQ_DIR)
   LOAD_PATH += -L $(TRANSIENT_DIR)
   LOAD_PATH += -L $(WITH_EDITOR_DIR)
-  ifneq "$(MAGIT_SECTION_DIR)" ""
-    LOAD_PATH += -L $(MAGIT_SECTION_DIR)
+  ifneq "$(MAJJIK_SECTION_DIR)" ""
+    LOAD_PATH += -L $(MAJJIK_SECTION_DIR)
   endif
 endif
 
