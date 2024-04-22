@@ -192,30 +192,18 @@ export ORG_MAN_EXPORT
 # Templates ##########################################################
 
 define AUTHORS_HEADER
-The following people have contributed to Magit.
+The following people have contributed to Majjik.
 For statistics see https://magit.vc/stats/magit/authors.html.
 
 Authors
 -------
 
-- Marius Vollmer
-- Jonas Bernoulli
+- Zoey Hewll
 
 Active Maintainers
 ------------------
 
-- Jonas Bernoulli
-- Kyle Meyer
-
-Former Maintainers
-------------------
-
-- Nicolas Dudebout
-- Noam Postavsky
-- Peter J. Weisberg
-- Phil Jackson
-- Rémi Vanicat
-- Yann Hodique
+- Zoey Hewll
 
 All Contributors
 ----------------
