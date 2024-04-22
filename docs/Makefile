@@ -193,7 +193,6 @@ export ORG_MAN_EXPORT
 
 define AUTHORS_HEADER
 The following people have contributed to Majjik.
-For statistics see https://majjik.vc/stats/majjik/authors.html.
 
 Authors
 -------
