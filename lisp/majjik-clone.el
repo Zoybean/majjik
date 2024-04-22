@@ -1,4 +1,4 @@
-;;; magit-clone.el --- Clone a repository  -*- lexical-binding:t -*-
+;;; majjik-clone.el --- Clone a repository  -*- lexical-binding:t -*-
 
 ;; Copyright (C) 2008-2024 The Magit Project Contributors
 
@@ -26,37 +26,9 @@
 
 ;;; Code:
 
-(require 'magit)
+(require 'majjik)
 
 ;;; Options
-
-(defcustom magit-clone-set-remote-head nil
-  "Whether cloning creates the symbolic-ref `<remote>/HEAD'."
-  :package-version '(magit . "2.4.2")
-  :group 'magit-commands
-  :type 'boolean)
-
-(defcustom magit-clone-set-remote.pushDefault 'ask
-  "Whether to set the value of `remote.pushDefault' after cloning.
-
-If t, then set without asking.  If nil, then don't set.  If
-`ask', then ask."
-  :package-version '(magit . "2.4.0")
-  :group 'magit-commands
-  :type '(choice (const :tag "set" t)
-                 (const :tag "ask" ask)
-                 (const :tag "don't set" nil)))
-
-(defcustom magit-clone-default-directory nil
-  "Default directory to use when `magit-clone' reads destination.
-If nil (the default), then use the value of `default-directory'.
-If a directory, then use that.  If a function, then call that
-with the remote url as only argument and use the returned value."
-  :package-version '(magit . "2.90.0")
-  :group 'magit-commands
-  :type '(choice (const     :tag "value of default-directory")
-                 (directory :tag "constant directory")
-                 (function  :tag "function's value")))
 
 (defcustom magit-clone-always-transient nil
   "Whether `magit-clone' always acts as a transient prefix command.
@@ -123,54 +95,56 @@ directory where the repository has been cloned."
 
 ;;; Commands
 
-;;;###autoload (autoload 'magit-clone "magit-clone" nil t)
-(transient-define-prefix magit-clone (&optional transient)
+;;;###autoload (autoload 'majjik-clone "majjik-clone" nil t)
+(transient-define-prefix majjik-clone (&optional transient)
   "Clone a repository."
-  :man-page "git-clone"
-  ["Fetch arguments"
-   ("-B" "Clone a single branch"  "--single-branch")
-   ("-n" "Do not clone tags"      "--no-tags")
-   ("-S" "Clones submodules"      "--recurse-submodules" :level 6)
-   ("-l" "Do not optimize"        "--no-local" :level 7)]
+  :man-page "jj-clone"
+  ; ["Fetch arguments"
+  ;  ("-B" "Clone a single branch"  "--single-branch")
+  ;  ("-n" "Do not clone tags"      "--no-tags")
+  ;  ("-S" "Clones submodules"      "--recurse-submodules" :level 6)
+  ;  ("-l" "Do not optimize"        "--no-local" :level 7)]
   ["Setup arguments"
-   ("-o" "Set name of remote"     ("-o" "--origin="))
-   ("-b" "Set HEAD branch"        ("-b" "--branch="))
-   (magit-clone:--filter
-    :if (lambda () (magit-git-version>= "2.17.0"))
-    :level 7)
-   ("-g" "Separate git directory" "--separate-git-dir="
-    transient-read-directory :level 7)
-   ("-t" "Use template directory" "--template="
-    transient-read-existing-directory :level 6)]
-  ["Local sharing arguments"
-   ("-s" "Share objects"          ("-s" "--shared" :level 7))
-   ("-h" "Do not use hardlinks"   "--no-hardlinks")]
+   ("--colocate" "Whether or not to colocate the Jujutsu repo with the git repo" "--colocate")]
+   ; ("-o" "Set name of remote"     ("-o" "--origin="))
+   ; ("-b" "Set HEAD branch"        ("-b" "--branch="))
+  ;  (magit-clone:--filter
+  ;   :if (lambda () (magit-git-version>= "2.17.0"))
+  ;   :level 7)
+  ;  ("-g" "Separate git directory" "--separate-git-dir="
+  ;   transient-read-directory :level 7)
+  ;  ("-t" "Use template directory" "--template="
+  ;   transient-read-existing-directory :level 6)]
+  ; ["Local sharing arguments"
+  ;  ("-s" "Share objects"          ("-s" "--shared" :level 7))
+  ;  ("-h" "Do not use hardlinks"   "--no-hardlinks")]
   ["Clone"
-   ("C" "regular"            magit-clone-regular)
-   ("s" "shallow"            magit-clone-shallow)
-   ("d" "shallow since date" magit-clone-shallow-since :level 7)
-   ("e" "shallow excluding"  magit-clone-shallow-exclude :level 7)
-   (">" "sparse checkout"    magit-clone-sparse
-    :if (lambda () (magit-git-version>= "2.25.0"))
-    :level 6)
-   ("b" "bare"               magit-clone-bare)
-   ("m" "mirror"             magit-clone-mirror)]
+   ("C" "regular"            majjik-clone-regular)
+   ; ("s" "shallow"            magit-clone-shallow)
+   ; ("d" "shallow since date" magit-clone-shallow-since :level 7)
+   ; ("e" "shallow excluding"  magit-clone-shallow-exclude :level 7)
+   ; (">" "sparse checkout"    magit-clone-sparse
+   ;  :if (lambda () (magit-git-version>= "2.25.0"))
+   ;  :level 6)
+   ; ("b" "bare"               magit-clone-bare)
+   ; ("m" "mirror"             magit-clone-mirror)
+  ]
   (interactive (list (or magit-clone-always-transient current-prefix-arg)))
   (if transient
       (transient-setup 'magit-clone)
-    (call-interactively #'magit-clone-regular)))
+    (call-interactively #'majjik-clone-regular)))
 
-(transient-define-argument magit-clone:--filter ()
-  :description "Filter some objects"
-  :class 'transient-option
-  :key "-f"
-  :argument "--filter="
-  :reader #'magit-clone-read-filter)
+; (transient-define-argument magit-clone:--filter ()
+;   :description "Filter some objects"
+;   :class 'transient-option
+;   :key "-f"
+;   :argument "--filter="
+;   :reader #'magit-clone-read-filter)
 
-(defun magit-clone-read-filter (prompt initial-input history)
-  (magit-completing-read prompt
-                         (list "blob:none" "tree:0")
-                         nil nil initial-input history))
+; (defun magit-clone-read-filter (prompt initial-input history)
+;   (magit-completing-read prompt
+;                          (list "blob:none" "tree:0")
+;                          nil nil initial-input history))
 
 ;;;###autoload
 (defun magit-clone-regular (repository directory args)
@@ -178,63 +152,6 @@ directory where the repository has been cloned."
 Then show the status buffer for the new repository."
   (interactive (magit-clone-read-args))
   (magit-clone-internal repository directory args))
-
-;;;###autoload
-(defun magit-clone-shallow (repository directory args depth)
-  "Create a shallow clone of REPOSITORY in DIRECTORY.
-Then show the status buffer for the new repository.
-With a prefix argument read the DEPTH of the clone;
-otherwise use 1."
-  (interactive (append (magit-clone-read-args)
-                       (list (if current-prefix-arg
-                                 (read-number "Depth: " 1)
-                               1))))
-  (magit-clone-internal repository directory
-                        (cons (format "--depth=%s" depth) args)))
-
-;;;###autoload
-(defun magit-clone-shallow-since (repository directory args date)
-  "Create a shallow clone of REPOSITORY in DIRECTORY.
-Then show the status buffer for the new repository.
-Exclude commits before DATE, which is read from the
-user."
-  (interactive (append (magit-clone-read-args)
-                       (list (transient-read-date "Exclude commits before: "
-                                                  nil nil))))
-  (magit-clone-internal repository directory
-                        (cons (format "--shallow-since=%s" date) args)))
-
-;;;###autoload
-(defun magit-clone-shallow-exclude (repository directory args exclude)
-  "Create a shallow clone of REPOSITORY in DIRECTORY.
-Then show the status buffer for the new repository.
-Exclude commits reachable from EXCLUDE, which is a
-branch or tag read from the user."
-  (interactive (append (magit-clone-read-args)
-                       (list (read-string "Exclude commits reachable from: "))))
-  (magit-clone-internal repository directory
-                        (cons (format "--shallow-exclude=%s" exclude) args)))
-
-;;;###autoload
-(defun magit-clone-bare (repository directory args)
-  "Create a bare clone of REPOSITORY in DIRECTORY.
-Then show the status buffer for the new repository."
-  (interactive (magit-clone-read-args))
-  (magit-clone-internal repository directory (cons "--bare" args)))
-
-;;;###autoload
-(defun magit-clone-mirror (repository directory args)
-  "Create a mirror of REPOSITORY in DIRECTORY.
-Then show the status buffer for the new repository."
-  (interactive (magit-clone-read-args))
-  (magit-clone-internal repository directory (cons "--mirror" args)))
-
-;;;###autoload
-(defun magit-clone-sparse (repository directory args)
-  "Clone REPOSITORY into DIRECTORY and create a sparse checkout."
-  (interactive (magit-clone-read-args))
-  (magit-clone-internal repository directory (cons "--no-checkout" args)
-                        'sparse))
 
 (defun magit-clone-internal (repository directory args &optional sparse)
   (let* ((checkout (not (member (car args) '("--bare" "--mirror"))))
@@ -354,5 +271,5 @@ Then show the status buffer for the new repository."
      "Bogus `magit-clone-url-format' (bad type or missing default)")))
 
 ;;; _
-(provide 'magit-clone)
-;;; magit-clone.el ends here
+(provide 'majjik-clone)
+;;; majjik-clone.el ends here
