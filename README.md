@@ -1,119 +1,40 @@
-<div align="center"><img src="https://magit.vc/assets/magit-168x200px.png"/></div>
-<h2 align="center">A Git Porcelain inside Emacs</h2>
+<h1 align="center">Majjik.el</h1>
+<h2 align="center">Jujutsu inside Emacs</h2>
 <p align="center">
-  <a href="https://magit.vc"><b>homepage</b></a> |
-  <a href="https://magit.vc/manual"><b>manual</b></a> |
-  <a href="https://magit.vc/manual/magit/FAQ.html"><b>faq</b></a> |
-  <a href="https://github.com/magit/magit/wiki"><b>wiki</b></a> |
-  <a href="https://emacs.ch/@tarsius"><b>mastodon</b></a>
+  <a href="https://zoybean.github.io/majjik.el/"><b>homepage</b> (todo)</a>
 </p>
 <hr>
 
 <p align="justify">
-  Magit is an interface to the version control system
-  <a href="https://git-scm.com">Git</a>, implemented as an
-  <a href="https://www.gnu.org/software/emacs">Emacs</a> package.
-  Magit aspires to be a complete Git porcelain.  While we cannot
-  (yet) claim that Magit wraps and improves upon each and every Git
-  command, it is complete enough to allow even experienced Git users
-  to perform almost all of their daily version control tasks directly
-  from within Emacs.  While many fine Git clients exist, only Magit
-  and Git itself deserve to be called porcelains.
+  Majjik.el is a <a href="https://martinvonz.github.io/jj/">jujutsu</a>
+  interface within <a href="https://www.gnu.org/software/emacs">Emacs</a>.
+  It is a fork of <a href="https://magit.vc">Magit</a>.
+  Eventually, I hope Majjik will be a complete jj interface, but for now
+  it's just my first dip into Emacs (and my first Lisp project since uni).
+  Please be patient.
 </p>
 <hr>
 
-<div align="center">
-  Keeping its users <a href= "https://magit.vc/quotes/">this excited</a> is
-  <a href="https://magit.vc/stats/magit/authors.html#cumulated_added_lines_of_code_per_author">
-    a lot of work
-  </a>.
-  If Magit makes you <br> more productive too,
-  then <b>please consider making a donation</b>.
-</div>
-<div align="center">
-  <em>Thank you! &mdash; Jonas Bernoulli</em>
-</div>
-<br>
-<div align="center">
-  <a href="https://github.com/sponsors/tarsius/">
-    <img title="Sponsor my work using Github Sponsors"
-         alt="Sponsor my work using Github Sponsors"
-         src="https://magit.vc/assets/donate/github-sponsors-50px.png"></a>
-  &nbsp;&nbsp;
-  <a href="https://liberapay.com/magit/">
-    <img title="Sponsor my work using Liberapay"
-         alt="Sponsor my work using Liberapay"
-         src="https://magit.vc/assets/donate/liberapay-50px.png"></a>
-  <br>
-  <a href="https://opencollective.com/magit/">
-    <img title="Sponsor my work using Opencollective"
-         alt="Sponsor my work using Opencollective"
-         src="https://magit.vc/assets/donate/opencollective-50px.png"></a>
-  &nbsp;&nbsp;
-  <a href="https://magit.vc/donate/paypal.html">
-    <img title="Sponsor my work using PayPal"
-         alt="Sponsor my work using PayPal"
-         src="https://magit.vc/assets/donate/paypal-50px.png"></a>
-</div>
-<br>
-<div align="center">
-  Some alternative donation methods are <a href="https://magit.vc/donate/">available</a>.
-</div>
+### Project Status
+- [x] Fork Magit
+- [ ] Find and replace magit -> majjik in filenames
+- [ ] Find and replace magit -> majjik in identifiers
+- [ ] Replace backend git lib with jj lib
+- [ ] Replace frontend git commands with jj commands
+- [ ] Update any internal helpers that need to change
+- [ ] Unknown additional scope
+- [ ] Check that it all works
+
 <hr>
 
 ### Getting Started
 
-If you are new to Magit, then either one of the following two
-articles should help understanding how it differs from other Git
-clients.
-
-#### [Visual Magit walk-through](https://emacsair.me/2017/09/01/magit-walk-through)
-
-If you are completely new to Magit, then this article is a good
-visual introduction.
-
-Almost everything that you see in Magit can be acted on by pressing
-some key, but that's not obvious from just seeing how Magit looks.
-The screenshots and accompanying text of this article explain how to
-perform a variety of actions on Magit's output.
-
-#### [Magit, the magical Git interface](https://emacsair.me/2017/09/01/the-magical-git-interface)
-
-Magit differs significantly from other Git interfaces, and its
-advantages are not immediately obvious simply from looking at a few
-screenshots as presented in the preceding article.
-
-This article discusses Magit's properties in somewhat more abstract
-terms.
-
-#### Video introductions
-
-If you prefer [video](https://magit.vc/screencasts/) introductions,
-head over to that page, where find a collection of such introductions
-and other videos about Magit, by various creators.
-
-***
-### Support and Contributing
-
-Magit has many users and very few maintainers, so we kindly ask to read
-the appropriate guidelines before getting in contact. &mdash; Thanks!
-
-- 🆘 [How to ask for help](https://github.com/magit/magit/discussions/4630)
-- 🪳 [How to report a bug](https://github.com/magit/magit/wiki/How-to-report-a-bug)
-- 💡 [How to suggest a feature](https://github.com/magit/magit/discussions/4631)
-- 🏗️ [Pull request guidelines](https://github.com/magit/magit/wiki/Pull-request-guidelines)
-- ℹ️ [FAQ](https://magit.vc/manual/magit/FAQ.html)
-- ℹ️ [Manual](https://magit.vc/manual/magit)
-
-TL;DR We now use discussions for feature requests (not issues) and prefer
-if you ask the community for support instead of the overworked maintainers.
-
-Please also consider to contribute by supporting other users or by making
-a [monetary donation](https://magit.vc/donate). &mdash; Thanks!
+If you are new to Majjik, but know Magit, then it should aleady be familiar. If not, a lot of the information in Magit's [Getting Started](https://github.com/magit/magit#getting-started) may be useful.
 
 ***
 ### Acknowledgments
 
+Majjik was started by [Zoey Hewll][zoey], as a fork of Magit.
 Magit was started by [Marius Vollmer][marius], and is now maintained by
 [Jonas Bernoulli][jonas] and [Kyle Meyer][kyle].  Former maintainers are
 [Nicolas Dudebout][nicolas], [Noam Postavsky][noam],
@@ -124,15 +45,13 @@ suggested features or made monetary contributions.
 Thanks to all of you, may (the history of) the source be with you!
 
 ***
-[![Compile](https://github.com/magit/magit/actions/workflows/compile.yml/badge.svg)](https://github.com/magit/magit/actions/workflows/compile.yml)
-[![Test](https://github.com/magit/magit/actions/workflows/test.yml/badge.svg)](https://github.com/magit/magit/actions/workflows/test.yml)
-[![Manual](https://github.com/magit/magit/actions/workflows/manual.yml/badge.svg)](https://github.com/magit/magit/actions/workflows/manual.yml)
-[![NonGNU ELPA](https://emacsair.me/assets/badges/nongnu-elpa.svg)](https://elpa.nongnu.org/nongnu/magit.html)
-[![Melpa](https://melpa.org/packages/magit-badge.svg)](https://melpa.org/#/magit)
-[![Melpa Stable](https://stable.melpa.org/packages/magit-badge.svg)](https://stable.melpa.org/#/magit)
+[![Compile](https://github.com/majjik/majjik/actions/workflows/compile.yml/badge.svg)](https://github.com/majjik/majjik/actions/workflows/compile.yml)
+[![Test](https://github.com/majjik/majjik/actions/workflows/test.yml/badge.svg)](https://github.com/majjik/majjik/actions/workflows/test.yml)
+[![Manual](https://github.com/majjik/majjik/actions/workflows/manual.yml/badge.svg)](https://github.com/majjik/majjik/actions/workflows/manual.yml)
 
 
-[authors]: https://magit.vc/stats/magit/authors.html
+[authors]: https://github.com/Zoybean/majjik/graphs/contributors
+[zoey]:    https://github.com/Zoybean
 [jonas]:   https://emacsair.me
 [kyle]:    https://kyleam.com
 [marius]:  https://github.com/mvollmer
