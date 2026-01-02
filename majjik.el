@@ -2234,7 +2234,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
          (sentinel (make-jj-simple-sentinel err temp))
          (filter (cl-labels ((read-next ()
                                (jj--try-read-each #'read-jj-entry #'read-jj-elided))
-                             (callback (news)
+                             (print-entries (news)
                                (with-current-buffer buf
                                  (let ((inhibit-read-only t))
                                    (cl-loop for new in news
@@ -2243,7 +2243,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                                                   (insert-jj-elided new))
                                                  ((pred jj-entry-p)
                                                   (insert-jj-entry new))))))))
-                   (make-jj-generic-buffered-filter temp #'read-next #'callback))))
+                   (make-jj-generic-buffered-filter temp #'read-next #'print-entries))))
     (make-process
      :name "jj-log"
      :buffer buf
