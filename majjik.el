@@ -1,4 +1,17 @@
-;;; -*- lexical-binding: t -*-
+;;; majjik.el --- Magit-inspired jujutsu interface for Emacs  -*- lexical-binding: t -*-
+
+;; Copyright (C) 2026 Zoey Hewll
+
+;; Author: Zoey Hewll <zoeyhewll@gmail.com>
+;; Created: 02 Jan 2026
+;; Version: 0.1.0
+;; Keywords: vc
+;; URL: https://github.com/Zoybean/majjik
+;; Package-Requires: (dash s eieio)
+
+;;; Commentary:
+
+;;; Code:
 
 ;; Require
 
@@ -2830,3 +2843,5 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; [[file:majjik.org::*Provide][Provide:1]]
 (provide 'majjik)
 ;; Provide:1 ends here
+
+;;; majjik.el ends here

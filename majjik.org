@@ -1,9 +1,22 @@
 #+PROPERTY: header-args :tangle yes :comments both :results silent
 #+PROPERTY: header-args:elisp :lexical t
 
-* Lexical binding header
+* Package header
 #+begin_src elisp :comments no
-  ;;; -*- lexical-binding: t -*-
+  ;;; majjik.el --- Magit-inspired jujutsu interface for Emacs  -*- lexical-binding: t -*-
+
+  ;; Copyright (C) 2026 Zoey Hewll
+
+  ;; Author: Zoey Hewll <zoeyhewll@gmail.com>
+  ;; Created: 02 Jan 2026
+  ;; Version: 0.1.0
+  ;; Keywords: vc
+  ;; URL: https://github.com/Zoybean/majjik
+  ;; Package-Requires: (dash s eieio)
+
+  ;;; Commentary:
+  
+  ;;; Code:
 #+end_src
 
 * Require
@@ -2813,4 +2826,8 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
 * Provide
 #+begin_src elisp
   (provide 'majjik)
+#+end_src
+* Package footer
+#+begin_src elisp :comments no
+  ;;; majjik.el ends here
 #+end_src
