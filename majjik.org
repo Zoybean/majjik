@@ -2329,17 +2329,108 @@ need error handling in these. but I do like them being synchronous i think.
 
 **** repo query commands
 #+begin_src elisp
+  (defun jj-name-list-template (self)
+    (jj-template
+     (cl-subst self 'self
+               `(++ (:chain self
+                            (.name))
+                    "\n"))))
+
+  (defun jj-bookmark-list-template (self)
+    (jj-template
+     (cl-subst self 'self
+               `(++ (separate
+                     "@"
+                     (:chain self
+                             (.name))
+                     (:chain self
+                             (.remote)))
+                    "\n"))))
+
   (defun jj-list-bookmarks ()
     "List all bookmarks."
-    (string-lines (call-cmd `("jj" "bookmark" "list" "-T" "name ++ \"\n\"") nil :string) :omit))
+    (string-lines (jj-cmd-sync `("bookmark" "list"
+                                 "-T" ,(jj-bookmark-list-template 'self))
+                               :no-revert)
+                  :omit))
+
+  (defun jj-list-tracked-bookmarks (&optional remote)
+    "List tracked bookmarks, optionally specific to a given REMOTE."
+    (string-lines (jj-cmd-sync `("bookmark" "list"
+                                 
+                                 ,@(jj--if-arg remote #'identity "--remote")
+                                 "-T" ,(jj-bookmark-list-template 'self))
+                               :no-revert)
+                  :omit))
+
+  (defun jj-list-local-bookmarks (&optional tracking)
+    "List local bookmarks. If TRACKING is nil, list all local bookmarks. If it is a string, list bookmarks tracking that remote. Otherwise, list bookmarks tracking any remote. "
+    (let* ((tracked (and tracking
+                         (not (stringp tracking))))
+           (remote (and (stringp tracking)
+                        tracking))
+           (all (not tracking)))
+      (cl-loop for line in (string-lines (jj-cmd-sync `("bookmark" "list"
+                                                        ,@(jj--if-arg tracked nil "--tracked")
+                                                        ,@(jj--if-arg remote #'identity "--remote")
+                                                        ,@(jj--if-arg all nil "--all-remotes")
+                                                        "-T" ,(jj-bookmark-list-template 'self))
+                                                      :no-revert)
+                                         :omit)
+               unless (string-match (rx "@") line)
+               collect line)))
+
+  (defun jj-list-non-tracking-local-bookmarks ()
+    "List local bookmarks that are not tracking any remote."
+    (let ((all (jj-list-local-bookmarks nil))
+          (tracked (jj-list-local-bookmarks :tracking)))
+      (cl-set-difference all tracked :test #'equal)))
+
+  (defun jj-list-remote-bookmarks (&optional remote tracked not-git)
+    "List remote bookmarks, optionally limited to tracked, and optionally specific to a given REMOTE. If NOT-GIT, ignore the colocated git repo as a remote."
+    (cl-loop for line in (string-lines (jj-cmd-sync `("bookmark" "list"
+                                                      ,@(jj--if-arg tracked nil "--tracked")
+                                                      ,@(jj--if-arg remote #'identity "--remote")
+                                                      ,@(jj--if-arg (not (or remote tracked)) nil "--all-remotes")
+                                                      "-T" ,(jj-bookmark-list-template 'self))
+                                                    :no-revert)
+                                       :omit)
+             nconc (when (string-match (rx string-start
+                                           (group (+ (not (any "\r\n @"))))
+                                           "@"
+                                           (group (+ (not (any "\r\n @"))))
+                                           string-end)
+                                       line)
+                     (let-match-string ((name 1)
+                                        (remote 2))
+                         line
+                       (unless (and not-git (string= remote "git"))
+                         (list (list name remote)))))))
+
+  (defun jj-list-untracked-remote-bookmarks (&optional remote not-git)
+    "List untracked remote bookmarks, and optionally specific to a given REMOTE. If NOT-GIT, ignore the colocated git repo as a remote."
+    (let ((all (jj-list-remote-bookmarks remote nil not-git))
+          (tracked (jj-list-remote-bookmarks remote :tracked not-git)))
+      (cl-set-difference all tracked :test #'equal)))
+
+  (defun jj-list-git-remotes ()
+    "List all git remotes."
+    (mapcar (lambda (s) (string-split s " " :omit))
+            (string-lines (jj-cmd-sync `("git" "remote" "list")
+                                       :no-revert)
+                          :omit)))
 
   (defun jj-match-revisions (&optional revset)
     "List all revisions matching REVSET, or all visible by default."
-    (string-lines (call-cmd `("jj" "log" "--no-graph" "-r" ,(or revset "all()") "-T" "change_id ++ \"\n\"") nil :string) :omit))
+    (string-lines (jj-cmd-sync `("log" "--no-graph"
+                                 "-r" ,(or revset "all()")
+                                 "-T" ,(jj-name-list-template 'self))
+                               :no-revert)
+                  :omit))
 
   (defun jj-workspace-root ()
     "Return the root of the current jj reposotory."
-    (string-trim (call-cmd `("jj" "workspace" "root" ,@jj-global-default-args) nil :string)
+    (string-trim (jj-cmd-sync `("workspace" "root") :no-revert)
                  nil
                  ;; only trim a single trailing newline
                  "\n"))
@@ -2552,7 +2643,7 @@ need error handling in these. but I do like them being synchronous i think.
 #+begin_src elisp
   (defun jj-bookmark-delete (bookmark &optional noconfirm)
     "Delete BOOKMARK."
-    (interactive (list (completing-read "Rename delete: " (jj-list-bookmarks))
+    (interactive (list (completing-read "Delete bookmark: " (jj-list-bookmarks))
                        current-prefix-arg))
     (unless (or noconfirm (yes-or-no-p (format "delete bookmark %s?" bookmark)))
       (user-error "cancelled"))
@@ -2561,15 +2652,59 @@ need error handling in these. but I do like them being synchronous i think.
 ***** forget
 #+begin_src elisp
   (defun jj-bookmark-forget (bookmark &optional noconfirm)
-    "Delete BOOKMARK."
-    (interactive (list (completing-read "Rename forget: " (jj-list-bookmarks))
+    "Delete BOOKMARK, but don't mark it for deletion on the remote."
+    (interactive (list (completing-read "Forget bookmark: " (jj-list-bookmarks))
                        current-prefix-arg))
     (unless (or noconfirm (yes-or-no-p (format "forget bookmark %s?" bookmark)))
       (user-error "cancelled"))
     (jj-cmd-sync `("bookmark" "forget" ,bookmark)))
 #+end_src
 ***** track
+#+begin_src elisp
+  (defun jj-bookmark-track (remote bookmark)
+    "Track BOOKMARK at REMOTE."
+    (interactive (let ((bookmark (completing-read "Bookmark to track: " (jj-list-bookmarks)))
+                       (remote (completing-read "From remote: " (jj-list-git-remotes))))
+                   (list remote bookmark)))
+    (jj-cmd-sync `("bookmark" "track" ,bookmark
+                   "--remote" ,remote)))
+
+  (defun jj-bookmark-track-remote (remote bookmark)
+    "Track BOOKMARK which is from REMOTE. Only prompts for untracked bookmarks at the given REMOTE."
+    (declare (interactive-only jj-bookmark-track))
+    (interactive (let ((remote (completing-read "From remote: " (jj-list-git-remotes)))
+                       (bookmark (completing-read "Bookmark to track: " (jj-list-untracked-remote-bookmarks nil :not-git))))
+                   (list remote bookmark)))
+    (jj-cmd-sync `("bookmark" "track" ,bookmark
+                   "--remote" ,remote)))
+
+  (defun jj-bookmark-track-local (remote bookmark)
+    "Track local BOOKMARK on REMOTE. Only prompts for local bookmarks."
+    (declare (interactive-only jj-bookmark-track))
+    (interactive (let ((bookmark (completing-read "Bookmark to track: " (jj-list-local-bookmarks)))
+                       (remote (completing-read "To remote: " (jj-list-git-remotes))))
+                   (list remote bookmark)))
+    (jj-cmd-sync `("bookmark" "track" ,bookmark
+                   "--remote" ,remote)))
+
+#+end_src
+
 ***** untrack
+#+begin_src elisp
+  (defun jj-bookmark-untrack (bookmark &optional remotes)
+    "Untrack BOOKMARK from REMOTES if provided, otherwise all remotes."
+    (interactive (let* ((bookmarks (jj-list-remote-bookmarks nil :tracked :not-git))
+                        (bookmark (completing-read "Bookmark to untrack: " (mapcar #'car bookmarks) nil t))
+                        (remotes (completing-read-multiple
+                                  "From remotes: "
+                                  (cl-loop for (b r) in bookmarks
+                                           when (string= b bookmark)
+                                           collect r)
+                                  nil t)))
+                   (list bookmark remotes)))
+    (jj-cmd-sync `("bookmark" "track" ,bookmark
+                   ,@(jj--if-arg remotes (apply-partially #'apply #'jj-revs-as-revset) "--remote"))))
+#+end_src
 **** jj file
 ***** track
 #+begin_src elisp
