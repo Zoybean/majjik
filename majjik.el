@@ -1489,12 +1489,17 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
   "c n n" #'jj-new-on
   "c k" #'jj-drop
   "c w" #'jj-desc
-  "F" #'jj-git-fetch
-  "P" #'jj-git-push
-  "b m" #'jj-bookmark-move
-  "b n" #'jj-bookmark-new
   "c a" #'jj-amend-into
   "c s" #'jj-squash-down
+  "F" #'jj-git-fetch
+  "P" #'jj-git-push
+  "b n" #'jj-bookmark-new
+  "b m" #'jj-bookmark-move
+  "b r" #'jj-bookmark-rename
+  "b d" #'jj-bookmark-delete
+  "b f" #'jj-bookmark-forget
+  "b t" #'jj-bookmark-track
+  "b u" #'jj-bookmark-untrack
   "f t" #'jj-file-track)
 
 (keymap-global-set "C-x j" #'jj-dash)
@@ -2265,6 +2270,24 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                                     (jj--toml-quote-string jj-log-node-template))))))
 ;; jj-log:1 ends here
 
+;; find and update dash buffer
+
+;; [[file:majjik.org::*find and update dash buffer][find and update dash buffer:1]]
+(defun jj-revert-dash-buffer (dir)
+  "Revert the jj dash buffer (if it exists) for DIR."
+  (when-let ((buf (get-buffer (jj-dash-buffer
+                               dir))))
+    (with-current-buffer buf
+      (jj-dash--revert))))
+
+(defun jj-revert-dash-buffer-async (dir)
+  "Asynchronously revert the jj dash buffer (if it exists) for DIR. Suitable for use as an async callback for process filters and sentinels."
+  (when-let ((buf (get-buffer (jj-dash-buffer
+                               dir))))
+    (with-current-buffer buf
+      (jj-dash--revert-async))))
+;; find and update dash buffer:1 ends here
+
 ;; repo query commands
 
 ;; [[file:majjik.org::*repo query commands][repo query commands:1]]
@@ -2377,13 +2400,13 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; sync command utils
 
 ;; [[file:majjik.org::*sync command utils][sync command utils:1]]
-(defun jj-cmd-sync (cmd)
-  "Call jj with the given CMD, passing the default args first, and returning the output as a string. Signals an error if the command returns a nonzero exit code."
+(defun jj-cmd-sync (cmd &optional no-revert)
+  "Call jj with the given CMD, passing the default args first, and returning the output as a string. Signals an error if the command returns a nonzero exit code. When the command completes successfully, reverts the dash buffer for the repo (if there is one)."
   (let ((cmd `("jj" ,@jj-global-default-args ,@cmd)))
-    (message "%S" cmd)
     (prog1
-      (call-cmd cmd nil :string)
-    (jj-dash--revert))))
+        (call-cmd cmd nil :string)
+      (unless no-revert
+        (jj-revert-dash-buffer default-directory)))))
 ;; sync command utils:1 ends here
 
 ;; jj undo
@@ -2391,11 +2414,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; [[file:majjik.org::*jj undo][jj undo:1]]
 (cl-defun jj-undo ()
   (interactive)
-  (call-cmd `("jj" "undo"
-              ,@jj-global-default-args)
-            nil :string)
-  (when (derived-mode-p 'jj-dashboard-mode)
-    (jj-dash--revert)))
+  (jj-cmd-sync `("undo")))
 ;; jj undo:1 ends here
 
 ;; jj new
@@ -2406,16 +2425,12 @@ Also sets `jj--current-status' in the initial buffer when the status process com
     (user-error "cannot supply REV with BEFORE or AFTER"))
   (unless (or rev before after)
     (user-error "must supply at least one of REV, BEFORE, or AFTER"))
-  (call-cmd `("jj" "new"
-              ,@(jj--if-arg rev #'identity "-r")
-              ,@(jj--if-arg before #'identity "--before")
-              ,@(jj--if-arg after #'identity "--after")
-              ,@(jj--if-arg no-edit nil "--no-edit")
-              ,@(jj--if-arg message #'identity "-m")
-              ,@jj-global-default-args)
-            nil :string)
-  (when (derived-mode-p 'jj-dashboard-mode)
-    (jj-dash--revert-and-goto #'jj-obj-wc-p)))
+  (jj-cmd-sync `("new"
+                 ,@(jj--if-arg rev #'identity "-r")
+                 ,@(jj--if-arg before #'identity "--before")
+                 ,@(jj--if-arg after #'identity "--after")
+                 ,@(jj--if-arg no-edit nil "--no-edit")
+                 ,@(jj--if-arg message #'identity "-m"))))
 
 (cl-defun jj-new-on (parent-revset &key message no-edit)
   (interactive (list (jj-get-revset-dwim "parent revs: ")))
@@ -2431,13 +2446,9 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; [[file:majjik.org::*jj edit][jj edit:1]]
 (cl-defun jj-edit (rev &optional ignore-immutable)
   (interactive (list (jj-get-revset-dwim "edit: ")))
-  (call-cmd `("jj" "edit"
-              "-r" ,rev
-              ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")
-              ,@jj-global-default-args)
-            nil :string)
-  (when (derived-mode-p 'jj-dashboard-mode)
-    (jj-dash--revert-and-goto #'jj-obj-wc-p)))
+  (jj-cmd-sync `("edit"
+                 "-r" ,rev
+                 ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))))
 ;; jj edit:1 ends here
 
 ;; jj desc
@@ -2446,12 +2457,9 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun jj-desc (revset message)
   (interactive (list (jj-get-revset-dwim "revs to describe: ")
                      (read-string "message: ")))
-  (call-cmd `("jj" "describe"
-              "-r" ,revset
-              "-m" ,message ,@jj-global-default-args)
-            nil :string)
-  (when (derived-mode-p 'jj-dashboard-mode)
-    (jj-dash--revert)))
+  (jj-cmd-sync `("describe"
+                 "-r" ,revset
+                 "-m" ,message)))
 ;; jj desc:1 ends here
 
 ;; jj drop
@@ -2461,12 +2469,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   (interactive (list (jj-get-revset-dwim "revs to abandon: ")))
   (unless (or noconfirm (yes-or-no-p (format "abandon %s?" revset)))
     (user-error "cancelled"))
-  (call-cmd `("jj" "abandon"
-              "-r" ,revset
-              ,@jj-global-default-args)
-            nil :string)
-  (when (derived-mode-p 'jj-dashboard-mode)
-    (jj-dash--revert)))
+  (jj-cmd-sync `("abandon"
+                 "-r" ,revset)))
 ;; jj drop:1 ends here
 
 ;; jj git init
@@ -2475,11 +2479,10 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun jj-git-init (root-dir colocate)
   (interactive (list (expand-file-name (read-directory-name "repository root: "))
                      (yes-or-no-p "colocated repository?")))
-  (call-cmd `("jj" "git" "init"
-              ,@(jj--if-arg colocate nil "--colocate")
-              ,@jj-global-default-args
-              "--" ,root-dir)
-            nil :string)
+  (jj-cmd-sync `("git" "init"
+                 ,@(jj--if-arg colocate nil "--colocate")
+                 "--" ,root-dir)
+               :no-revert)
   (jj-dash root-dir))
 ;; jj git init:1 ends here
 
@@ -2490,11 +2493,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   "Create new BOOKMARK pointing at revision REV."
   (interactive (list (read-string "New bookmark: ")
                      (jj-get-revision-dwim "At rev: ")))
-  (call-cmd `("jj" "bookmark" "create" ,bookmark
-              "-r" ,rev
-              ,@jj-global-default-args)
-            nil :string)
-  (jj-dash--revert))
+  (jj-cmd-sync `("bookmark" "create" ,bookmark
+                 "-r" ,rev)))
 ;; new:1 ends here
 
 ;; move
@@ -2505,26 +2505,44 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   (interactive (list (completing-read "Move bookmark: " (jj-list-bookmarks))
                      (jj-get-revision-dwim "move to: ")
                      current-prefix-arg))
-  (call-cmd `("jj" "bookmark" "move" ,bookmark
-              "--to" ,to-rev
-              ,@(jj--if-arg allow-backwards nil "--allow-backwards")
-              ,@jj-global-default-args)
-            nil :string)
-  (jj-dash--revert))
+  (jj-cmd-sync `("bookmark" "move" ,bookmark
+                 "--to" ,to-rev
+                 ,@(jj--if-arg allow-backwards nil "--allow-backwards"))))
 ;; move:1 ends here
 
 ;; rename
 
 ;; [[file:majjik.org::*rename][rename:1]]
-(defun jj-bookmark-new (bookmark new-name)
+(defun jj-bookmark-rename (bookmark new-name)
   "Create new BOOKMARK pointing at revision REV."
   (interactive (list (completing-read "Rename bookmark: " (jj-list-bookmarks))
                      (read-string "New name: ")))
-  (call-cmd `("jj" "bookmark" "rename" ,bookmark ,new-name
-              ,@jj-global-default-args)
-            nil :string)
-  (jj-dash--revert))
+  (jj-cmd-sync `("bookmark" "rename" ,bookmark ,new-name)))
 ;; rename:1 ends here
+
+;; delete
+
+;; [[file:majjik.org::*delete][delete:1]]
+(defun jj-bookmark-delete (bookmark &optional noconfirm)
+  "Delete BOOKMARK."
+  (interactive (list (completing-read "Rename delete: " (jj-list-bookmarks))
+                     current-prefix-arg))
+  (unless (or noconfirm (yes-or-no-p (format "delete bookmark %s?" bookmark)))
+    (user-error "cancelled"))
+  (jj-cmd-sync `("bookmark" "delete" ,bookmark)))
+;; delete:1 ends here
+
+;; forget
+
+;; [[file:majjik.org::*forget][forget:1]]
+(defun jj-bookmark-forget (bookmark &optional noconfirm)
+  "Delete BOOKMARK."
+  (interactive (list (completing-read "Rename forget: " (jj-list-bookmarks))
+                     current-prefix-arg))
+  (unless (or noconfirm (yes-or-no-p (format "forget bookmark %s?" bookmark)))
+    (user-error "cancelled"))
+  (jj-cmd-sync `("bookmark" "forget" ,bookmark)))
+;; forget:1 ends here
 
 ;; track
 
@@ -2539,35 +2557,27 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; [[file:majjik.org::*jj squash/amend][jj squash/amend:1]]
 (cl-defun jj-squash-down (rev &optional noconfirm ignore-immutable)
   "Squash changes from REV into its single parent."
-  (interactive (list (jj-get-rev-dwim "squash rev: ")
+  (interactive (list (jj-get-revision-dwim "squash rev: ")
                      nil
-                     (current-prefix-arg)))
+                     current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "squash %s into its parent?" rev)))
     (user-error "cancelled"))
   (with-editor
-    (call-cmd `("jj" "squash"
-                "-r" ,rev
-                ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")
-                ,@jj-global-default-args)
-              nil :string))
-  (when (derived-mode-p 'jj-dashboard-mode)
-    (jj-dash--revert-and-goto #'jj-obj-wc-p)))
+    (jj-cmd-sync `("squash"
+                   "-r" ,rev
+                   ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
 
 (cl-defun jj-amend-into (rev &optional noconfirm ignore-immutable)
   "Squash changes from @ into the chosen revision."
-  (interactive (list (jj-get-rev-dwim "squash into rev: ")
+  (interactive (list (jj-get-revision-dwim "squash into rev: ")
                      nil
-                     (current-prefix-arg)))
+                     current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "squash @ into %s?" rev)))
     (user-error "cancelled"))
   (with-editor
-    (call-cmd `("jj" "squash"
-                "--into" ,rev
-                ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")
-                ,@jj-global-default-args)
-              nil :string))
-  (when (derived-mode-p 'jj-dashboard-mode)
-    (jj-dash--revert-and-goto #'jj-obj-wc-p)))
+    (jj-cmd-sync `("squash"
+                   "--into" ,rev
+                   ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
 ;; jj squash/amend:1 ends here
 
 ;; jj git push
@@ -2608,20 +2618,6 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; jj git fetch
 
 ;; [[file:majjik.org::*jj git fetch][jj git fetch:1]]
-(defun jj-revert-dash-buffer (dir)
-  "Revert the jj dash buffer (if it exists) for DIR."
-  (when-let ((buf (get-buffer (jj-dash-buffer
-                               dir))))
-    (with-current-buffer buf
-      (jj-dash--revert))))
-
-(defun jj-revert-dash-buffer-async (dir)
-  "Asynchronously revert the jj dash buffer (if it exists) for DIR. Suitable for use as an async callback for process filters and sentinels, and therefore does not call accept-process-output."
-  (when-let ((buf (get-buffer (jj-dash-buffer
-                               dir))))
-    (with-current-buffer buf
-      (jj-dash--revert-async))))
-
 (defun jj-git-fetch ()
   "Fetch from git in the background."
   (interactive)
