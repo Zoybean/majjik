@@ -2153,7 +2153,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                         (with-current-buffer buf
                           (setq-local jj--current-status stat)
                           (goto-char (point-min))
-                          (insert-jj-status stat))
+                          (let ((inhibit-read-only t))
+                            (insert-jj-status stat)))
                       (push (format "dash output buffer %s deleted" buf)
                             fails))
                     (unless running

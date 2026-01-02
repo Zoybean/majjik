@@ -2133,7 +2133,8 @@ but, they should also be able to rely on the same underlying machinery, if possi
                           (with-current-buffer buf
                             (setq-local jj--current-status stat)
                             (goto-char (point-min))
-                            (insert-jj-status stat))
+                            (let ((inhibit-read-only t))
+                              (insert-jj-status stat)))
                         (push (format "dash output buffer %s deleted" buf)
                               fails))
                       (unless running
