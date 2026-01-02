@@ -923,7 +923,8 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                     for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
                     when (jj--re-step-over field-rx)
                     nconc `(,key ,(if quoted
-                                      (json-parse-string (match-string 1))
+                                      (save-match-data
+                                         (funcall #'json-parse-string (match-string 1)))
                                     (match-string 1)))
                     into struct-props
                     finally return
@@ -1324,7 +1325,8 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                            (jj--re-step-over field-rx))
                     nconc `(,key ,(string-trim
                                    (if quoted
-                                       (json-parse-string (match-string 1))
+                                       (save-match-data
+                                         (funcall #'json-parse-string (match-string 1)))
                                      (match-string 1))))
                     into struct-props
                     finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props))))
