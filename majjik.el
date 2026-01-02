@@ -124,7 +124,7 @@ If INITIALLY-STAY is non-nil, point stays in place if it is at `bobp' even if th
               (insert "\n")
               (insert (propertize event 'face '(:foreground "red")))
               (insert "\n")
-              (insert-buffer error-buffer)))))
+              (insert-buffer-substring error-buffer)))))
     ;; always clean up the auxiliary buffers
     (kill-buffer error-buffer)
     (mapcar #'kill-buffer other-buffers)))
@@ -974,8 +974,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                                    :first-line-suffix graph-suf
                                                    :mandatory-segments graph-tail))))
      (defun insert-jj-entry (entry)
-       "Insert after point the ENTRY, formatted as a jj log entry.
-  Puts mark after the inserted text."
+       "Insert the ENTRY, formatted as a jj log entry."
        ,(cl-labels ((field (name-sym)
                       `(,(intern (format "%s-%s" 'jj-header name-sym))
                         header)))
@@ -1043,10 +1042,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                ;; as by that point it's been disposed
                (let ((content-buffer (current-buffer)))
                  (with-current-buffer target-buffer
-                   (insert-buffer content-buffer)
-                   ;; this moves mark. move point instead
-                   (goto-char (mark))
-                   (pop-mark)))))))
+                   (insert-buffer-substring content-buffer)))))))
      (defun insert-jj-elided (graph)
        "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
        (let ((target-buffer (current-buffer)))
@@ -1075,10 +1071,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
            ;; as by that point it's been disposed
            (let ((content-buffer (current-buffer)))
              (with-current-buffer target-buffer
-               (insert-buffer content-buffer)
-               ;; this moves mark. move point instead
-               (goto-char (mark))
-               (pop-mark))))))
+               (insert-buffer-substring content-buffer))))))
      (cl-defstruct jj-header
        ;; semantic fields
        ,@(cl-loop for (name . props) in fields
@@ -1322,8 +1315,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                     into struct-props
                     finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props))))
      (defun ,(intern (format "insert-jj-%s" type-name)) (entry)
-       ,(format "Insert after point the ENTRY, formatted as a `jj-%s' entry.
-  Puts mark after the inserted text." type-name)
+       ,(format "Insert the ENTRY, formatted as a `jj-%s' entry." type-name)
        ,(cl-labels ((field (name-sym)
                       `(,(intern (format "jj-%s-%s" type-name name-sym))
                         entry)))
@@ -1356,10 +1348,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                ;; as by that point it's been disposed
                (let ((content-buffer (current-buffer)))
                  (with-current-buffer target-buffer
-                   (insert-buffer content-buffer)
-                   ;; this moves mark. move point instead
-                   (goto-char (mark))
-                   (pop-mark)))))))
+                   (insert-buffer-substring content-buffer)))))))
      (cl-defstruct ,(intern (format "jj-%s" type-name))
        ;; semantic fields
        ,@(cl-loop for (field-name . props) in fields
@@ -1607,7 +1596,7 @@ Reverted buffer is the one that was active when this function was called."
       ;; make sure there's something between end-of-buffer and where we'll be inserting stuff
       (save-excursion
         (insert trailer)
-        (push-mark))
+        (push-mark nil :nomsg))
       ;; record point from the original buffer
       ;; seems there's a race condition to update it in the indirect buffer
       (let ((p (point)))
