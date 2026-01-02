@@ -1539,7 +1539,9 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   "b f" #'jj-bookmark-forget
   "b t" #'jj-bookmark-track
   "b u" #'jj-bookmark-untrack
-  "f t" #'jj-file-track-dwim)
+  "f t" #'jj-file-track-dwim
+  "f u" #'jj-file-untrack-dwim
+  "f k" #'jj-file-delete-dwim)
 
 (keymap-global-set "C-x j" #'jj-dash)
 ;; Keymaps:1 ends here
@@ -2453,11 +2455,27 @@ Also sets `jj--current-status' in the initial buffer when the status process com
      (jj-header-change-id cmt))
     (unmatched (jj-read-revset prompt))))
 
+(defun jj-get-file-dwim (&optional prompt)
+  "Get a filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
+  (pcase (jj-thing-at-point)
+    ((and file (pred jj-status-file-untracked-p))
+     (jj-status-file-untracked-path file))
+    ((and file (pred jj-status-wc-change-p))
+     (jj-status-wc-change-path-target file))
+    (unmatched (read-file-name prompt))))
+
 (defun jj-get-untracked-file-dwim (&optional prompt)
   "Get an untracked filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
   (pcase (jj-thing-at-point)
     ((and file (pred jj-status-file-untracked-p))
      (jj-status-file-untracked-path file))
+    (unmatched (read-file-name prompt))))
+
+(defun jj-get-tracked-file-dwim (&optional prompt)
+  "Get a tracked filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
+  (pcase (jj-thing-at-point)
+    ((and file (pred jj-status-wc-change-p))
+     (jj-status-wc-change-path-target file))
     (unmatched (read-file-name prompt))))
 
 (defun jj-get-revision-dwim (&optional prompt mutable)
@@ -2740,9 +2758,31 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 
 ;; [[file:majjik.org::*track][track:1]]
 (defun jj-file-track-dwim (file)
+  "Track FILE."
   (interactive (list (jj-get-untracked-file-dwim "File to track")))
   (jj-cmd-sync `("file" "track" ,(jj-files-as-fileset file))))
 ;; track:1 ends here
+
+;; untrack
+
+;; [[file:majjik.org::*untrack][untrack:1]]
+(defun jj-file-untrack-dwim (file)
+  "Untrack FILE."
+  (interactive (list (jj-get-tracked-file-dwim "File to untrack")))
+  (jj-cmd-sync `("file" "untrack" ,(jj-files-as-fileset file))))
+;; untrack:1 ends here
+
+;; delete
+
+;; [[file:majjik.org::*delete][delete:1]]
+(defun jj-file-delete-dwim (file &optional noconfirm)
+  "Delete FILE."
+  (interactive (list (jj-get-file-dwim "File to untrack")
+                     current-prefix-arg))
+  (unless (or noconfirm (yes-or-no-p (format "delete file %s?" file)))
+    (user-error "cancelled"))
+  (jj-cmd-sync `("util" "exec" "rm" ,file)))
+;; delete:1 ends here
 
 ;; jj squash/amend
 

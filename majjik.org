@@ -1528,7 +1528,9 @@
     "b f" #'jj-bookmark-forget
     "b t" #'jj-bookmark-track
     "b u" #'jj-bookmark-untrack
-    "f t" #'jj-file-track-dwim)
+    "f t" #'jj-file-track-dwim
+    "f u" #'jj-file-untrack-dwim
+    "f k" #'jj-file-delete-dwim)
 
   (keymap-global-set "C-x j" #'jj-dash)
 #+end_src
@@ -2464,11 +2466,27 @@ need error handling in these. but I do like them being synchronous i think.
        (jj-header-change-id cmt))
       (unmatched (jj-read-revset prompt))))
 
+  (defun jj-get-file-dwim (&optional prompt)
+    "Get a filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
+    (pcase (jj-thing-at-point)
+      ((and file (pred jj-status-file-untracked-p))
+       (jj-status-file-untracked-path file))
+      ((and file (pred jj-status-wc-change-p))
+       (jj-status-wc-change-path-target file))
+      (unmatched (read-file-name prompt))))
+  
   (defun jj-get-untracked-file-dwim (&optional prompt)
     "Get an untracked filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
     (pcase (jj-thing-at-point)
       ((and file (pred jj-status-file-untracked-p))
        (jj-status-file-untracked-path file))
+      (unmatched (read-file-name prompt))))
+
+  (defun jj-get-tracked-file-dwim (&optional prompt)
+    "Get a tracked filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
+    (pcase (jj-thing-at-point)
+      ((and file (pred jj-status-wc-change-p))
+       (jj-status-wc-change-path-target file))
       (unmatched (read-file-name prompt))))
 
   (defun jj-get-revision-dwim (&optional prompt mutable)
@@ -2724,10 +2742,27 @@ need error handling in these. but I do like them being synchronous i think.
 ***** track
 #+begin_src elisp
   (defun jj-file-track-dwim (file)
+    "Track FILE."
     (interactive (list (jj-get-untracked-file-dwim "File to track")))
     (jj-cmd-sync `("file" "track" ,(jj-files-as-fileset file))))
 #+end_src
 ***** untrack
+#+begin_src elisp
+  (defun jj-file-untrack-dwim (file)
+    "Untrack FILE."
+    (interactive (list (jj-get-tracked-file-dwim "File to untrack")))
+    (jj-cmd-sync `("file" "untrack" ,(jj-files-as-fileset file))))
+#+end_src
+***** delete
+#+begin_src elisp
+  (defun jj-file-delete-dwim (file &optional noconfirm)
+    "Delete FILE."
+    (interactive (list (jj-get-file-dwim "File to untrack")
+                       current-prefix-arg))
+    (unless (or noconfirm (yes-or-no-p (format "delete file %s?" file)))
+      (user-error "cancelled"))
+    (jj-cmd-sync `("util" "exec" "rm" ,file)))
+#+end_src
 **** jj squash/amend
 #+begin_src elisp
   (cl-defun jj-squash-down-dwim (rev &optional noconfirm ignore-immutable)
