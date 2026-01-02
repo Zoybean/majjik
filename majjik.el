@@ -7,7 +7,7 @@
 ;; Version: 0.1.0
 ;; Keywords: vc
 ;; URL: https://github.com/Zoybean/majjik
-;; Package-Requires: (dash s eieio)
+;; Package-Requires: (dash s eieio with-editor)
 
 ;;; Commentary:
 
@@ -19,11 +19,32 @@
 (require 'dash)
 (require 's)
 (require 'eieio)
+(require 'with-editor)
 ;; Require:1 ends here
 
-;; macros
+;; collect-repeat
 
-;; [[file:majjik.org::*macros][macros:1]]
+;; [[file:majjik.org::*collect-repeat][collect-repeat:1]]
+(defmacro collect-repeat (&rest body)
+  "Call FN repeatedly until it returns nil. Return the list of non-nil values."
+  (let ((vals-sym (gensym "vals")))
+    `(let ((,vals-sym))
+       (while-let ((val (progn ,@body)))
+         (push val ,vals-sym))
+       (nreverse ,vals-sym))))
+
+(ert-deftest jj-test-collect-repeat ()
+  (should (eq nil
+              (collect-repeat nil)))
+  (should (equal '(2 1 0)
+                 (let ((x 3))
+                   (collect-repeat (when (< 0 x)
+                                     (cl-decf x)))))))
+;; collect-repeat:1 ends here
+
+;; error-context
+
+;; [[file:majjik.org::*error-context][error-context:1]]
 (defmacro with-error-context (formatter-fn &rest body)
   "If BODY signals an error condition, modify its message by calling FORMATTER-FN on the original message. FORMATTER-FN should take and return a string."
   (declare (indent 1))
@@ -37,7 +58,7 @@
   (declare (indent 1))
   `(with-error-context (lambda (msg) (format ,format-str msg))
      ,@body))
-;; macros:1 ends here
+;; error-context:1 ends here
 
 ;; argument utils
 
@@ -309,26 +330,6 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
         (error "string did not wholly encode a single json object: %s" string)))))
 ;; json utils:1 ends here
 
-;; collect-repeat
-
-;; [[file:majjik.org::*collect-repeat][collect-repeat:1]]
-(defmacro collect-repeat (&rest body)
-  "Call FN repeatedly until it returns nil. Return the list of non-nil values."
-  (let ((vals-sym (gensym "vals")))
-    `(let ((,vals-sym))
-       (while-let ((val (progn ,@body)))
-         (push val ,vals-sym))
-       (nreverse ,vals-sym))))
-
-(ert-deftest jj-test-collect-repeat ()
-  (should (eq nil
-              (collect-repeat nil)))
-  (should (equal '(2 1 0)
-                 (let ((x 3))
-                   (collect-repeat (when (< 0 x)
-                                     (cl-decf x)))))))
-;; collect-repeat:1 ends here
-
 ;; Fileset
 
 ;; [[file:majjik.org::*Fileset][Fileset:1]]
@@ -349,7 +350,7 @@ Patterns all have keyword names, and all keywords are assumed to be patterns.
 See URL `https://docs.jj-vcs.dev/latest/filesets/' for more info."
   (cl-labels ((render-unpack (sexp)
                 (pcase (render sexp)
-                  ((or `(,(and needlessly-nested form))
+                  ((or `(form)
                        form)
                    (format "%s" form))
                   (unrecognised
@@ -455,7 +456,7 @@ See URL `https://docs.jj-vcs.dev/latest/revsets/' for more info."
         (prefix '(~)))
   (cl-labels ((render-unpack (sexp)
                 (pcase (render sexp)
-                  ((or `(,(and needlessly-nested form))
+                  ((or `(,form)
                        form)
                    (format "%s" form))
                   (unrecognised
@@ -646,7 +647,7 @@ See URL `https://docs.jj-vcs.dev/latest/templates/' for more info."
         (prefix '(- !)))
     (cl-labels ((render-unpack (sexp)
                   (pcase (render sexp)
-                    ((or `(,(and needlessly-nested form))
+                    ((or `(,form)
                          form)
                      (format "%s" form))
                     (unrecognised
@@ -825,15 +826,18 @@ See URL `https://docs.jj-vcs.dev/latest/templates/' for more info."
 ;; Log format
 
 ;; [[file:majjik.org::*Log format][Log format:1]]
-(defconst jj--count-graph-lines 4
+(eval-and-compile
+  (defconst jj--count-graph-lines 4
   "Number of lines of graph to sample for each commit in the log output. Fewer lines will give scrappier output, but 4 should be enough for any graph configuration.
-I've hardcoded other areas to expect exactly 4, so changing this will not break anything but the output will change slightly, specifically in which lines are considered mandatory.")
-(defconst jj--major-delim "\x1E"
+I've hardcoded other areas to expect exactly 4, so changing this will not break anything but the output will change slightly, specifically in which lines are considered mandatory."))
+(eval-and-compile
+  (defconst jj--major-delim "\x1E"
   "Delimiter for separating the graph from the records in the jj-log template.
-  By default, this is the ascii record separator character.")
-(defconst jj--delim "\x1F"
+  By default, this is the ascii record separator character."))
+(eval-and-compile
+  (defconst jj--delim "\x1F"
   "Delimiter for separating fields in the jj-log template.
-  By default, this is the ascii unit separator character.")
+  By default, this is the ascii unit separator character."))
 
 (defmacro define-jj-log-format (&rest fields)
   "Define the format to be used for jj log parsing and formatting.
@@ -958,7 +962,7 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                                                       ,jj--major-delim
                                                       "\n"))
                              collect (match-string 1) into graph-tail
-                             else return (error "failed to parse graph shape on line %d of commit %s" ix plist)
+                             else return (error "failed to parse graph shape on line %d of commit %s" ix struct-props)
                              finally return (make-jj-entry :header (apply #'make-jj-header struct-props)
                                                            :graph (apply #'make-jj-graph graph-pre graph-node graph-suf graph-tail))))))
      (defun read-jj-elided ()
@@ -1126,7 +1130,7 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
               ;; special case used to identify (and print in grey) the truncated marker of fully-separate subtrees
               ;; - this implementation is brittle AF. I really should set the truncation marker and search for it.
               `(,graph-mandatory))
-             (illegal (error "I thought that jj graph output would always have at most one run in a set of jj--count-graph-lines lines, and that run would be at the end, but apparently not. graph segments: %s" `(,graph-mandatory . ,graph-tails))))))
+             (illegal (error "I thought that jj graph output would always have at most one run in a set of `jj--count-graph-lines' lines, and that run would be at the end, but apparently not. graph segments: %s" graph-prefixes)))))
     (make--jj-graph
      :first-line-prefix pre
      :first-line-node node
@@ -1332,10 +1336,10 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
           `(cl-loop initially (with-error-context (lambda (msg)
                                                     (format "failed to read struct label %s: %s" ',type-name msg))
                                 (jj--re-step-over (rx ,(format "%s" type-name) ,jj--major-delim)))
-                    for (key . parser) in (list ,@(cl-loop for (name . props) in fields
-                                                           for key = (intern (format ":%s" name))
+                    for (field-name key parser) in (list ,@(cl-loop for (field-name . props) in fields
+                                                           for key = (intern (format ":%s" field-name))
                                                            for parser = (plist-get props :parser)
-                                                           collect `(cons ,key ,parser)))
+                                                           collect `(list ',field-name ,key ,parser)))
                     ;; no delimiter for first field
                     for first = t then nil
                     for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
@@ -1540,6 +1544,15 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 (keymap-global-set "C-x j" #'jj-dash)
 ;; Keymaps:1 ends here
 
+;; General buffer-locals
+
+;; [[file:majjik.org::*General buffer-locals][General buffer-locals:1]]
+(defvar-local jj--last-revs nil
+  "The revset last used in this buffer")
+(defvar-local jj--last-files nil
+  "The fileset last used in this buffer")
+;; General buffer-locals:1 ends here
+
 ;; Dashboard buffer
 
 ;; [[file:majjik.org::*Dashboard buffer][Dashboard buffer:1]]
@@ -1548,6 +1561,9 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 
 (define-derived-mode jj-dashboard-mode jj-inspect-mode "jj-dash"
   "Major mode for jj dashboard")
+
+(defvar-local jj--current-status nil
+  "In a jj dashboard buffer, this is the most recent status object.")
 
 (defvar-local jj--indirect-buffers nil
   "Indirect buffers into the current buffer. Ought to be killed if we're reverting.")
@@ -1579,7 +1595,6 @@ Reverted buffer is the one that was active when this function was called."
                                   (buffer-local-value 'jj--current-status temp-buf))))
                       (cleanup)))
                   (end-err (errs)
-                    (dbg errs)
                     (unwind-protect
                         (error "jj status update failed: %s" errs)
                       (cleanup)))
@@ -1662,8 +1677,7 @@ Reverted buffer is the one that was active when this function was called."
 
 ;; [[file:majjik.org::*jj-show for status section][jj-show for status section:1]]
 (defun jj-show--revert ()
-  (start-jj-show-status default-directory
-                        jj--last-revs
+  (start-jj-show-status jj--last-revs
                         jj--last-files))
 
 (defun jj-show-status (repo-dir &optional revset fileset)
@@ -1708,8 +1722,7 @@ Reverted buffer is the one that was active when this function was called."
 
 ;; [[file:majjik.org::*jj-show for diff section][jj-show for diff section:1]]
 (defun jj-show-status--revert ()
-  (start-jj-show-diff default-directory
-                      jj--last-revs
+  (start-jj-show-diff jj--last-revs
                       jj--last-files))
 
 (defun jj-show-diff (repo-dir &optional revset fileset)
@@ -1761,16 +1774,14 @@ Reverted buffer is the one that was active when this function was called."
   (start-jj-file-untracked))
 
 (defun jj-file-untracked (repo-dir)
-  "Run jj file list-untracked asynchronously in REPO-DIR, with the given REVSET, FILESET, and TEMPLATE string arguments. Returns the process and opens the corresponding buffer."
-  (interactive (list (read-directory-name "jj repo: ")
-                     (jj-read-revset-sexp)))
+  "Run jj file list-untracked asynchronously in REPO-DIR. Returns the process and opens the corresponding buffer."
+  (interactive (list (read-directory-name "jj repo: ")))
   (let* ((repo-dir (expand-file-name repo-dir))
          (buf (get-buffer-create (format "*jj-file-untracked: %s*" repo-dir))))
     (prog1
         (with-current-buffer buf
           (jj-inspect-mode)
           (setq-local default-directory repo-dir
-                      jj--last-revs revset
                       revert-buffer-function #'jj-file-untracked--revert)
           (start-jj-file-untracked))
       (pop-to-buffer buf))))
@@ -1845,9 +1856,6 @@ Reverted buffer is the one that was active when this function was called."
 ;; Combined struct and output formatter
 
 ;; [[file:majjik.org::*Combined struct and output formatter][Combined struct and output formatter:1]]
-(defvar-local jj--current-status nil
-  "In a jj dashboard buffer, this is the most recent status object.")
-
 (defun start-jj-status ()
   "Start the component processes for jj dashboard's status section. Returns the list of processes."
   (save-excursion
@@ -2245,10 +2253,6 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; jj-log
 
 ;; [[file:majjik.org::*jj-log][jj-log:1]]
-(defvar-local jj--last-revs nil
-  "The revset last used in this buffer")
-(defvar-local jj--last-files nil
-  "The fileset last used in this buffer")
 (defun jj-log--revert (&rest _)
   (start-jj-log jj--last-revs jj--last-files))
 
