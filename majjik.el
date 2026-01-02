@@ -916,16 +916,16 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                                                                     (match-string 3)))
                     ;; entry line
                     for (key . parser) in (list ,@(cl-loop for (name . props) in fields
-                                                   for key = (intern (format ":%s" name))
-                                                   for parser = (plist-get props :parser)
-                                                   collect `(cons ,key ,parser)))
+                                                           for key = (intern (format ":%s" name))
+                                                           for parser = (plist-get props :parser)
+                                                           collect `(cons ,key ,parser)))
                     ;; no delimiter for first field
                     for first = t then nil
                     for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
                     when (jj--re-step-over field-rx)
                     nconc `(,key ,(if parser
                                       (save-match-data
-                                         (funcall parser (match-string 1)))
+                                        (funcall parser (match-string 1)))
                                     (match-string 1)))
                     into struct-props
                     finally return
@@ -988,24 +988,24 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
              ;; we'll insert its contents later
              (with-temp-buffer
                (cl-loop for (name val printer face sep) in (list ,@(cl-loop  
-                                                            for (name . props) in fields
-                                                            for first = t then nil
-                                                            for sep = (if-let ((sep (plist-get props :separator)))
-                                                                          sep
-                                                                        (cond
-                                                                         (first "")
-                                                                         (t " ")))
-                                                            for face = (plist-get props :face)
-                                                            for printer = (plist-get props :printer)
-                                                            collect `(list ',name ,(field name) ,printer ,face ,sep)))
-                        do (when-let ((printed (and (s-present? val)
-                                                    (s-presence
-                                                     (if printer
-                                                         (funcall printer val header)
-                                                       val)))))
-                             (insert sep (propertize printed
-                                                     'help-echo (symbol-name name)
-                                                     'face face))))
+                                                                    for (name . props) in fields
+                                                                    for first = t then nil
+                                                                    for sep = (if-let ((sep (plist-get props :separator)))
+                                                                                  sep
+                                                                                (cond
+                                                                                 (first "")
+                                                                                 (t " ")))
+                                                                    for face = (plist-get props :face)
+                                                                    for printer = (plist-get props :printer)
+                                                                    collect `(list ',name ,(field name) ,printer ,face ,sep)))
+                        do (when-let ((printed (s-presence
+                                                (if printer
+                                                    (funcall printer val header)
+                                                  val))))
+                             (insert sep (apply #'propertize
+                                                `(,printed
+                                                  help-echo ,(symbol-name name)
+                                                  ,@(jj--if-arg face #'identity 'face))))))
                ;; ensure commit text ends on a newline
                (unless (bolp)
                  (insert "\n"))
@@ -1168,14 +1168,19 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
   :form (if (:chain self (.conflict)) "conflict"))
  (empty
   :face '(:foreground "green")
+  :parser (lambda (s)
+            (json-parse-string s :false-object nil))
   :printer (lambda (empty _entry)
-             (when (string= "true" empty)
-                 "(empty)"))
+             (when empty
+               "(empty)"))
   :separator "\n"
   :form (:chain self (.empty)))
  (description
   :parser #'json-parse-string
   :separator "\n"
+  :printer (lambda (desc _entry)
+             (or (s-presence desc)
+                 (propertize "(no description)" 'face '(:foreground "orange"))))
   :form (:chain self (.description) (.escape_json))))
 
 (ert-deftest jj-round-trip-truncate-overflow ()
@@ -1315,9 +1320,9 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                                                     (format "failed to read struct label %s: %s" ',type-name msg))
                                 (jj--re-step-over (rx ,(format "%s" type-name) ,jj--major-delim)))
                     for (key . parser) in (list ,@(cl-loop for (name . props) in fields
-                                                   for key = (intern (format ":%s" name))
-                                                   for parser = (plist-get props :parser)
-                                                   collect `(cons ,key ,parser)))
+                                                           for key = (intern (format ":%s" name))
+                                                           for parser = (plist-get props :parser)
+                                                           collect `(cons ,key ,parser)))
                     ;; no delimiter for first field
                     for first = t then nil
                     for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
@@ -1341,24 +1346,24 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
              ;; we'll insert its contents later
              (with-temp-buffer
                (cl-loop for (field-name val printer face sep) in (list ,@(cl-loop  
-                                                                  for (field-name . props) in fields
-                                                                  for first = t then nil
-                                                                  for sep = (if-let ((sep (plist-get props :separator)))
-                                                                                sep
-                                                                              (cond
-                                                                               (first "")
-                                                                               (t " ")))
-                                                                  for face = (plist-get props :face)
-                                                                  for printer = (plist-get props :printer)
-                                                                  collect `(list ',field-name ,(field field-name) ,printer ,face ,sep)))
-                        do (when-let ((printed (and (s-present? val)
-                                                    (s-presence
-                                                     (if printer
-                                                         (funcall printer val entry)
-                                                       val)))))
-                             (insert sep (propertize printed
-                                                     'help-echo (symbol-name field-name)
-                                                     'face face))))
+                                                                          for (field-name . props) in fields
+                                                                          for first = t then nil
+                                                                          for sep = (if-let ((sep (plist-get props :separator)))
+                                                                                        sep
+                                                                                      (cond
+                                                                                       (first "")
+                                                                                       (t " ")))
+                                                                          for face = (plist-get props :face)
+                                                                          for printer = (plist-get props :printer)
+                                                                          collect `(list ',field-name ,(field field-name) ,printer ,face ,sep)))
+                        do (when-let ((printed (s-presence
+                                                (if printer
+                                                    (funcall printer val entry)
+                                                  val))))
+                             (insert sep (apply #'propertize
+                                                `(,printed
+                                                  help-echo ,(symbol-name field-name)
+                                                  ,@(jj--if-arg face #'identity 'face))))))
                ;; ensure commit text ends on a newline
                (unless (bolp)
                  (insert "\n"))
