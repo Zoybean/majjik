@@ -1166,6 +1166,9 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
   :form (if (:chain self (.conflict)) "conflict"))
  (empty
   :face '(:foreground "green")
+  :printer (lambda (empty _entry)
+             (when (string= "true" empty)
+                 "(empty)"))
   :separator "\n"
   :form (:chain self (.empty)))
  (description
