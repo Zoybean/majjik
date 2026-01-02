@@ -1632,6 +1632,7 @@ Reverted buffer is the one that was active when this function was called."
   "Return the dashboard buffer for the jj workspace root of DIR."
   (format "*jj-dash %s*" (jj-workspace-root dir)))
 
+;;;###autoload
 (defun jj-dash (repo-dir)
   "Show the status of the current jj repository in a buffer."
   (interactive (list (jj-workspace-root default-directory)))
