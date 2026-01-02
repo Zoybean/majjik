@@ -826,9 +826,9 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
   "Define the format to be used for jj log parsing and formatting.
   Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the following keys:
   - `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
-  - `:quoted' specifies whether the field should be considered un-trusted, and therefore json-quoted in its machine-readable form.
-  - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present.
-  - `:face' specifies the face to use for formatting this entry in the log buffer."
+  - `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
+  - `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
+  - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
   `(progn
      (require 'json)
      (define-short-documentation-group jj-entry
@@ -985,7 +985,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
              ;; open a buffer to make a mess in
              ;; we'll insert its contents later
              (with-temp-buffer
-               (cl-loop for (name val face sep) in (list ,@(cl-loop  
+               (cl-loop for (name val printer face sep) in (list ,@(cl-loop  
                                                             for (name . props) in fields
                                                             for first = t then nil
                                                             for sep = (if-let ((sep (plist-get props :separator)))
@@ -994,9 +994,12 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                                                          (first "")
                                                                          (t " ")))
                                                             for face = (plist-get props :face)
-                                                            collect `(list ',name ,(field name) ,face ,sep)))
+                                                            for printer = (plist-get props :printer)
+                                                            collect `(list ',name ,(field name) ,printer ,face ,sep)))
                         do (when (s-present? val)
-                             (insert sep (propertize val
+                             (insert sep (propertize (if (dbg printer)
+                                                         (dbg (funcall printer val header))
+                                                       (dbg val))
                                                      'help-echo (symbol-name name)
                                                      'face face))))
                ;; ensure commit text ends on a newline
@@ -1256,8 +1259,9 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
   Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
   - `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
   - `:quoted' specifies whether the field should be considered un-trusted, and therefore decoded from json when bring read. If non-nil, its machine-readable `:form' should call escape_json as its last step.
-  - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present.
-  - `:face' specifies the face to use for formatting this entry."
+  - `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
+  - `:face' specifies the face to use for formatting this entry.
+  - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
   (declare (indent 1))
   `(progn
      (require 'json)
@@ -1328,7 +1332,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
              ;; open a buffer to make a mess in
              ;; we'll insert its contents later
              (with-temp-buffer
-               (cl-loop for (field-name val face sep) in (list ,@(cl-loop  
+               (cl-loop for (field-name val printer face sep) in (list ,@(cl-loop  
                                                                   for (field-name . props) in fields
                                                                   for first = t then nil
                                                                   for sep = (if-let ((sep (plist-get props :separator)))
@@ -1337,9 +1341,12 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                                                                (first "")
                                                                                (t " ")))
                                                                   for face = (plist-get props :face)
-                                                                  collect `(list ',field-name ,(field field-name) ,face ,sep)))
+                                                                  for printer = (plist-get props :printer)
+                                                                  collect `(list ',field-name ,(field field-name) ,printer ,face ,sep)))
                         do (when (s-present? val)
-                             (insert sep (propertize val
+                             (insert sep (propertize (if (dbg printer)
+                                                         (dbg (funcall printer val entry))
+                                                       (dbg val))
                                                      'help-echo (symbol-name field-name)
                                                      'face face))))
                ;; ensure commit text ends on a newline
