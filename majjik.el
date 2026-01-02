@@ -996,10 +996,12 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                                             for face = (plist-get props :face)
                                                             for printer = (plist-get props :printer)
                                                             collect `(list ',name ,(field name) ,printer ,face ,sep)))
-                        do (when (s-present? val)
-                             (insert sep (propertize (if (dbg printer)
-                                                         (dbg (funcall printer val header))
-                                                       (dbg val))
+                        do (when-let ((printed (and (s-present? val)
+                                                    (s-presence
+                                                     (if printer
+                                                         (funcall printer val header)
+                                                       val)))))
+                             (insert sep (propertize printed
                                                      'help-echo (symbol-name name)
                                                      'face face))))
                ;; ensure commit text ends on a newline
@@ -1165,7 +1167,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
  (empty
   :face '(:foreground "green")
   :separator "\n"
-  :form (:chain self (.empty) (if "(empty)" "")))
+  :form (:chain self (.empty)))
  (description
   :quoted t
   :separator "\n"
@@ -1343,10 +1345,12 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                                                   for face = (plist-get props :face)
                                                                   for printer = (plist-get props :printer)
                                                                   collect `(list ',field-name ,(field field-name) ,printer ,face ,sep)))
-                        do (when (s-present? val)
-                             (insert sep (propertize (if (dbg printer)
-                                                         (dbg (funcall printer val entry))
-                                                       (dbg val))
+                        do (when-let ((printed (and (s-present? val)
+                                                    (s-presence
+                                                     (if printer
+                                                         (funcall printer val entry)
+                                                       val)))))
+                             (insert sep (propertize printed
                                                      'help-echo (symbol-name field-name)
                                                      'face face))))
                ;; ensure commit text ends on a newline
