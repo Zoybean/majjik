@@ -914,17 +914,17 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                                                     (match-string 2)
                                                                     (match-string 3)))
                     ;; entry line
-                    for (key . quoted) in ',(cl-loop for (name . props) in fields
-                                                     for key = (intern (format ":%s" name))
-                                                     for quoted = (plist-get props :quoted)
-                                                     collect `(,key . ,quoted))
+                    for (key . parser) in (list ,@(cl-loop for (name . props) in fields
+                                                   for key = (intern (format ":%s" name))
+                                                   for parser = (plist-get props :parser)
+                                                   collect `(cons ,key ,parser)))
                     ;; no delimiter for first field
                     for first = t then nil
                     for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
                     when (jj--re-step-over field-rx)
-                    nconc `(,key ,(if quoted
+                    nconc `(,key ,(if parser
                                       (save-match-data
-                                         (funcall #'json-parse-string (match-string 1)))
+                                         (funcall parser (match-string 1)))
                                     (match-string 1)))
                     into struct-props
                     finally return
@@ -1145,7 +1145,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
   :form (:chain self (format_short_change_id_with_change_offset)))
  (author
   :face '(:foreground "yellow")
-  :quoted t
+  :parser #'json-parse-string
   :form (:chain self (.author) (.email) (stringify) (.escape_json)))
  (timestamp
   :face '(:foreground "cyan")
@@ -1173,7 +1173,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
   :separator "\n"
   :form (:chain self (.empty)))
  (description
-  :quoted t
+  :parser #'json-parse-string
   :separator "\n"
   :form (:chain self (.description) (.escape_json))))
 
@@ -1313,10 +1313,10 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
           `(cl-loop initially (with-error-context (lambda (msg)
                                                     (format "failed to read struct label %s: %s" ',type-name msg))
                                 (jj--re-step-over (rx ,(format "%s" type-name) ,jj--major-delim)))
-                    for (key . quoted) in ',(cl-loop for (field-name . props) in fields
-                                                     for key = (intern (format ":%s" field-name))
-                                                     for quoted = (plist-get props :quoted)
-                                                     collect `(,key . ,quoted))
+                    for (key . parser) in (list ,@(cl-loop for (name . props) in fields
+                                                   for key = (intern (format ":%s" name))
+                                                   for parser = (plist-get props :parser)
+                                                   collect `(cons ,key ,parser)))
                     ;; no delimiter for first field
                     for first = t then nil
                     for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
@@ -1324,9 +1324,9 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                                (format "failed to read field %s: %s" field-name msg))
                            (jj--re-step-over field-rx))
                     nconc `(,key ,(string-trim
-                                   (if quoted
+                                   (if parser
                                        (save-match-data
-                                         (funcall #'json-parse-string (match-string 1)))
+                                         (funcall parser (match-string 1)))
                                      (match-string 1))))
                     into struct-props
                     finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props))))
@@ -1396,23 +1396,23 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
    :face '(:foreground "red")
    :form (if (:chain self (.conflict)) "conflict"))
   (description
-   :quoted t
+   :parser #'json-parse-string
    :form (:chain self (.description) (.trim) (.escape_json))))
 
 (define-jj-plain-format status-wc-change
   (status
    :form (:chain self (.status)))
   (path-source
-   :quoted t
+   :parser #'json-parse-string
    :form (:chain self (.source) (.path) (.display) (.escape_json)))
   (path-target
-   :quoted t
+   :parser #'json-parse-string
    :form (:chain self (.target) (.path) (.display) (.escape_json))))
 
 (define-jj-plain-format status-file-conflict
   (path
    :face '(:foreground "red")
-   :quoted t
+   :parser #'json-parse-string
    :form (:chain f (.path) (.display) (.escape_json)))
   ;; (num-sides) ;; todo once it's representable in a template. for now, always unknown.
   )
@@ -1420,7 +1420,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
 (define-jj-plain-format status-file-untracked
   (path
    :face '(:foreground "magenta")
-   :quoted t
+   :parser #'json-parse-string
    :form (++ (:chain self (.display t) (.escape_json)) "\n")))
 
 (define-jj-plain-format status-bookmark-conflict
