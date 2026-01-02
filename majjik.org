@@ -819,11 +819,12 @@
 
   (defmacro define-jj-log-format (&rest fields)
     "Define the format to be used for jj log parsing and formatting.
-    Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the following keys:
-    - `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
-    - `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
-    - `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
-    - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
+  Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the following keys:
+  - `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
+  - `:parser' specifies how to read the data in to lisp.
+  - `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
+  - `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
+  - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
     `(progn
        (require 'json)
        (define-short-documentation-group jj-entry
@@ -1256,12 +1257,12 @@
 #+begin_src elisp
   (defmacro define-jj-plain-format (type-name &rest fields)
     "Define the format to be used for parsing and formatting various jj output.
-    Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
-    - `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
-    - `:quoted' specifies whether the field should be considered un-trusted, and therefore decoded from json when bring read. If non-nil, its machine-readable `:form' should call escape_json as its last step.
-    - `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
-    - `:face' specifies the face to use for formatting this entry.
-    - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
+  Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
+  - `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
+  - `:parser' specifies how to read the data in to lisp.
+  - `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
+  - `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
+  - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
     (declare (indent 1))
     `(progn
        (require 'json)
