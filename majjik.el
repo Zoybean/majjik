@@ -4,6 +4,7 @@
 
 ;; [[file:majjik.org::*Require][Require:1]]
 (require 'dash)
+(require 's)
 (require 'eieio)
 ;; Require:1 ends here
 
@@ -994,7 +995,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                                                          (t " ")))
                                                             for face = (plist-get props :face)
                                                             collect `(list ',name ,(field name) ,face ,sep)))
-                        do (unless (string= "" (or val ""))
+                        do (when (s-present? val)
                              (insert sep (propertize val
                                                      'help-echo (symbol-name name)
                                                      'face face))))
@@ -1158,6 +1159,10 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
  (conflict
   :face '(:foreground "red")
   :form (if (:chain self (.conflict)) "conflict"))
+ (empty
+  :face '(:foreground "green")
+  :separator "\n"
+  :form (:chain self (.empty) (if "(empty)" "")))
  (description
   :quoted t
   :separator "\n"
@@ -1333,7 +1338,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                                                                (t " ")))
                                                                   for face = (plist-get props :face)
                                                                   collect `(list ',field-name ,(field field-name) ,face ,sep)))
-                        do (unless (string= "" (or val ""))
+                        do (when (s-present? val)
                              (insert sep (propertize val
                                                      'help-echo (symbol-name field-name)
                                                      'face face))))
