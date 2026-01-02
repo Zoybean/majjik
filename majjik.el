@@ -1474,22 +1474,28 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
   "C-_" #'jj-undo
   "C-M-_" #'jj-redo
   "C-x u" #'jj-undo
-  "c n e" #'jj-edit
-  "c n n" #'jj-new-on
-  "c k" #'jj-drop
-  "c w" #'jj-desc
-  "c a" #'jj-amend-into
-  "c s" #'jj-squash-down
+  "c e" #'jj-edit-dwim
+  "c n e" #'jj-edit-dwim
+  "c n n" #'jj-new-on-dwim
+  "c n -" #'jj-new-before-dwim
+  "c n +" #'jj-new-after-dwim
+  "c n b" #'jj-new-before-dwim
+  "c n a" #'jj-new-after-dwim
+  "c n i" #'jj-new-insert
+  "c k" #'jj-drop-dwim
+  "c w" #'jj-desc-dwim
+  "c a" #'jj-amend-into-dwim
+  "c s" #'jj-squash-down-dwim
   "F" #'jj-git-fetch
   "P" #'jj-git-push
-  "b n" #'jj-bookmark-new
-  "b m" #'jj-bookmark-move
+  "b n" #'jj-bookmark-new-dwim
+  "b m" #'jj-bookmark-move-dwim
   "b r" #'jj-bookmark-rename
   "b d" #'jj-bookmark-delete
   "b f" #'jj-bookmark-forget
   "b t" #'jj-bookmark-track
   "b u" #'jj-bookmark-untrack
-  "f t" #'jj-file-track)
+  "f t" #'jj-file-track-dwim)
 
 (keymap-global-set "C-x j" #'jj-dash)
 ;; Keymaps:1 ends here
@@ -2422,19 +2428,32 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                  ,@(jj--if-arg no-edit nil "--no-edit")
                  ,@(jj--if-arg message #'identity "-m"))))
 
-(cl-defun jj-new-on (parent-revset &key message no-edit)
+(cl-defun jj-new-on-dwim (parents-revset &key message no-edit)
+  "Create a new commit after the chosen PARENTS-REVSET, with no children."
   (interactive (list (jj-get-revset-dwim "parent revs: ")))
-  (jj-new :rev parent-revset :message message :no-edit no-edit))
+  (jj-new :rev parents-revset :message message :no-edit no-edit))
 
-(cl-defun jj-new-insert (before after &key message no-edit)
-  "One or both of BEFORE and/or AFTER must be a non-nil and non-empty revset."
-  (jj-new :before before :after after :message message :no-edit no-edit))
+(cl-defun jj-new-before-dwim (children-revset &key message no-edit)
+  "Insert a new commit before the chosen CHILDREN-REVSET, and after its parents."
+  (interactive (list (jj-get-revset-dwim "child revs: ")))
+  (jj-new :before children-revset :message message :no-edit no-edit))
+
+(cl-defun jj-new-after-dwim (parents-revset &key message no-edit)
+  "Insert a new commit after the chosen PARENTS-REVSET, and before its children."
+  (interactive (list (jj-get-revset-dwim "parent revs: ")))
+  (jj-new :after parents-revset :message message :no-edit no-edit))
+
+(cl-defun jj-new-insert (children-revset parents-revset &key message no-edit)
+  "Insert a new commit before the chosen CHILDREN-REVSET, and after the chosen PARENTS-REVSET."
+  (interactive (list (jj-read-revset "parent revs: ")
+                     (jj-read-revset "child revs: ")))
+  (jj-new :before children-revset :after parents-revset :message message :no-edit no-edit))
 ;; jj new:1 ends here
 
 ;; jj edit
 
 ;; [[file:majjik.org::*jj edit][jj edit:1]]
-(cl-defun jj-edit (rev &optional ignore-immutable)
+(cl-defun jj-edit-dwim (rev &optional ignore-immutable)
   (interactive (list (jj-get-revset-dwim "edit: ")))
   (jj-cmd-sync `("edit"
                  "-r" ,rev
@@ -2444,7 +2463,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; jj desc
 
 ;; [[file:majjik.org::*jj desc][jj desc:1]]
-(defun jj-desc (revset message)
+(defun jj-desc-dwim (revset message)
   (interactive (list (jj-get-revset-dwim "revs to describe: ")
                      (read-string "message: ")))
   (jj-cmd-sync `("describe"
@@ -2455,7 +2474,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; jj drop
 
 ;; [[file:majjik.org::*jj drop][jj drop:1]]
-(defun jj-drop (revset &optional noconfirm)
+(defun jj-drop-dwim (revset &optional noconfirm)
   (interactive (list (jj-get-revset-dwim "revs to abandon: ")))
   (unless (or noconfirm (yes-or-no-p (format "abandon %s?" revset)))
     (user-error "cancelled"))
@@ -2479,7 +2498,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; new
 
 ;; [[file:majjik.org::*new][new:1]]
-(defun jj-bookmark-new (bookmark rev)
+(defun jj-bookmark-new-dwim (bookmark rev)
   "Create new BOOKMARK pointing at revision REV."
   (interactive (list (read-string "New bookmark: ")
                      (jj-get-revision-dwim "At rev: ")))
@@ -2490,7 +2509,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; move
 
 ;; [[file:majjik.org::*move][move:1]]
-(defun jj-bookmark-move (bookmark to-rev &optional allow-backwards)
+(defun jj-bookmark-move-dwim (bookmark to-rev &optional allow-backwards)
   "Move BOOKMARK to point to revision TO-REV. If used with a prefix arg, allow the bookmark to move backwards or sideways."
   (interactive (list (completing-read "Move bookmark: " (jj-list-bookmarks))
                      (jj-get-revision-dwim "move to: ")
@@ -2537,7 +2556,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; track
 
 ;; [[file:majjik.org::*track][track:1]]
-(defun jj-file-track (file)
+(defun jj-file-track-dwim (file)
   (interactive (list (jj-get-untracked-file-dwim "File to track")))
   (jj-cmd-sync `("file" "track" ,(jj-files-as-fileset file))))
 ;; track:1 ends here
@@ -2545,7 +2564,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; jj squash/amend
 
 ;; [[file:majjik.org::*jj squash/amend][jj squash/amend:1]]
-(cl-defun jj-squash-down (rev &optional noconfirm ignore-immutable)
+(cl-defun jj-squash-down-dwim (rev &optional noconfirm ignore-immutable)
   "Squash changes from REV into its single parent."
   (interactive (list (jj-get-revision-dwim "squash rev: ")
                      nil
@@ -2557,7 +2576,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                    "-r" ,rev
                    ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
 
-(cl-defun jj-amend-into (rev &optional noconfirm ignore-immutable)
+(cl-defun jj-amend-into-dwim (rev &optional noconfirm ignore-immutable)
   "Squash changes from @ into the chosen revision."
   (interactive (list (jj-get-revision-dwim "squash into rev: ")
                      nil
