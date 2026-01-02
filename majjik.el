@@ -1628,11 +1628,13 @@ Reverted buffer is the one that was active when this function was called."
   (let ((test (or test #'eq)))
     (jj-jump-find-object (lambda (obj) (funcall test thing obj)))))
 
-(defun jj-dash-buffer (repo-dir)
-  (format "*jj-dash %s*" repo-dir))
+(defun jj-dash-buffer (dir)
+  "Return the dashboard buffer for the jj workspace root of DIR."
+  (format "*jj-dash %s*" (jj-workspace-root dir)))
 
 (defun jj-dash (repo-dir)
-  (interactive (list default-directory))
+  "Show the status of the current jj repository in a buffer."
+  (interactive (list (jj-workspace-root default-directory)))
   (let ((main-buf (get-buffer-create (jj-dash-buffer repo-dir))))
     (with-current-buffer main-buf
       (jj-dashboard-mode)
@@ -2157,7 +2159,6 @@ Untracked files:
   "Start the jj dashboard in the current buffer, and call CALLBACK-OK once all processes finish successfully, or CALLBACK-ERR with a list of failed processes.
 
 Also sets `jj--current-status' in the initial buffer when the status process completes."
-  (assert-jj)
   (let ((inhibit-read-only t))
     ;; erase while respecting narrowing
     (delete-region (point-min) (point-max)))
@@ -2220,7 +2221,6 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 
 (defun start-jj-dash-blocking ()
   "Start the jj dashboard, and block until the status section and the first part of the log are completed"
-  (assert-jj)
   (let ((inhibit-read-only t))
     ;; erase while respecting narrowing
     (delete-region (point-min) (point-max)))
@@ -2432,8 +2432,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                              :no-revert)
                 :omit))
 
-(defun jj-workspace-root ()
-  "Return the root of the current jj reposotory."
+(defun jj-workspace-root (&optional dir)
+  "Return the root of the jj repository containing DIR, or `default-directory' if not provided."
   (string-trim (jj-cmd-sync `("workspace" "root") :no-revert)
                nil
                ;; only trim a single trailing newline
