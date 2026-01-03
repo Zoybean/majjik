@@ -330,6 +330,27 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
         (error "string did not wholly encode a single json object: %s" string)))))
 ;; json utils:1 ends here
 
+;; rendering utils
+
+;; [[file:majjik.org::*rendering utils][rendering utils:1]]
+(defun jj--entitize-newlines (string)
+  "Propertize all newlines in STRING with the corresponding escape glyph, with the `escape-glyph' face."
+  (let* ((replacements `(("\n" . "^J")
+                         ("\r" . "^M"))))
+    (replace-regexp-in-string
+     (regexp-opt (mapcar 'car replacements))
+     (lambda (it)
+       (let ((rep (s--aget replacements it)))
+         (propertize it
+                     'display rep
+                     'face 'escape-glyph)))
+     string t t)))
+
+(ert-deftest jj-test-entitize-newlines ()
+  (should (string= "foo\r\nbar"
+          (jj--entitize-newlines "foo\r\nbar"))))
+;; rendering utils:1 ends here
+
 ;; Fileset
 
 ;; [[file:majjik.org::*Fileset][Fileset:1]]
@@ -2542,7 +2563,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
        (with-current-buffer buf
          (let ((inhibit-read-only t))
            (erase-buffer)
-           (insert (format "%S" object))))
+           (insert (jj--entitize-newlines (format "%S" object)))))
        (pop-to-buffer buf)
        (special-mode)))))
 ;; thing at point:1 ends here

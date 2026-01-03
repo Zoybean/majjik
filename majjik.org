@@ -329,6 +329,26 @@
         (error "string did not wholly encode a single json object: %s" string)))))
 #+end_src
 
+** rendering utils
+#+begin_src elisp
+  (defun jj--entitize-newlines (string)
+    "Propertize all newlines in STRING with the corresponding escape glyph, with the `escape-glyph' face."
+    (let* ((replacements `(("\n" . "^J")
+                           ("\r" . "^M"))))
+      (replace-regexp-in-string
+       (regexp-opt (mapcar 'car replacements))
+       (lambda (it)
+         (let ((rep (s--aget replacements it)))
+           (propertize it
+                       'display rep
+                       'face 'escape-glyph)))
+       string t t)))
+
+  (ert-deftest jj-test-entitize-newlines ()
+    (should (string= "foo\r\nbar"
+            (jj--entitize-newlines "foo\r\nbar"))))
+#+end_src
+
 * DSLs
 ** Fileset
 #+begin_src elisp
@@ -2551,7 +2571,7 @@ need error handling in these. but I do like them being synchronous i think.
          (with-current-buffer buf
            (let ((inhibit-read-only t))
              (erase-buffer)
-             (insert (format "%S" object))))
+             (insert (jj--entitize-newlines (format "%S" object)))))
          (pop-to-buffer buf)
          (special-mode)))))
 #+end_src
