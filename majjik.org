@@ -2722,6 +2722,9 @@ need error handling in these. but I do like them being synchronous i think.
   (cl-defgeneric jj-inspect-thing (thing)
     "Inspect THING in its own buffer if we have a method to do so."
     (user-error "Not at an inspectable jj object"))
+
+  (cl-defmethod jj-inspect-thing ((thing jj-status-file-untracked))
+    (view-file (jj-status-file-untracked-path thing)))
 #+end_src
 *** Sync commands
 **** sync command utils

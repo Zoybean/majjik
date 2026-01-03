@@ -2672,6 +2672,9 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (cl-defgeneric jj-inspect-thing (thing)
   "Inspect THING in its own buffer if we have a method to do so."
   (user-error "Not at an inspectable jj object"))
+
+(cl-defmethod jj-inspect-thing ((thing jj-status-file-untracked))
+  (view-file (jj-status-file-untracked-path thing)))
 ;; thing at point:1 ends here
 
 ;; sync command utils
