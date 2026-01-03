@@ -2700,16 +2700,16 @@ Also sets `jj--current-status' in the initial buffer when the status process com
         (jj-revert-dash-buffer default-directory)))))
 ;; sync command utils:1 ends here
 
-;; bookmark list
+;; jj bookmark list
 
-;; [[file:majjik.org::*bookmark list][bookmark list:1]]
+;; [[file:majjik.org::*jj bookmark list][jj bookmark list:1]]
 (defun jj-bookmark-list ()
   (interactive)
   (message "%s"
            (s-chomp
             (jj-cmd-sync `("bookmark" "list")
                          :no-revert))))
-;; bookmark list:1 ends here
+;; jj bookmark list:1 ends here
 
 ;; jj undo
 

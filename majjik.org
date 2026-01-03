@@ -2743,8 +2743,8 @@ need error handling in these. but I do like them being synchronous i think.
           (jj-revert-dash-buffer default-directory)))))
 #+end_src
 **** view
-***** diff
-***** bookmark list
+***** jj diff
+***** jj bookmark list
 #+begin_src elisp
   (defun jj-bookmark-list ()
     (interactive)
