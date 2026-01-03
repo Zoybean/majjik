@@ -1673,7 +1673,8 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 ;; [[file:majjik.org::*Keymaps][Keymaps:1]]
 (defvar-keymap jj-inspect-mode-map
   :parent special-mode-map
-  "," #'jj-inspect-sexp-at-point)
+  "," #'jj-inspect-sexp-at-point
+  "RET" #'jj-inspect-thing-at-point)
 
 (defvar-keymap jj-dashboard-mode-map
   :parent jj-inspect-mode-map
@@ -2651,19 +2652,26 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun jj-thing-at-point ()
   (get-text-property (point) 'jj-object))
 
-(defun jj-inspect-sexp-at-point ()
+(defun jj-inspect-sexp-at-point (thing)
   "When point is in a jj object, show that object's data in its own buffer."
-  (interactive)
-  (pcase (jj-thing-at-point)
-    ('nil (user-error "Not at an inspectable object"))
-    (object
-     (let ((buf (get-buffer-create "*jj-sexp*")))
-       (with-current-buffer buf
-         (let ((inhibit-read-only t))
-           (erase-buffer)
-           (insert (jj--entitize-newlines (format "%S" object)))))
-       (pop-to-buffer buf)
-       (special-mode)))))
+  (interactive (list (jj-thing-at-point)))
+  (unless thing (user-error "Not at a jj object"))
+  (let ((buf (get-buffer-create "*jj-sexp*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (jj--entitize-newlines (format "%S" thing)))))
+    (pop-to-buffer buf)
+    (special-mode)))
+
+(defun jj-inspect-thing-at-point (thing)
+  "When point is in an inspectable jj object, show that object in its own buffer."
+  (interactive (list (jj-thing-at-point)))
+  (jj-inspect-thing thing))
+
+(cl-defgeneric jj-inspect-thing (thing)
+  "Inspect THING in its own buffer if we have a method to do so."
+  (user-error "Not at an inspectable jj object"))
 ;; thing at point:1 ends here
 
 ;; sync command utils
