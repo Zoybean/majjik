@@ -2723,6 +2723,53 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                          :no-revert))))
 ;; jj bookmark list:1 ends here
 
+;; async command utils
+
+;; [[file:majjik.org::*async command utils][async command utils:1]]
+(defun jj--standard-async-callback (name do-revert)
+  "Returns a callback for `jj-cmd-async'. If NAME, print a message saying whether NAME was successful. If DO-REVERT, on success, revert the dash buffer for the relevant jj repo."
+  (lambda (ok dir)
+    (cond (ok
+           (when do-revert
+             (jj-revert-dash-buffer-async dir))
+           (when name
+             (message "%s ok" name)))
+          (t
+           (when name
+             (message "%s failed" name))))))
+
+(defun jj-cmd-async (name cmd &optional callback)
+  "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
+  (declare (indent 2))
+  (let* ((repo-dir default-directory)
+         (buf (get-buffer-create (format "*jj-%s: %s*" name repo-dir))))
+    (prog1
+        (with-current-buffer buf
+          (jj-inspect-mode)
+          (setq-local default-directory repo-dir)
+          (let ((inhibit-read-only t))
+            (erase-accessible-buffer))
+          (let* ((buf (current-buffer))
+                 (err (generate-new-buffer (format "*jj-%s-stderr*" name)))
+                 (sentinel (make-jj-callback-sentinel
+                            ;; hacky - make something better once there's a standardised output buffer?
+                            (when callback
+                              (lambda (ok)
+                                (funcall callback ok repo-dir)))
+                            err))
+                 (filter (make-sticky-process-filter :sticky)))
+            (make-process
+             :name (format "jj-%s" name)
+             :buffer buf
+             :stderr err
+             :filter filter
+             :sentinel sentinel
+             :noquery t
+             :command `("jj"
+                        ,@jj-global-default-args
+                        ,@cmd)))))))
+;; async command utils:1 ends here
+
 ;; jj undo
 
 ;; [[file:majjik.org::*jj undo][jj undo:1]]
@@ -3008,7 +3055,6 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "squash %s into its parent?" rev)))
     (user-error "cancelled"))
-  ;; nope - these are sync, so they can't wait on emacs
   (with-editor "VISUAL"
     (jj-cmd-async "squash"
         `("squash"
@@ -3023,7 +3069,6 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "squash @ into %s?" rev)))
     (user-error "cancelled"))
-  ;; nope - these are sync, so they can't wait on emacs
   (with-editor "VISUAL"
     (jj-cmd-async "squash"
         `("squash"
@@ -3031,53 +3076,6 @@ Also sets `jj--current-status' in the initial buffer when the status process com
           ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))
       (jj--standard-async-callback nil :revert))))
 ;; jj squash/amend:1 ends here
-
-;; async command utils
-
-;; [[file:majjik.org::*async command utils][async command utils:1]]
-(defun jj--standard-async-callback (name do-revert)
-  "Returns a callback for `jj-cmd-async'. If NAME, print a message saying whether NAME was successful. If DO-REVERT, on success, revert the dash buffer for the relevant jj repo."
-  (lambda (ok dir)
-    (cond (ok
-           (when do-revert
-             (jj-revert-dash-buffer-async dir))
-           (when name
-             (message "%s ok" name)))
-          (t
-           (when name
-             (message "%s failed" name))))))
-
-(defun jj-cmd-async (name cmd &optional callback)
-  "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
-  (declare (indent 2))
-  (let* ((repo-dir default-directory)
-         (buf (get-buffer-create (format "*jj-%s: %s*" name repo-dir))))
-    (prog1
-        (with-current-buffer buf
-          (jj-inspect-mode)
-          (setq-local default-directory repo-dir)
-          (let ((inhibit-read-only t))
-            (erase-accessible-buffer))
-          (let* ((buf (current-buffer))
-                 (err (generate-new-buffer (format "*jj-%s-stderr*" name)))
-                 (sentinel (make-jj-callback-sentinel
-                            ;; hacky - make something better once there's a standardised output buffer?
-                            (when callback
-                              (lambda (ok)
-                                (funcall callback ok repo-dir)))
-                            err))
-                 (filter (make-sticky-process-filter :sticky)))
-            (make-process
-             :name (format "jj-%s" name)
-             :buffer buf
-             :stderr err
-             :filter filter
-             :sentinel sentinel
-             :noquery t
-             :command `("jj"
-                        ,@jj-global-default-args
-                        ,@cmd)))))))
-;; async command utils:1 ends here
 
 ;; jj git push
 
