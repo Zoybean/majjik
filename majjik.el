@@ -2676,7 +2676,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 
 (cl-defmethod jj-inspect-thing ((thing jj-status-wc-change))
   "View the diff for the file at point."
-  (jj-diff "@" (jj-status-wc-change-path-target thing)))
+  (jj-diff-at "@" (jj-files-as-fileset (jj-status-wc-change-path-target thing))))
 ;; thing at point:1 ends here
 
 ;; swap buffers, same dir
@@ -2769,6 +2769,48 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                         ,@jj-global-default-args
                         ,@cmd)))))))
 ;; async command utils:1 ends here
+
+;; jj diff
+
+;; [[file:majjik.org::*jj diff][jj diff:1]]
+(cl-defun jj-diff (&key at from to fileset)
+  "View the diff for AT, or between FROM and TO, optionally limited to files in FILESET."
+  (let* ((repo-dir default-directory)
+         (main-buf (get-buffer-create (format "*jj-diff %s:%s:%s*" repo-dir at fileset))))
+    (with-current-buffer main-buf
+      (diff-mode)
+      (setq-local default-directory repo-dir)
+      (let ((inhibit-read-only t))
+        (erase-accessible-buffer))
+      (let* ((err (generate-new-buffer "*jj-diff-stderr*"))
+             (sentinel (make-jj-callback-sentinel
+                        (lambda (ok)
+                          (when ok (pop-to-buffer main-buf)))
+                        err))
+             (filter (make-sticky-process-filter :sticky)))
+        (make-process
+         :name "jj-diff"
+         :buffer (current-buffer)
+         :stderr err
+         :filter filter
+         :sentinel sentinel
+         :noquery t
+         :command `("jj" ,@jj-global-default-args
+                    "diff"
+                    "--git"
+                    ,@(jj--if-arg at #'identity "--revisions")
+                    ,@(jj--if-arg from #'identity "--from")
+                    ,@(jj--if-arg to #'identity "--to")
+                    ))))))
+
+(defun jj-diff-at (revset &optional fileset)
+  "View the diff for REVISION, optionally limited to files in FILESET."
+  (jj-diff :at revset :fileset fileset))
+
+(defun jj-diff-from-to (from to &optional fileset)
+  "View the diff between FROM and TO, optionally limited to files in FILESET."
+  (jj-diff :from from :to to :fileset fileset))
+;; jj diff:1 ends here
 
 ;; jj undo
 

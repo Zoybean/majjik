@@ -2698,7 +2698,7 @@ need error handling in these. but I do like them being synchronous i think.
 
   (cl-defmethod jj-inspect-thing ((thing jj-status-wc-change))
     "View the diff for the file at point."
-    (jj-diff "@" (jj-status-wc-change-path-target thing)))
+    (jj-diff-at "@" (jj-files-as-fileset (jj-status-wc-change-path-target thing))))
 #+end_src
 **** swap buffers, same dir
 might actually not use these as I need a lexical variable anyway in most cases where i'm following this pattern
@@ -2731,7 +2731,6 @@ might actually not use these as I need a lexical variable anyway in most cases w
           (jj-revert-dash-buffer default-directory)))))
 #+end_src
 **** view
-***** jj diff
 ***** jj bookmark list
 #+begin_src elisp
   (defun jj-bookmark-list ()
@@ -2790,21 +2789,63 @@ might actually not use these as I need a lexical variable anyway in most cases w
 ***** TODO this callback interface sucks
 expose an ~error~ parameter, not an ~ok~ parameter.
 (see also, make-jj-callback-sentinel, which would have to change)
-**** jj undo
+**** view
+***** jj diff
+#+begin_src elisp
+  (cl-defun jj-diff (&key at from to fileset)
+    "View the diff for AT, or between FROM and TO, optionally limited to files in FILESET."
+    (let* ((repo-dir default-directory)
+           (main-buf (get-buffer-create (format "*jj-diff %s:%s:%s*" repo-dir at fileset))))
+      (with-current-buffer main-buf
+        (diff-mode)
+        (setq-local default-directory repo-dir)
+        (let ((inhibit-read-only t))
+          (erase-accessible-buffer))
+        (let* ((err (generate-new-buffer "*jj-diff-stderr*"))
+               (sentinel (make-jj-callback-sentinel
+                          (lambda (ok)
+                            (when ok (pop-to-buffer main-buf)))
+                          err))
+               (filter (make-sticky-process-filter :sticky)))
+          (make-process
+           :name "jj-diff"
+           :buffer (current-buffer)
+           :stderr err
+           :filter filter
+           :sentinel sentinel
+           :noquery t
+           :command `("jj" ,@jj-global-default-args
+                      "diff"
+                      "--git"
+                      ,@(jj--if-arg at #'identity "--revisions")
+                      ,@(jj--if-arg from #'identity "--from")
+                      ,@(jj--if-arg to #'identity "--to")
+                      ))))))
+
+  (defun jj-diff-at (revset &optional fileset)
+    "View the diff for REVISION, optionally limited to files in FILESET."
+    (jj-diff :at revset :fileset fileset))
+
+  (defun jj-diff-from-to (from to &optional fileset)
+    "View the diff between FROM and TO, optionally limited to files in FILESET."
+    (jj-diff :from from :to to :fileset fileset))
+#+end_src
+**** do
+***** jj undo
 #+begin_src elisp
   (cl-defun jj-undo ()
     (interactive)
     (jj-cmd-async "undo" `("undo")
       (jj--standard-async-callback nil :revert)))
 #+end_src
-**** jj redo
+***** jj redo
 #+begin_src elisp
   (cl-defun jj-redo ()
     (interactive)
     (jj-cmd-async "redo" `("redo")
       (jj--standard-async-callback nil :revert)))
 #+end_src
-**** jj new
+***** jj new
 #+begin_src elisp
   (cl-defun jj-new (&key rev before after message no-edit)
     (when (and rev (or before after))
@@ -2846,7 +2887,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
                        (jj-read-revset "child revs: ")))
     (jj-new :before children-revset :after parents-revset :message message :no-edit no-edit))
 #+end_src
-**** jj edit
+***** jj edit
 #+begin_src elisp
   (cl-defun jj-edit-dwim (rev &optional ignore-immutable)
     (interactive (list (jj-get-revset-dwim "edit: ")))
@@ -2856,7 +2897,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
           ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))
       (jj--standard-async-callback nil :revert)))
 #+end_src
-**** jj desc
+***** jj desc
 #+begin_src elisp
   (defun jj-desc-dwim (revset message)
     (interactive (list (jj-get-revset-dwim "revs to describe: ")
@@ -2867,7 +2908,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
           "-m" ,message)
       (jj--standard-async-callback nil :revert)))
 #+end_src
-**** jj drop
+***** jj drop
 #+begin_src elisp
   (defun jj-drop-dwim (revset &optional noconfirm)
     (interactive (list (jj-get-revset-dwim "revs to abandon: ")))
@@ -2878,7 +2919,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
           "-r" ,revset)
       (jj--standard-async-callback nil :revert)))
 #+end_src
-**** jj git init
+***** jj git init
 #+begin_src elisp
   ;;;###autoload
   (defun jj-git-init (root-dir colocate)
@@ -2891,8 +2932,8 @@ expose an ~error~ parameter, not an ~ok~ parameter.
       (lambda (ok _dir)
         (jj-dash--async root-dir))))
 #+end_src
-**** jj bookmark
-***** new
+***** jj bookmark
+****** new
 #+begin_src elisp
   (defun jj-bookmark-new-dwim (bookmark rev)
     "Create new BOOKMARK pointing at revision REV."
@@ -2903,7 +2944,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
           "-r" ,rev)
       (jj--standard-async-callback nil :revert)))
 #+end_src
-***** move
+****** move
 #+begin_src elisp
   (defun jj-bookmark-move-dwim (bookmark to-rev &optional allow-backwards)
     "Move BOOKMARK to point to revision TO-REV. If used with a prefix arg, allow the bookmark to move backwards or sideways."
@@ -2916,7 +2957,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
           ,@(jj--if-arg allow-backwards nil "--allow-backwards"))
       (jj--standard-async-callback nil :revert)))
 #+end_src
-***** rename
+****** rename
 #+begin_src elisp
   (defun jj-bookmark-rename (bookmark new-name)
     "Create new BOOKMARK pointing at revision REV."
@@ -2926,7 +2967,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
         `("bookmark" "rename" ,bookmark ,new-name)
       (jj--standard-async-callback nil :revert)))
 #+end_src
-***** delete
+****** delete
 #+begin_src elisp
   (defun jj-bookmark-delete (bookmark &optional noconfirm)
     "Delete BOOKMARK."
@@ -2938,7 +2979,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
         `("bookmark" "delete" ,bookmark)
       (jj--standard-async-callback nil :revert)))
 #+end_src
-***** forget
+****** forget
 #+begin_src elisp
   (defun jj-bookmark-forget (bookmark &optional noconfirm)
     "Delete BOOKMARK, but don't mark it for deletion on the remote."
@@ -2950,7 +2991,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
         `("bookmark" "forget" ,bookmark)
       (jj--standard-async-callback nil :revert)))
 #+end_src
-***** track
+****** track
 #+begin_src elisp
   (defun jj-bookmark-track (remote bookmark)
     "Track BOOKMARK at REMOTE."
@@ -2986,7 +3027,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
 
 #+end_src
 
-***** untrack
+****** untrack
 #+begin_src elisp
   (defun jj-bookmark-untrack (bookmark &optional remotes)
     "Untrack BOOKMARK from REMOTES if provided, otherwise all remotes."
@@ -3004,8 +3045,8 @@ expose an ~error~ parameter, not an ~ok~ parameter.
           ,@(jj--if-arg remotes (apply-partially #'apply #'jj-revs-as-revset) "--remote"))
       (jj--standard-async-callback nil :revert)))
 #+end_src
-**** jj file
-***** track
+***** jj file
+****** track
 #+begin_src elisp
   (defun jj-file-track-dwim (file)
     "Track FILE."
@@ -3014,7 +3055,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
         `("file" "track" ,(jj-files-as-fileset file))
       (jj--standard-async-callback nil :revert)))
 #+end_src
-***** untrack
+****** untrack
 #+begin_src elisp
   (defun jj-file-untrack-dwim (file)
     "Untrack FILE."
@@ -3023,7 +3064,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
         `("file" "untrack" ,(jj-files-as-fileset file))
       (jj--standard-async-callback nil :revert)))
 #+end_src
-***** delete
+****** delete
 #+begin_src elisp
   (defun jj-file-delete-dwim (file &optional noconfirm)
     "Delete FILE."
@@ -3035,7 +3076,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
         `("util" "exec" "rm" ,file)
       (jj--standard-async-callback nil :revert)))
 #+end_src
-**** jj squash/amend
+***** jj squash/amend
 #+begin_src elisp
   (cl-defun jj-squash-down-dwim (rev &optional noconfirm ignore-immutable)
     "Squash changes from REV into its single parent."
@@ -3065,9 +3106,9 @@ expose an ~error~ parameter, not an ~ok~ parameter.
             ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))
         (jj--standard-async-callback nil :revert))))
 #+end_src
-**** jj split
+***** jj split
 Full-interactive split will require an interactive hunk selector. Maybe just use magit for this?
-**** jj git push
+***** jj git push
 #+begin_src elisp
   (defun jj-git-push ()
     "Push to git in the background."
@@ -3076,7 +3117,7 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
       (jj--standard-async-callback "push" :revert)))
 #+end_src
 
-**** jj git fetch
+***** jj git fetch
 #+begin_src elisp
   (defun jj-git-fetch ()
     "Fetch from git in the background."
