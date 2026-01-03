@@ -2969,13 +2969,25 @@ might actually not use these as I need a lexical variable anyway in most cases w
 ***** jj split
 Full-interactive split will require an interactive hunk selector. Maybe just use magit for this?
 *** Async commands
-**** jj git push
+**** async command utils
 #+begin_src elisp
-  (defun jj-git-push ()
-    "Push to git in the background."
-    (interactive)
+  (defun jj--standard-async-callback (name do-revert)
+    "Returns a callback for `jj-cmd-async'. If NAME, print a message saying whether NAME was successful. If DO-REVERT, on success, revert the dash buffer for the relevant jj repo."
+    (lambda (ok dir)
+      (cond (ok
+             (when do-revert
+               (jj-revert-dash-buffer-async dir))
+             (when name
+               (message "%s ok" name)))
+            (t
+             (when name
+               (message "%s failed" name))))))
+
+  (defun jj-cmd-async (name cmd &optional callback)
+    "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
+    (declare (indent 2))
     (let* ((repo-dir default-directory)
-           (buf (get-buffer-create (format "*jj-git-push: %s*" repo-dir))))
+           (buf (get-buffer-create (format "*jj-%s: %s*" name repo-dir))))
       (prog1
           (with-current-buffer buf
             (jj-inspect-mode)
@@ -2983,24 +2995,32 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
             (let ((inhibit-read-only t))
               (erase-accessible-buffer))
             (let* ((buf (current-buffer))
-                   (err (generate-new-buffer "*jj-git-push-stderr*"))
+                   (err (generate-new-buffer (format "*jj-%s-stderr*" name)))
                    (sentinel (make-jj-callback-sentinel
+                              ;; hacky - make something better once there's a standardised output buffer?
                               (lambda (ok)
-                                (if ok
-                                    (progn (jj-revert-dash-buffer-async repo-dir)
-                                           (message "push ok"))
-                                  (message "push failed")))
+                                (funcall callback ok repo-dir))
                               err))
                    (filter (make-sticky-process-filter :sticky)))
               (make-process
-               :name "jj-git-push"
+               :name (format "jj-%s" name)
                :buffer buf
                :stderr err
                :filter filter
                :sentinel sentinel
                :noquery t
-               :command `("jj" "git" "push"
-                          ,@jj-global-default-args)))))))
+               :command `("jj"
+                          ,@jj-global-default-args
+                          ,@cmd)))))))
+#+end_src
+
+**** jj git push
+#+begin_src elisp
+  (defun jj-git-push ()
+    "Push to git in the background."
+    (interactive)
+    (jj-cmd-async "git-push" `("git" "push")
+      (jj--standard-async-callback "push" :revert)))
 #+end_src
 
 **** jj git fetch
@@ -3008,33 +3028,8 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
   (defun jj-git-fetch ()
     "Fetch from git in the background."
     (interactive)
-    (let* ((repo-dir default-directory)
-           (buf (get-buffer-create (format "*jj-git-fetch: %s*" repo-dir))))
-      (prog1
-          (with-current-buffer buf
-            (jj-inspect-mode)
-            (setq-local default-directory repo-dir)
-            (let ((inhibit-read-only t))
-              (erase-accessible-buffer))
-            (let* ((buf (current-buffer))
-                   (err (generate-new-buffer "*jj-git-fetch-stderr*"))
-                   (sentinel (make-jj-callback-sentinel
-                              (lambda (ok)
-                                (if ok
-                                    (progn (jj-revert-dash-buffer-async repo-dir)
-                                           (message "fetch ok"))
-                                  (message "fetch failed")))
-                              err))
-                   (filter (make-sticky-process-filter :sticky)))
-              (make-process
-               :name "jj-git-fetch"
-               :buffer buf
-               :stderr err
-               :filter filter
-               :sentinel sentinel
-               :noquery t
-               :command `("jj" "git" "fetch"
-                          ,@jj-global-default-args)))))))
+    (jj-cmd-async "git-fetch" `("git" "fetch")
+      (jj--standard-async-callback "fetch" :revert)))
 #+end_src
 
 * Provide
@@ -3045,3 +3040,6 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
 #+begin_src elisp :comments no
   ;;; majjik.el ends here
 #+end_src
+* TODO use one buffer for all command output?
+find uses of get-buffer-create, replace with somethign that makes a section and an indirect buffer within a common command-log buffer (local to the repo, not emacs-global)
+then I could do like magit when there's an error, and direct user to look at the common log.

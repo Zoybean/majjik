@@ -2979,14 +2979,26 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                    ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
 ;; jj squash/amend:1 ends here
 
-;; jj git push
+;; async command utils
 
-;; [[file:majjik.org::*jj git push][jj git push:1]]
-(defun jj-git-push ()
-  "Push to git in the background."
-  (interactive)
+;; [[file:majjik.org::*async command utils][async command utils:1]]
+(defun jj--standard-async-callback (name do-revert)
+  "Returns a callback for `jj-cmd-async'. If NAME, print a message saying whether NAME was successful. If DO-REVERT, on success, revert the dash buffer for the relevant jj repo."
+  (lambda (ok dir)
+    (cond (ok
+           (when do-revert
+             (jj-revert-dash-buffer-async dir))
+           (when name
+             (message "%s ok" name)))
+          (t
+           (when name
+             (message "%s failed" name))))))
+
+(defun jj-cmd-async (name cmd &optional callback)
+  "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
+  (declare (indent 2))
   (let* ((repo-dir default-directory)
-         (buf (get-buffer-create (format "*jj-git-push: %s*" repo-dir))))
+         (buf (get-buffer-create (format "*jj-%s: %s*" name repo-dir))))
     (prog1
         (with-current-buffer buf
           (jj-inspect-mode)
@@ -2994,24 +3006,33 @@ Also sets `jj--current-status' in the initial buffer when the status process com
           (let ((inhibit-read-only t))
             (erase-accessible-buffer))
           (let* ((buf (current-buffer))
-                 (err (generate-new-buffer "*jj-git-push-stderr*"))
+                 (err (generate-new-buffer (format "*jj-%s-stderr*" name)))
                  (sentinel (make-jj-callback-sentinel
+                            ;; hacky - make something better once there's a standardised output buffer?
                             (lambda (ok)
-                              (if ok
-                                  (progn (jj-revert-dash-buffer-async repo-dir)
-                                         (message "push ok"))
-                                (message "push failed")))
+                              (funcall callback ok repo-dir))
                             err))
                  (filter (make-sticky-process-filter :sticky)))
             (make-process
-             :name "jj-git-push"
+             :name (format "jj-%s" name)
              :buffer buf
              :stderr err
              :filter filter
              :sentinel sentinel
              :noquery t
-             :command `("jj" "git" "push"
-                        ,@jj-global-default-args)))))))
+             :command `("jj"
+                        ,@jj-global-default-args
+                        ,@cmd)))))))
+;; async command utils:1 ends here
+
+;; jj git push
+
+;; [[file:majjik.org::*jj git push][jj git push:1]]
+(defun jj-git-push ()
+  "Push to git in the background."
+  (interactive)
+  (jj-cmd-async "git-push" `("git" "push")
+    (jj--standard-async-callback "push" :revert)))
 ;; jj git push:1 ends here
 
 ;; jj git fetch
@@ -3020,33 +3041,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun jj-git-fetch ()
   "Fetch from git in the background."
   (interactive)
-  (let* ((repo-dir default-directory)
-         (buf (get-buffer-create (format "*jj-git-fetch: %s*" repo-dir))))
-    (prog1
-        (with-current-buffer buf
-          (jj-inspect-mode)
-          (setq-local default-directory repo-dir)
-          (let ((inhibit-read-only t))
-            (erase-accessible-buffer))
-          (let* ((buf (current-buffer))
-                 (err (generate-new-buffer "*jj-git-fetch-stderr*"))
-                 (sentinel (make-jj-callback-sentinel
-                            (lambda (ok)
-                              (if ok
-                                  (progn (jj-revert-dash-buffer-async repo-dir)
-                                         (message "fetch ok"))
-                                (message "fetch failed")))
-                            err))
-                 (filter (make-sticky-process-filter :sticky)))
-            (make-process
-             :name "jj-git-fetch"
-             :buffer buf
-             :stderr err
-             :filter filter
-             :sentinel sentinel
-             :noquery t
-             :command `("jj" "git" "fetch"
-                        ,@jj-global-default-args)))))))
+  (jj-cmd-async "git-fetch" `("git" "fetch")
+    (jj--standard-async-callback "fetch" :revert)))
 ;; jj git fetch:1 ends here
 
 ;; Provide
