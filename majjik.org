@@ -2930,7 +2930,10 @@ expose an ~error~ parameter, not an ~ok~ parameter.
           ,@(jj--if-arg colocate nil "--colocate")
           "--" ,root-dir)
       (lambda (ok _dir)
-        (jj-dash--async root-dir))))
+        (when ok
+          (jj-dash--async root-dir))
+        (unless ok
+          (message "jj init failed")))))
 #+end_src
 ***** jj bookmark
 ****** new

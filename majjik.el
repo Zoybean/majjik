@@ -2924,7 +2924,10 @@ Also sets `jj--current-status' in the initial buffer when the status process com
         ,@(jj--if-arg colocate nil "--colocate")
         "--" ,root-dir)
     (lambda (ok _dir)
-      (jj-dash--async root-dir))))
+      (when ok
+        (jj-dash--async root-dir))
+      (unless ok
+        (message "jj init failed")))))
 ;; jj git init:1 ends here
 
 ;; new
