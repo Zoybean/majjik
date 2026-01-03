@@ -1704,6 +1704,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   "b f" #'jj-bookmark-forget
   "b t" #'jj-bookmark-track
   "b u" #'jj-bookmark-untrack
+  "b l" #'jj-bookmark-list
   "f t" #'jj-file-track-dwim
   "f u" #'jj-file-untrack-dwim
   "f k" #'jj-file-delete-dwim)
@@ -1935,27 +1936,7 @@ Reverted buffer is the one that was active when this function was called."
 
 
 ;; [[file:majjik.org::*jj-bookmark-list for bookmark conflicts][jj-bookmark-list for bookmark conflicts:1]]
-(defun jj-bookmark-list--revert ()
-  (start-jj-bookmark-list default-directory jj--last-revs jj--last-files))
-
-(defun jj-bookmark-list (repo-dir &optional revset fileset &rest other-args)
-  "Run jj bookmark asynchronously in REPO-DIR, with the given REVSET, FILESET, and TEMPLATE string arguments. Returns the process and opens the corresponding buffer."
-  (interactive (list (read-directory-name "jj repo: ")
-                     (jj-read-revset-sexp)
-                     (jj-read-fileset-sexp)))
-  (let* ((repo-dir (expand-file-name repo-dir))
-         (buf (get-buffer-create (format "*jj-bookmark-list: %s*" repo-dir))))
-    (prog1
-        (with-current-buffer buf
-          (jj-inspect-mode)
-          (setq-local default-directory repo-dir
-                      jj--last-revs revset
-                      jj--last-files fileset
-                      revert-buffer-function #'jj-bookmark-list--revert)
-          (start-jj-bookmark-list revset fileset other-args))
-      (pop-to-buffer buf))))
-
-(defun start-jj-bookmark-list (&optional revset fileset &rest other-args)
+(defun start-jj-bookmark-list (&optional revset &rest other-args)
   "Make a jj bookmark-list in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer."
   (let ((inhibit-read-only t))
     ;; erase while respecting narrowing
@@ -1971,9 +1952,7 @@ Reverted buffer is the one that was active when this function was called."
      :sentinel sentinel
      :noquery t
      :command `("jj" "bookmark" "list"
-                "-T" ,(jj-status-bookmark-conflict-template 'self)
                 ,@(jj--if-arg revset #'identity "-r")
-                ,@(jj--if-arg fileset #'identity "--")
                 ,@other-args
                 ,@jj-global-default-args))))
 ;; jj-bookmark-list for bookmark conflicts:1 ends here
@@ -1993,7 +1972,10 @@ Reverted buffer is the one that was active when this function was called."
           (proc (start-jj-show-status)))
         (with-current-buffer
             (jj-make-section-buffer "bookmark-conflicts" "\n" "\n")
-          (proc (start-jj-bookmark-list nil nil "--conflicted")))
+          (proc (start-jj-bookmark-list
+                 nil
+                 "--conflicted"
+                 "-T" (jj-status-bookmark-conflict-template 'self))))
         (with-current-buffer
             (jj-make-section-buffer "untracked" "\n" "\n")
           (proc (start-jj-file-untracked)))
@@ -2717,6 +2699,17 @@ Also sets `jj--current-status' in the initial buffer when the status process com
       (unless no-revert
         (jj-revert-dash-buffer default-directory)))))
 ;; sync command utils:1 ends here
+
+;; bookmark list
+
+;; [[file:majjik.org::*bookmark list][bookmark list:1]]
+(defun jj-bookmark-list ()
+  (interactive)
+  (message "%s"
+           (s-chomp
+            (jj-cmd-sync `("bookmark" "list")
+                         :no-revert))))
+;; bookmark list:1 ends here
 
 ;; jj undo
 
