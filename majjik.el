@@ -60,6 +60,48 @@
      ,@body))
 ;; error-context:1 ends here
 
+;; let-match
+
+;; [[file:majjik.org::*let-match][let-match:1]]
+(defmacro let-match (spec-list &rest body)
+  "Bind SPEC-LIST to the numbered matching groups, and execute BODY.
+
+SPEC-LIST is of a form similar to let.  For example:
+
+  ((VAR1 GROUP1)
+   (VAR2 GROUP2))
+
+Where each VAR is the local variable, and each GROUP is a numeric literal or variable specifying a matching group in the current global match data."
+  (declare (indent 1))
+  `(let ,(cl-loop for (name num) in spec-list
+                  collect `(,name (match-string ,num)))
+     ,@body))
+
+(defmacro let-match-string (spec-list string &rest body)
+  "Bind SPEC-LIST to the numbered matching groups in STRING, and execute BODY.
+
+SPEC-LIST is of a form similar to let.  For example:
+
+  ((VAR1 GROUP1)
+   (VAR2 GROUP2))
+
+Where each VAR is the local variable, and each GROUP is a numeric literal or variable specifying a matching group in the current global match data."
+  (declare (indent 2))
+  `(let ,(cl-loop for (name num) in spec-list
+                  collect `(,name (match-string ,num ,string)))
+     ,@body))
+;; let-match:1 ends here
+
+;; opt
+
+;; [[file:majjik.org::*opt][opt:1]]
+(defun opt (&optional item)
+  "Helper for splicing optional items into backquoted lists.
+
+Use me with comma-at!"
+  (when item `(,item)))
+;; opt:1 ends here
+
 ;; argument utils
 
 ;; [[file:majjik.org::*argument utils][argument utils:1]]
@@ -116,9 +158,40 @@ If ARG is nil, returns nil. Otherwise returns the list containing FLAG (if provi
                              "--no-args-flag"))))
 ;; argument utils:1 ends here
 
-;; process utils
+;; sync processes
 
-;; [[file:majjik.org::*process utils][process utils:1]]
+;; [[file:majjik.org::*sync processes][sync processes:1]]
+(defun call-cmd (cmd &optional infile destination display noerror)
+  "Call CMD via `call-process', with some changes.
+If DESTINATION is `:string', include the program output in the return value and any error messages, and ignore DISPLAY.
+If NOERROR is nil and the process has a nonzero exit code, signal an error, citing the exit code.
+If NOERROR is non-nil, include the exit code in the return value.
+When returning both a string result and an exit code, they are returned as a cons (CODE . OUTPUT)."
+  (pcase destination
+    (:string
+     (let ((dir default-directory))
+       (with-temp-buffer
+         (-let* ((default-directory dir)
+                 ((prog . args) cmd)
+                 (res (apply #'call-process prog infile t nil args))
+                 (out (buffer-string)))
+           (if noerror
+               (cons res out)
+             (unless (= res 0)
+               (error "process exited with nonzero exit code %d: %s" res out))
+             out)))))
+    (_
+     (-let* (((prog . args) cmd)
+             (res (apply #'call-process prog infile destination display args)))
+       (if noerror
+           res
+         (unless (= res 0)
+           (error "process exited with nonzero exit code %d" res)))))))
+;; sync processes:1 ends here
+
+;; async processes
+
+;; [[file:majjik.org::*async processes][async processes:1]]
 (defun jj--sticky-insert (marker insert-fn sticky-top)
   "Move to MARKER, call INSERT-FN, update the marker, and move point if it's at the marker. If STICKY-TOP and point is at the beginning of the buffer, it will not move even if it is at the marker."
   (let ((moving (and (= (point) marker)
@@ -200,7 +273,7 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
             ;; delete them and send the list to the callback
             (funcall callback news)
             (delete-region (point-min) (point))))))))
-;; process utils:1 ends here
+;; async processes:1 ends here
 
 ;; log utils
 
@@ -1719,7 +1792,7 @@ Reverted buffer is the one that was active when this function was called."
           (setq-local default-directory repo-dir
                       jj--last-revs revset
                       jj--last-files fileset
-                      revert-buffer-function #'jj-show-revert)
+                      revert-buffer-function #'jj-show--revert)
           (start-jj-show-status revset fileset))
       (pop-to-buffer buf))))
 
@@ -1742,51 +1815,6 @@ Reverted buffer is the one that was active when this function was called."
                 "-T" ,(jj-show-status-template 'self)
                 ,@jj-global-default-args))))
 ;; jj-show for status section:1 ends here
-
-;; jj-show for diff section
-
-
-;; [[file:majjik.org::*jj-show for diff section][jj-show for diff section:1]]
-(defun jj-show-status--revert ()
-  (start-jj-show-diff jj--last-revs
-                      jj--last-files))
-
-(defun jj-show-diff (repo-dir &optional revset fileset)
-  "Run jj show asynchronously in REPO-DIR, with the given REVSET, FILESET, and TEMPLATE string arguments. Any OTHER-ARGS must be passed as strings. Returns the process and opens the corresponding buffer."
-  (interactive (list (read-directory-name "jj repo: ")
-                     (jj-read-revset-sexp)
-                     (jj-read-fileset-sexp)))
-  (let* ((repo-dir (expand-file-name repo-dir))
-         (buf (get-buffer-create (format "*jj-show: %s*" repo-dir))))
-    (prog1
-        (with-current-buffer buf
-          (jj-inspect-mode)
-          (setq-local default-directory repo-dir
-                      jj--last-revs revset
-                      jj--last-files fileset
-                      revert-buffer-function #'jj-show-revert)
-          (start-jj-show-diff revset fileset))
-      (pop-to-buffer buf))))
-
-(defun start-jj-show-diff (&optional revset fileset)
-  (let ((inhibit-read-only t))
-    ;; erase while respecting narrowing
-    (delete-region (point-min) (point-max)))
-  (let* ((err (generate-new-buffer "*jj-show-diff-stderr*"))
-         (sentinel (make-jj-simple-sentinel err))
-         (filter (make-sticky-process-filter :sticky)))
-    (make-process
-     :name "jj-status-diff"
-     :buffer (current-buffer)
-     :stderr err
-     :filter filter
-     :sentinel sentinel
-     :noquery t
-     :command `("jj" "show"
-                "--no-patch"
-                "-T" ,(jj-status-diff-template 'self)
-                ,@jj-global-default-args))))
-;; jj-show for diff section:1 ends here
 
 ;; jj-file for untracked files
 
@@ -1852,7 +1880,7 @@ Reverted buffer is the one that was active when this function was called."
           (setq-local default-directory repo-dir
                       jj--last-revs revset
                       jj--last-files fileset
-                      revert-buffer-function #'jj-bookmark-list-revert)
+                      revert-buffer-function #'jj-bookmark-list--revert)
           (start-jj-bookmark-list revset fileset other-args))
       (pop-to-buffer buf))))
 
@@ -2587,6 +2615,14 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   (interactive)
   (jj-cmd-sync `("undo")))
 ;; jj undo:1 ends here
+
+;; jj redo
+
+;; [[file:majjik.org::*jj redo][jj redo:1]]
+(cl-defun jj-redo ()
+  (interactive)
+  (jj-cmd-sync `("redo")))
+;; jj redo:1 ends here
 
 ;; jj new
 

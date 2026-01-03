@@ -63,6 +63,44 @@
     `(with-error-context (lambda (msg) (format ,format-str msg))
        ,@body))
 #+end_src
+*** let-match
+#+begin_src elisp
+  (defmacro let-match (spec-list &rest body)
+    "Bind SPEC-LIST to the numbered matching groups, and execute BODY.
+
+  SPEC-LIST is of a form similar to let.  For example:
+
+    ((VAR1 GROUP1)
+     (VAR2 GROUP2))
+
+  Where each VAR is the local variable, and each GROUP is a numeric literal or variable specifying a matching group in the current global match data."
+    (declare (indent 1))
+    `(let ,(cl-loop for (name num) in spec-list
+                    collect `(,name (match-string ,num)))
+       ,@body))
+
+  (defmacro let-match-string (spec-list string &rest body)
+    "Bind SPEC-LIST to the numbered matching groups in STRING, and execute BODY.
+
+  SPEC-LIST is of a form similar to let.  For example:
+
+    ((VAR1 GROUP1)
+     (VAR2 GROUP2))
+
+  Where each VAR is the local variable, and each GROUP is a numeric literal or variable specifying a matching group in the current global match data."
+    (declare (indent 2))
+    `(let ,(cl-loop for (name num) in spec-list
+                    collect `(,name (match-string ,num ,string)))
+       ,@body))
+#+end_src
+*** opt
+#+begin_src elisp
+  (defun opt (&optional item)
+    "Helper for splicing optional items into backquoted lists.
+
+  Use me with comma-at!"
+    (when item `(,item)))
+#+end_src
 
 ** argument utils
 #+begin_src elisp
@@ -120,6 +158,37 @@
 #+end_src
 
 ** process utils
+
+*** sync processes
+#+begin_src elisp
+  (defun call-cmd (cmd &optional infile destination display noerror)
+    "Call CMD via `call-process', with some changes.
+  If DESTINATION is `:string', include the program output in the return value and any error messages, and ignore DISPLAY.
+  If NOERROR is nil and the process has a nonzero exit code, signal an error, citing the exit code.
+  If NOERROR is non-nil, include the exit code in the return value.
+  When returning both a string result and an exit code, they are returned as a cons (CODE . OUTPUT)."
+    (pcase destination
+      (:string
+       (let ((dir default-directory))
+         (with-temp-buffer
+           (-let* ((default-directory dir)
+                   ((prog . args) cmd)
+                   (res (apply #'call-process prog infile t nil args))
+                   (out (buffer-string)))
+             (if noerror
+                 (cons res out)
+               (unless (= res 0)
+                 (error "process exited with nonzero exit code %d: %s" res out))
+               out)))))
+      (_
+       (-let* (((prog . args) cmd)
+               (res (apply #'call-process prog infile destination display args)))
+         (if noerror
+             res
+           (unless (= res 0)
+             (error "process exited with nonzero exit code %d" res)))))))
+#+end_src
+*** async processes
 #+begin_src elisp
   (defun jj--sticky-insert (marker insert-fn sticky-top)
     "Move to MARKER, call INSERT-FN, update the marker, and move point if it's at the marker. If STICKY-TOP and point is at the beginning of the buffer, it will not move even if it is at the marker."
@@ -1702,7 +1771,7 @@ so far, the only significant differences in parity that I'm aware of, are:
             (setq-local default-directory repo-dir
                         jj--last-revs revset
                         jj--last-files fileset
-                        revert-buffer-function #'jj-show-revert)
+                        revert-buffer-function #'jj-show--revert)
             (start-jj-show-status revset fileset))
         (pop-to-buffer buf))))
 
@@ -1725,7 +1794,7 @@ so far, the only significant differences in parity that I'm aware of, are:
                   "-T" ,(jj-show-status-template 'self)
                   ,@jj-global-default-args))))
 #+end_src
-**** jj-show for diff section
+**** COMMENT jj-show for diff section
 
 #+begin_src elisp
   (defun jj-show-status--revert ()
@@ -1745,7 +1814,7 @@ so far, the only significant differences in parity that I'm aware of, are:
             (setq-local default-directory repo-dir
                         jj--last-revs revset
                         jj--last-files fileset
-                        revert-buffer-function #'jj-show-revert)
+                        revert-buffer-function #'jj-show-status--revert)
             (start-jj-show-diff revset fileset))
         (pop-to-buffer buf))))
 
@@ -1830,7 +1899,7 @@ so far, the only significant differences in parity that I'm aware of, are:
             (setq-local default-directory repo-dir
                         jj--last-revs revset
                         jj--last-files fileset
-                        revert-buffer-function #'jj-bookmark-list-revert)
+                        revert-buffer-function #'jj-bookmark-list--revert)
             (start-jj-bookmark-list revset fileset other-args))
         (pop-to-buffer buf))))
 
@@ -2591,6 +2660,12 @@ need error handling in these. but I do like them being synchronous i think.
   (cl-defun jj-undo ()
     (interactive)
     (jj-cmd-sync `("undo")))
+#+end_src
+**** jj redo
+#+begin_src elisp
+  (cl-defun jj-redo ()
+    (interactive)
+    (jj-cmd-sync `("redo")))
 #+end_src
 **** jj new
 #+begin_src elisp
