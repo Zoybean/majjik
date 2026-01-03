@@ -2564,9 +2564,9 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   "Throw an error unless we're in a jj repo.")
 ;; repo query commands:1 ends here
 
-;; status query utils
+;; revset
 
-;; [[file:majjik.org::*status query utils][status query utils:1]]
+;; [[file:majjik.org::*revset][revset:1]]
 (defun jj-get-revset-dwim (&optional prompt)
   "Get a revision or revset based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
   (pcase (jj-thing-at-point)
@@ -2575,30 +2575,11 @@ Also sets `jj--current-status' in the initial buffer when the status process com
     ((and cmt (pred jj-header-p))
      (jj-header-change-id cmt))
     (unmatched (jj-read-revset prompt))))
+;; revset:1 ends here
 
-(defun jj-get-file-dwim (&optional prompt)
-  "Get a filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
-  (pcase (jj-thing-at-point)
-    ((and file (pred jj-status-file-untracked-p))
-     (jj-status-file-untracked-path file))
-    ((and file (pred jj-status-wc-change-p))
-     (jj-status-wc-change-path-target file))
-    (unmatched (read-file-name prompt))))
+;; single revision
 
-(defun jj-get-untracked-file-dwim (&optional prompt)
-  "Get an untracked filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
-  (pcase (jj-thing-at-point)
-    ((and file (pred jj-status-file-untracked-p))
-     (jj-status-file-untracked-path file))
-    (unmatched (read-file-name prompt))))
-
-(defun jj-get-tracked-file-dwim (&optional prompt)
-  "Get a tracked filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
-  (pcase (jj-thing-at-point)
-    ((and file (pred jj-status-wc-change-p))
-     (jj-status-wc-change-path-target file))
-    (unmatched (read-file-name prompt))))
-
+;; [[file:majjik.org::*single revision][single revision:1]]
 (defun jj-get-revision-dwim (&optional prompt mutable)
   "Get a revision or revset based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT. If MUTABLE, only include mutable commits in the completion options."
   (pcase (jj-thing-at-point)
@@ -2607,7 +2588,11 @@ Also sets `jj--current-status' in the initial buffer when the status process com
     ((and cmt (pred jj-header-p))
      (jj-header-change-id cmt))
     (unmatched (jj-read-revision prompt (when mutable "~immutable()")))))
+;; single revision:1 ends here
 
+;; rev is wc
+
+;; [[file:majjik.org::*rev is wc][rev is wc:1]]
 (defun jj-rev-wc-p (rev)
   "Returns true if REV (a string) is the current working copy commit."
   (let ((stat (jj-status-commit-working-copy jj--current-status)))
@@ -2618,7 +2603,46 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   "Returns true if OBJ is the current working copy commit."
   (and (jj-header-p obj)
        (jj-rev-wc-p (jj-header-change-id obj))))
+;; rev is wc:1 ends here
 
+;; any
+
+;; [[file:majjik.org::*any][any:1]]
+(defun jj-get-file-dwim (&optional prompt)
+  "Get a filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
+  (pcase (jj-thing-at-point)
+    ((and file (pred jj-status-file-untracked-p))
+     (jj-status-file-untracked-path file))
+    ((and file (pred jj-status-wc-change-p))
+     (jj-status-wc-change-path-target file))
+    (unmatched (read-file-name prompt))))
+;; any:1 ends here
+
+;; untracked
+
+;; [[file:majjik.org::*untracked][untracked:1]]
+(defun jj-get-untracked-file-dwim (&optional prompt)
+  "Get an untracked filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
+  (pcase (jj-thing-at-point)
+    ((and file (pred jj-status-file-untracked-p))
+     (jj-status-file-untracked-path file))
+    (unmatched (read-file-name prompt))))
+;; untracked:1 ends here
+
+;; tracked
+
+;; [[file:majjik.org::*tracked][tracked:1]]
+(defun jj-get-tracked-file-dwim (&optional prompt)
+  "Get a tracked filename based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
+  (pcase (jj-thing-at-point)
+    ((and file (pred jj-status-wc-change-p))
+     (jj-status-wc-change-path-target file))
+    (unmatched (read-file-name prompt))))
+;; tracked:1 ends here
+
+;; theseus
+
+;; [[file:majjik.org::*theseus][theseus:1]]
 (cl-defmacro jj-compatible-ident (a b specs &optional equal)
   "Check if objects A and B can be considered equal by some means of producing an identifier. SPECS is a list of (TYPE-P GETTER) where an object matching TYPE-P can be identified by GETTER. Only the first matching type is considered. The objects need not be of the same type, they only need to produce an identifier considered equal according to EQUAL."
   (cl-labels ((get-id (ob)
@@ -2644,7 +2668,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
       (jj-compatible-ident old new
                            ((jj-status-lineage-entry-p jj-status-lineage-entry-change-id))
                            equal)))
-;; status query utils:1 ends here
+;; theseus:1 ends here
 
 ;; thing at point
 
@@ -2674,7 +2698,12 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   (user-error "Not at an inspectable jj object"))
 
 (cl-defmethod jj-inspect-thing ((thing jj-status-file-untracked))
+  "View the file at point."
   (view-file (jj-status-file-untracked-path thing)))
+
+(cl-defmethod jj-inspect-thing ((thing jj-status-wc-change))
+  "View the diff for the file at point."
+  (jj-diff "@" (jj-status-wc-change-path-target thing)))
 ;; thing at point:1 ends here
 
 ;; sync command utils
