@@ -2779,6 +2779,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
          (main-buf (get-buffer-create (format "*jj-diff %s:%s:%s*" repo-dir at fileset))))
     (with-current-buffer main-buf
       (diff-mode)
+      (view-mode)
       (setq-local default-directory repo-dir)
       (let ((inhibit-read-only t))
         (erase-accessible-buffer))
@@ -2800,8 +2801,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                     "--git"
                     ,@(jj--if-arg at #'identity "--revisions")
                     ,@(jj--if-arg from #'identity "--from")
-                    ,@(jj--if-arg to #'identity "--to")
-                    ))))))
+                    ,@(jj--if-arg to #'identity "--to")))))))
 
 (defun jj-diff-at (revset &optional fileset)
   "View the diff for REVISION, optionally limited to files in FILESET."
