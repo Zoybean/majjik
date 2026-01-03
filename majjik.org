@@ -2787,7 +2787,9 @@ might actually not use these as I need a lexical variable anyway in most cases w
                           ,@jj-global-default-args
                           ,@cmd)))))))
 #+end_src
-
+***** TODO this callback interface sucks
+expose an ~error~ parameter, not an ~ok~ parameter.
+(see also, make-jj-callback-sentinel, which would have to change)
 **** jj undo
 #+begin_src elisp
   (cl-defun jj-undo ()
