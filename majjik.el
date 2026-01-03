@@ -495,7 +495,7 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
 
 (ert-deftest jj-test-entitize-newlines ()
   (should (string= "foo\r\nbar"
-          (jj--entitize-newlines "foo\r\nbar"))))
+                   (jj--entitize-newlines "foo\r\nbar"))))
 ;; rendering utils:1 ends here
 
 ;; Fileset
@@ -1852,27 +1852,6 @@ Reverted buffer is the one that was active when this function was called."
 
 
 ;; [[file:majjik.org::*jj-show for status section][jj-show for status section:1]]
-(defun jj-show--revert ()
-  (start-jj-show-status jj--last-revs
-                        jj--last-files))
-
-(defun jj-show-status (repo-dir &optional revset fileset)
-  "Run jj show asynchronously in REPO-DIR, with the given REVSET, FILESET, and TEMPLATE string arguments. Any OTHER-ARGS must be passed as strings. Returns the process and opens the corresponding buffer."
-  (interactive (list (read-directory-name "jj repo: ")
-                     (jj-read-revset-sexp)
-                     (jj-read-fileset-sexp)))
-  (let* ((repo-dir (expand-file-name repo-dir))
-         (buf (get-buffer-create (format "*jj-show: %s*" repo-dir))))
-    (prog1
-        (with-current-buffer buf
-          (jj-inspect-mode)
-          (setq-local default-directory repo-dir
-                      jj--last-revs revset
-                      jj--last-files fileset
-                      revert-buffer-function #'jj-show--revert)
-          (start-jj-show-status revset fileset))
-      (pop-to-buffer buf))))
-
 (defun start-jj-show-status (&optional revset fileset)
   (let ((inhibit-read-only t))
     (erase-accessible-buffer))
@@ -2687,6 +2666,27 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   (jj-diff "@" (jj-status-wc-change-path-target thing)))
 ;; thing at point:1 ends here
 
+;; swap buffers, same dir
+;; might actually not use these as I need a lexical variable anyway in most cases where i'm following this pattern
+
+;; [[file:majjik.org::*swap buffers, same dir][swap buffers, same dir:1]]
+(cl-defmacro with-current-buffer-set-dir (buffer &rest body)
+  "Like `with-current-buffer', but sets the `default-directory' in BUFFER to whatever is current at the call site. Does not let-bind `default-directory' - it is set persistently."
+  (let ((dir-sym (gensym "buffer")))
+    `(let* ((,dir-sym default-directory))
+       (with-current-buffer ,buffer
+         (setq-local default-directory ,dir-sym)
+         ,@body))))
+
+(cl-defmacro with-current-buffer-let-dir (buffer &rest body)
+  "Like `with-current-buffer', but let-binds the `default-directory' in BUFFER for the duration of BODY to whatever is current at the call site."
+  (let ((dir-sym (gensym "buffer")))
+    `(let* ((,dir-sym default-directory))
+       (with-current-buffer ,buffer
+         (let ((default-directory ,dir-sym))
+           ,@body)))))
+;; swap buffers, same dir:1 ends here
+
 ;; sync command utils
 
 ;; [[file:majjik.org::*sync command utils][sync command utils:1]]
@@ -2959,7 +2959,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "squash %s into its parent?" rev)))
     (user-error "cancelled"))
-  (with-editor
+  ;; nope - these are sync, so they can't wait on emacs
+  (with-editor "VISUAL"
     (jj-cmd-sync `("squash"
                    "-r" ,rev
                    ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
@@ -2971,7 +2972,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "squash @ into %s?" rev)))
     (user-error "cancelled"))
-  (with-editor
+  ;; nope - these are sync, so they can't wait on emacs
+  (with-editor "VISUAL"
     (jj-cmd-sync `("squash"
                    "--into" ,rev
                    ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))

@@ -490,7 +490,7 @@
 
   (ert-deftest jj-test-entitize-newlines ()
     (should (string= "foo\r\nbar"
-            (jj--entitize-newlines "foo\r\nbar"))))
+                     (jj--entitize-newlines "foo\r\nbar"))))
 #+end_src
 
 * DSLs
@@ -1832,27 +1832,6 @@ so far, the only significant differences in parity that I'm aware of, are:
 - I can only show ref conflicts for the current commit, not the whole repo. but I can probably just call jj bookmark list -c for that.
 
 #+begin_src elisp
-  (defun jj-show--revert ()
-    (start-jj-show-status jj--last-revs
-                          jj--last-files))
-
-  (defun jj-show-status (repo-dir &optional revset fileset)
-    "Run jj show asynchronously in REPO-DIR, with the given REVSET, FILESET, and TEMPLATE string arguments. Any OTHER-ARGS must be passed as strings. Returns the process and opens the corresponding buffer."
-    (interactive (list (read-directory-name "jj repo: ")
-                       (jj-read-revset-sexp)
-                       (jj-read-fileset-sexp)))
-    (let* ((repo-dir (expand-file-name repo-dir))
-           (buf (get-buffer-create (format "*jj-show: %s*" repo-dir))))
-      (prog1
-          (with-current-buffer buf
-            (jj-inspect-mode)
-            (setq-local default-directory repo-dir
-                        jj--last-revs revset
-                        jj--last-files fileset
-                        revert-buffer-function #'jj-show--revert)
-            (start-jj-show-status revset fileset))
-        (pop-to-buffer buf))))
-
   (defun start-jj-show-status (&optional revset fileset)
     (let ((inhibit-read-only t))
       (erase-accessible-buffer))
@@ -1874,27 +1853,6 @@ so far, the only significant differences in parity that I'm aware of, are:
 **** COMMENT jj-show for diff section
 
 #+begin_src elisp
-  (defun jj-show-status--revert ()
-    (start-jj-show-diff jj--last-revs
-                        jj--last-files))
-
-  (defun jj-show-diff (repo-dir &optional revset fileset)
-    "Run jj show asynchronously in REPO-DIR, with the given REVSET, FILESET, and TEMPLATE string arguments. Any OTHER-ARGS must be passed as strings. Returns the process and opens the corresponding buffer."
-    (interactive (list (read-directory-name "jj repo: ")
-                       (jj-read-revset-sexp)
-                       (jj-read-fileset-sexp)))
-    (let* ((repo-dir (expand-file-name repo-dir))
-           (buf (get-buffer-create (format "*jj-show: %s*" repo-dir))))
-      (prog1
-          (with-current-buffer buf
-            (jj-inspect-mode)
-            (setq-local default-directory repo-dir
-                        jj--last-revs revset
-                        jj--last-files fileset
-                        revert-buffer-function #'jj-show-status--revert)
-            (start-jj-show-diff revset fileset))
-        (pop-to-buffer buf))))
-
   (defun start-jj-show-diff (&optional revset fileset)
     (let ((inhibit-read-only t))
       (erase-accessible-buffer))
@@ -2729,6 +2687,25 @@ need error handling in these. but I do like them being synchronous i think.
     "View the diff for the file at point."
     (jj-diff "@" (jj-status-wc-change-path-target thing)))
 #+end_src
+**** swap buffers, same dir
+might actually not use these as I need a lexical variable anyway in most cases where i'm following this pattern
+#+begin_src elisp
+  (cl-defmacro with-current-buffer-set-dir (buffer &rest body)
+    "Like `with-current-buffer', but sets the `default-directory' in BUFFER to whatever is current at the call site. Does not let-bind `default-directory' - it is set persistently."
+    (let ((dir-sym (gensym "buffer")))
+      `(let* ((,dir-sym default-directory))
+         (with-current-buffer ,buffer
+           (setq-local default-directory ,dir-sym)
+           ,@body))))
+
+  (cl-defmacro with-current-buffer-let-dir (buffer &rest body)
+    "Like `with-current-buffer', but let-binds the `default-directory' in BUFFER for the duration of BODY to whatever is current at the call site."
+    (let ((dir-sym (gensym "buffer")))
+      `(let* ((,dir-sym default-directory))
+         (with-current-buffer ,buffer
+           (let ((default-directory ,dir-sym))
+             ,@body)))))
+#+end_src
 *** Sync commands
 **** sync command utils
 #+begin_src elisp
@@ -2970,7 +2947,8 @@ need error handling in these. but I do like them being synchronous i think.
                        current-prefix-arg))
     (unless (or noconfirm (yes-or-no-p (format "squash %s into its parent?" rev)))
       (user-error "cancelled"))
-    (with-editor
+    ;; nope - these are sync, so they can't wait on emacs
+    (with-editor "VISUAL"
       (jj-cmd-sync `("squash"
                      "-r" ,rev
                      ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
@@ -2982,7 +2960,8 @@ need error handling in these. but I do like them being synchronous i think.
                        current-prefix-arg))
     (unless (or noconfirm (yes-or-no-p (format "squash @ into %s?" rev)))
       (user-error "cancelled"))
-    (with-editor
+    ;; nope - these are sync, so they can't wait on emacs
+    (with-editor "VISUAL"
       (jj-cmd-sync `("squash"
                      "--into" ,rev
                      ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
