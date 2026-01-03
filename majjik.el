@@ -67,13 +67,20 @@
   "Bind SPEC-LIST to the numbered matching groups, and execute BODY.
 
 SPEC-LIST is of a form similar to let.  For example:
-
   ((VAR1 GROUP1)
-   (VAR2 GROUP2))
+   (VAR2)
+   VAR3
+   (VAR4 GROUP4))
 
-Where each VAR is the local variable, and each GROUP is a numeric literal or variable specifying a matching group in the current global match data."
+Where each VAR is the local variable, and each GROUP is a numeric literal or variable specifying a matching group in the current match data. If any GROUP is nil or unspecified, count up from the last number, or from 1."
   (declare (indent 1))
-  `(let ,(cl-loop for (name num) in spec-list
+  `(let ,(cl-loop for last-num = 0 then num
+                  for spec in spec-list
+                  for (name num) = (pcase spec
+                                     (`(,name ,num)
+                                      spec)
+                                     ((or `(,name) name)
+                                      `(,name ,(1+ last-num))))
                   collect `(,name (match-string ,num)))
      ,@body))
 
@@ -81,15 +88,78 @@ Where each VAR is the local variable, and each GROUP is a numeric literal or var
   "Bind SPEC-LIST to the numbered matching groups in STRING, and execute BODY.
 
 SPEC-LIST is of a form similar to let.  For example:
-
   ((VAR1 GROUP1)
-   (VAR2 GROUP2))
+   (VAR2)
+   VAR3
+   (VAR4 GROUP4))
 
-Where each VAR is the local variable, and each GROUP is a numeric literal or variable specifying a matching group in the current global match data."
+Where each VAR is the local variable, and each GROUP is a numeric literal or variable specifying a matching group in the current match data. If any GROUP is nil or unspecified, count up from the last number, or from 1."
   (declare (indent 2))
-  `(let ,(cl-loop for (name num) in spec-list
+  `(let ,(cl-loop for last-num = 0 then num
+                  for spec in spec-list
+                  for (name num) = (pcase spec
+                                     (`(,name ,num)
+                                      `(,name ,(or num (1+ last-num))))
+                                     ((or `(,name) name)
+                                      `(,name ,(1+ last-num))))
                   collect `(,name (match-string ,num ,string)))
      ,@body))
+
+(ert-deftest jj-test-let-match-string ()
+  (should (string-match (rx (group "f" anychar anychar)
+                    " "
+                    (group (+ (not (any " "))))
+                    " "
+                    (group "baz"))
+                        "foo bar baz"))
+  (let-match-string ((foo 1)
+                     (bar 2)
+                     (baz 3))
+      "foo bar baz"
+    (should (equal (list foo bar baz)
+                   (list "foo" "bar" "baz")))))
+
+(ert-deftest jj-test-let-match-string-elided ()
+  (should (string-match (rx (group "f" anychar anychar)
+                    " "
+                    (group (+ (not (any " "))))
+                    " "
+                    (group "baz"))
+                        "foo bar baz"))
+  (let-match-string ((foo)
+                     (bar)
+                     (baz))
+      "foo bar baz"
+    (should (equal (list foo bar baz)
+                   (list "foo" "bar" "baz")))))
+
+(ert-deftest jj-test-let-match-string-flat ()
+  (should (string-match (rx (group "f" anychar anychar)
+                    " "
+                    (group (+ (not (any " "))))
+                    " "
+                    (group "baz"))
+                        "foo bar baz"))
+  (let-match-string (foo
+                     bar
+                     baz)
+      "foo bar baz"
+    (should (equal (list foo bar baz)
+                   (list "foo" "bar" "baz")))))
+
+(ert-deftest jj-test-let-match-string-disordered ()
+  (should (string-match (rx (group "f" anychar anychar)
+                    " "
+                    (group (+ (not (any " "))))
+                    " "
+                    (group "baz"))
+                        "foo bar baz"))
+  (let-match-string ((bar 2)
+                     baz ;; same as (baz 3)
+                     (foo 1))
+      "foo bar baz"
+    (should (equal (list foo bar baz)
+                   (list "foo" "bar" "baz")))))
 ;; let-match:1 ends here
 
 ;; opt
@@ -2455,8 +2525,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                                          (group (+ (not (any "\r\n @"))))
                                          string-end)
                                      line)
-                   (let-match-string ((name 1)
-                                      (remote 2))
+                   (let-match-string ((name)
+                                      (remote))
                        line
                      (unless (and not-git (string= remote "git"))
                        (list (list name remote)))))))
