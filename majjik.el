@@ -1705,6 +1705,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   "b t" #'jj-bookmark-track
   "b u" #'jj-bookmark-untrack
   "b l" #'jj-bookmark-list
+  "b b" #'jj-new-on-bookmark
   "f t" #'jj-file-track-dwim
   "f u" #'jj-file-untrack-dwim
   "f k" #'jj-file-delete-dwim)
@@ -2746,6 +2747,11 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   "Create a new commit after the chosen PARENTS-REVSET, with no children."
   (interactive (list (jj-get-revset-dwim "parent revs: ")))
   (jj-new :rev parents-revset :message message :no-edit no-edit))
+
+(cl-defun jj-new-on-bookmark (bookmark-name &key message no-edit)
+  "Create a new commit after the chosen BOOKMARK-NAME, with no children."
+  (interactive (list (completing-read "New on bookmark: " (jj-list-bookmarks))))
+  (jj-new :rev bookmark-name :message message :no-edit no-edit))
 
 (cl-defun jj-new-before-dwim (children-revset &key message no-edit)
   "Insert a new commit before the chosen CHILDREN-REVSET, and after its parents."
