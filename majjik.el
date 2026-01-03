@@ -2686,7 +2686,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; [[file:majjik.org::*move][move:1]]
 (defun jj-bookmark-move-dwim (bookmark to-rev &optional allow-backwards)
   "Move BOOKMARK to point to revision TO-REV. If used with a prefix arg, allow the bookmark to move backwards or sideways."
-  (interactive (list (completing-read "Move bookmark: " (jj-list-bookmarks))
+  (interactive (list (completing-read "Move bookmark: " (jj-list-local-bookmarks))
                      (jj-get-revision-dwim "move to: ")
                      current-prefix-arg))
   (jj-cmd-sync `("bookmark" "move" ,bookmark
@@ -2853,9 +2853,10 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                  (err (generate-new-buffer "*jj-git-push-stderr*"))
                  (sentinel (make-jj-callback-sentinel
                             (lambda (ok)
-                              (when ok
-                                (jj-revert-dash-buffer-async repo-dir)
-                                (message "push ok")))
+                              (if ok
+                                  (progn (jj-revert-dash-buffer-async repo-dir)
+                                         (message "push ok"))
+                                (message "push failed")))
                             err))
                  (filter (make-sticky-process-filter :sticky)))
             (make-process
@@ -2888,9 +2889,10 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                  (err (generate-new-buffer "*jj-git-fetch-stderr*"))
                  (sentinel (make-jj-callback-sentinel
                             (lambda (ok)
-                              (when ok
-                                (jj-revert-dash-buffer-async repo-dir)
-                                (message "fetch ok")))
+                              (if ok
+                                  (progn (jj-revert-dash-buffer-async repo-dir)
+                                         (message "fetch ok"))
+                                (message "fetch failed")))
                             err))
                  (filter (make-sticky-process-filter :sticky)))
             (make-process
