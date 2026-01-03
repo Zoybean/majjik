@@ -476,6 +476,10 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
 ;; rendering utils
 
 ;; [[file:majjik.org::*rendering utils][rendering utils:1]]
+(defun erase-accessible-buffer ()
+  ;; erase while respecting narrowing
+  (delete-region (point-min) (point-max)))
+
 (defun jj--entitize-newlines (string)
   "Propertize all newlines in STRING with the corresponding escape glyph, with the `escape-glyph' face."
   (let* ((replacements `(("\n" . "^J")
@@ -1871,8 +1875,7 @@ Reverted buffer is the one that was active when this function was called."
 
 (defun start-jj-show-status (&optional revset fileset)
   (let ((inhibit-read-only t))
-    ;; erase while respecting narrowing
-    (delete-region (point-min) (point-max)))
+    (erase-accessible-buffer))
   (let* ((err (generate-new-buffer "*jj-show-status-stderr*"))
          (sentinel (make-jj-simple-sentinel err))
          (filter (make-sticky-process-filter :sticky)))
@@ -1916,8 +1919,7 @@ Reverted buffer is the one that was active when this function was called."
 (defun start-jj-file-untracked ()
   "Make a jj file-untracked in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer."
   (let ((inhibit-read-only t))
-    ;; erase while respecting narrowing
-    (delete-region (point-min) (point-max)))
+    (erase-accessible-buffer))
   (let* ((err (generate-new-buffer "*jj-file-untracked-stderr*"))
          (sentinel (make-jj-simple-sentinel err))
          (filter (make-sticky-process-filter :sticky)))
@@ -1940,8 +1942,7 @@ Reverted buffer is the one that was active when this function was called."
 (defun start-jj-bookmark-list (&optional revset &rest other-args)
   "Make a jj bookmark-list in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer."
   (let ((inhibit-read-only t))
-    ;; erase while respecting narrowing
-    (delete-region (point-min) (point-max)))
+    (erase-accessible-buffer))
   (let* ((err (generate-new-buffer "*jj-bookmark-list-stderr*"))
          (sentinel (make-jj-simple-sentinel err))
          (filter (make-sticky-process-filter :sticky)))
@@ -2264,8 +2265,7 @@ Untracked files:
 
 Also sets `jj--current-status' in the initial buffer when the status process completes."
   (let ((inhibit-read-only t))
-    ;; erase while respecting narrowing
-    (delete-region (point-min) (point-max)))
+    (erase-accessible-buffer))
   (let ((buf (current-buffer))
         (running ())
         (fails ()))
@@ -2326,8 +2326,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun start-jj-dash-blocking ()
   "Start the jj dashboard, and block until the status section and the first part of the log are completed"
   (let ((inhibit-read-only t))
-    ;; erase while respecting narrowing
-    (delete-region (point-min) (point-max)))
+    (erase-accessible-buffer))
   (mapc #'kill-buffer jj--indirect-buffers)
   (setq jj--indirect-buffers nil)
   (cl-labels ((ind-buf (buffer)
@@ -2382,8 +2381,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun start-jj-log (&optional revset fileset)
   "Make a jj log in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer. Ignores `jj--last-revs' and `jj--last-files'."
   (let ((inhibit-read-only t))
-    ;; erase while respecting narrowing
-    (delete-region (point-min) (point-max)))
+    (erase-accessible-buffer))
   (let* ((buf (current-buffer))
          (temp (generate-new-buffer "*jj-log-temp*"))
          (err (generate-new-buffer "*jj-log-stderr*"))
@@ -2992,8 +2990,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
           (jj-inspect-mode)
           (setq-local default-directory repo-dir)
           (let ((inhibit-read-only t))
-            ;; erase while respecting narrowing
-            (delete-region (point-min) (point-max)))
+            (erase-accessible-buffer))
           (let* ((buf (current-buffer))
                  (err (generate-new-buffer "*jj-git-push-stderr*"))
                  (sentinel (make-jj-callback-sentinel
@@ -3028,8 +3025,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
           (jj-inspect-mode)
           (setq-local default-directory repo-dir)
           (let ((inhibit-read-only t))
-            ;; erase while respecting narrowing
-            (delete-region (point-min) (point-max)))
+            (erase-accessible-buffer))
           (let* ((buf (current-buffer))
                  (err (generate-new-buffer "*jj-git-fetch-stderr*"))
                  (sentinel (make-jj-callback-sentinel
