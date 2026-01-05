@@ -2677,6 +2677,14 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (cl-defmethod jj-inspect-thing ((thing jj-status-wc-change))
   "View the diff for the file at point."
   (jj-diff-at "@" (jj-files-as-fileset (jj-status-wc-change-path-target thing))))
+
+(cl-defmethod jj-inspect-thing ((thing jj-status-lineage-entry))
+  "Show the change at point."
+  (jj-show (jj-status-lineage-entry-commit-id thing)))
+
+(cl-defmethod jj-inspect-thing ((thing jj-log-header))
+  "Show the change at point."
+  (jj-show (jj-log-header-commit-id thing)))
 ;; thing at point:1 ends here
 
 ;; swap buffers, same dir
@@ -2801,7 +2809,9 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                     "--git"
                     ,@(jj--if-arg at #'identity "--revisions")
                     ,@(jj--if-arg from #'identity "--from")
-                    ,@(jj--if-arg to #'identity "--to")))))))
+                    ,@(jj--if-arg to #'identity "--to")
+                    "--"
+                    ,@(jj--if-arg fileset #'identity nil)))))))
 
 (defun jj-diff-at (revset &optional fileset)
   "View the diff for REVISION, optionally limited to files in FILESET."
@@ -2811,6 +2821,55 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   "View the diff between FROM and TO, optionally limited to files in FILESET."
   (jj-diff :from from :to to :fileset fileset))
 ;; jj diff:1 ends here
+
+;; jj show
+
+;; [[file:majjik.org::*jj show][jj show:1]]
+(cl-defun jj-show (commit &optional fileset)
+  "View COMMIT, optionally limited to files in FILESET."
+  (let* ((repo-dir default-directory)
+         (main-buf (get-buffer-create (format "*jj-show %s:%s:%s*" repo-dir commit fileset))))
+    (with-current-buffer main-buf
+      (diff-mode)
+      (view-mode)
+      (setq-local default-directory repo-dir)
+      (let ((inhibit-read-only t))
+        (erase-accessible-buffer))
+      (let* ((err (generate-new-buffer "*jj-show-stderr*"))
+             (sentinel (make-jj-callback-sentinel
+                        (lambda (ok)
+                          (when ok (pop-to-buffer main-buf)))
+                        err))
+             (filter (make-sticky-process-filter :sticky)))
+        ;; (with-section "show"
+        (make-process
+         :name "jj-show"
+         :buffer (current-buffer)
+         :stderr err
+         :filter filter
+         :sentinel sentinel
+         :noquery t
+         :command `("jj" ,@jj-global-default-args
+                    "show"
+                    "--git"
+                    "-r" ,commit
+                    "--"
+                    ,@(jj--if-arg fileset #'identity nil)))
+        ;; )
+        ;; (with-section "diff"
+        ;;               (make-process
+        ;;                :name "jj-diff"
+        ;;                :buffer (current-buffer)
+        ;;                :stderr err
+        ;;                :filter filter
+        ;;                :sentinel sentinel
+        ;;                :noquery t
+        ;;                :command `("jj" ,@jj-global-default-args
+        ;;                           "diff"
+        ;;                           "--git"
+        ;;                           ,@(jj--if-arg at #'identity "--revisions"))))
+        ))))
+;; jj show:1 ends here
 
 ;; jj undo
 
