@@ -2837,7 +2837,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
            (main-buf (get-buffer-create (format "*jj-diff %s:%s:%s*" repo-dir at fileset))))
       (with-current-buffer main-buf
         (diff-mode)
-        (view-mode)
+        (view-mode-enter nil #'kill-buffer)
         (setq-local default-directory repo-dir)
         (let ((inhibit-read-only t))
           (erase-accessible-buffer))
@@ -2879,7 +2879,7 @@ expose an ~error~ parameter, not an ~ok~ parameter.
            (main-buf (get-buffer-create (format "*jj-show %s:%s:%s*" repo-dir commit fileset))))
       (with-current-buffer main-buf
         (diff-mode)
-        (view-mode)
+        (view-mode-enter nil #'kill-buffer)
         (setq-local default-directory repo-dir)
         (let ((inhibit-read-only t))
           (erase-accessible-buffer))

@@ -2818,7 +2818,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
          (main-buf (get-buffer-create (format "*jj-diff %s:%s:%s*" repo-dir at fileset))))
     (with-current-buffer main-buf
       (diff-mode)
-      (view-mode)
+      (view-mode-enter nil #'kill-buffer)
       (setq-local default-directory repo-dir)
       (let ((inhibit-read-only t))
         (erase-accessible-buffer))
@@ -2862,7 +2862,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
          (main-buf (get-buffer-create (format "*jj-show %s:%s:%s*" repo-dir commit fileset))))
     (with-current-buffer main-buf
       (diff-mode)
-      (view-mode)
+      (view-mode-enter nil #'kill-buffer)
       (setq-local default-directory repo-dir)
       (let ((inhibit-read-only t))
         (erase-accessible-buffer))
