@@ -1720,6 +1720,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   "P" #'jj-git-push
   "b n" #'jj-bookmark-new-dwim
   "b m" #'jj-bookmark-move-dwim
+  "b !" #'jj-bookmark-set-dwim
   "b r" #'jj-bookmark-rename
   "b d" #'jj-bookmark-delete
   "b f" #'jj-bookmark-forget
@@ -3074,6 +3075,23 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
         ,@(jj--if-arg allow-backwards nil "--allow-backwards"))
     nil :silent-ok))
 ;; move:1 ends here
+
+;; set
+
+;; [[file:majjik.org::*set][set:1]]
+(defun jj-bookmark-set-dwim (bookmark rev &optional allow-backwards)
+  "Create or move BOOKMARK to point to revision REV. If used with a prefix arg, allow the bookmark to move backwards or sideways.
+
+Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `jj-bookmark-new-dwim'."
+  (interactive (list (completing-read "Set bookmark: " (jj-list-local-bookmarks))
+                     (jj-get-revision-dwim "Set to: ")
+                     current-prefix-arg))
+  (jj-cmd-async "bookmark-set"
+      `("bookmark" "set" ,bookmark
+        "-r" ,rev
+        ,@(jj--if-arg allow-backwards nil "--allow-backwards"))
+    nil :silent-ok))
+;; set:1 ends here
 
 ;; rename
 
