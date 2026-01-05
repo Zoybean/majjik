@@ -1834,6 +1834,22 @@ Reverted buffer is the one that was active when this function was called."
        (lambda ()
          (pop-to-buffer main-buf))))))
 
+(defun jj-ensure-repo (dir)
+  (let ((repo-root ((condition-case e (jj-workspace-root dir)
+                      (jj-repo-missing (when (yes-or-no-p "Not within a jj repo: initialize here?")
+                                         (jj-git--init-sync dir :colocate)
+                                         dir)))))
+    (unless (string= (expand-file-name dir)
+                     (expand-file-name repo-root))
+      (pcase (read-answer (format "%s is not the root of a jj repo. Continue anyway? " dir)
+                          '(("yes" ?y "continue")
+                            ("no" ?n "cancel")
+                            ("init" ?i "initialise a repo here")))
+        ("yes" t)
+        ("no" (user-error "Cancelled"))
+        ("init" (jj-git--init-sync dir :colocate))
+        )))))
+
 ;;;###autoload
 (defun jj-project-dash ()
   "Run `jj-dash' in the current project's root."
@@ -2779,6 +2795,8 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
                                 (funcall callback ok repo-dir)))
                             err))
                  (filter (make-sticky-process-filter :sticky)))
+            ;; TODO add a process list to the dash buffer modeline
+            ;; pushing it here to a common list would be most of the way
             (make-process
              :name (format "jj-%s" name)
              :buffer buf
@@ -3000,6 +3018,15 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
         (jj-dash--async root-dir))
       (unless ok
         (message "jj init failed")))))
+
+(defun jj-git--init-sync (root-dir colocate)
+  (interactive (list (expand-file-name (read-directory-name "repository root: "))
+                     (yes-or-no-p "colocated repository?")))
+  (jj-cmd-sync
+      `("git" "init"
+        ,@(jj--if-arg colocate nil "--colocate")
+        "--" ,root-dir)
+      :no-revert))
 ;; jj git init:1 ends here
 
 ;; new
