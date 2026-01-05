@@ -475,6 +475,18 @@
     ;; erase while respecting narrowing
     (delete-region (point-min) (point-max)))
 
+  (defun replace-buffer-contents-and-properties (source &optional max-secs max-costs)
+    (let ((buf (current-buffer)))
+      (replace-buffer-contents source max-secs max-costs)
+      (with-current-buffer source
+        (cl-loop for start = (point-min) then pos
+                 for pos = (next-property-change start)
+                 for end = (or pos
+                               (point-max))
+                 for props = (text-properties-at start)
+                 do (set-text-properties start end props buf)
+                 while pos))))
+
   (defun jj--entitize-newlines (string)
     "Propertize all newlines in STRING with the corresponding escape glyph, with the `escape-glyph' face."
     (let* ((replacements `(("\n" . "^J")
@@ -532,6 +544,13 @@
                      (format "%s:%s"
                              (substring (symbol-name flag) 1)
                              (jj--quote-argument arg)))
+                    ;; identity operators
+                    (`(,(or 'or
+                            'and)
+                       ,form)
+                     ;; trick to only nest in quotes if an outer form requires it
+                     ;; outermost caller will unwrap any toplevel list
+                     (render form))
                     ;; operators: or, none (empty sum)
                     ((or `(or)
                          `(none))
@@ -1721,19 +1740,6 @@
 
   (defvar-local jj--indirect-buffers nil
     "Indirect buffers into the current buffer. Ought to be killed if we're reverting.")
-
-  (defun replace-buffer-contents-and-properties (source &optional max-secs max-costs)
-    (let ((buf (current-buffer)))
-      (replace-buffer-contents source max-secs max-costs)
-      (with-current-buffer source
-        (cl-loop for start = (point-min) then pos
-                 for pos = (next-property-change start)
-                 for end = (or pos
-                               (point-max))
-                 for props = (text-properties-at start)
-                 do (set-text-properties start end props buf)
-                 while pos))))
-
   (defun jj-dash--revert-async (&optional and-then)
     "Asynchronously get the new status, and reverts the buffer contents when those processes complete.
   Reverted buffer is the one that was active when this function was called."
@@ -1796,6 +1802,7 @@
         (start-jj-dash-blocking))
       (pop-to-buffer main-buf)))
 
+  ;;;###autoload
   (defun jj-dash--async (repo-dir)
     "Show the status of the current jj repository in a buffer. Async - pops to the new buffer once the status is ready."
     (interactive (list (jj-workspace-root default-directory)))
@@ -1808,6 +1815,23 @@
          (lambda ()
            (pop-to-buffer main-buf))))))
 
+  (defun jj-ensure-repo (dir)
+    (let ((repo-root ((condition-case e (jj-workspace-root dir)
+                        (jj-repo-missing (when (yes-or-no-p "Not within a jj repo: initialize here?")
+                                           (jj-git--init-sync dir :colocate)
+                                           dir)))))
+      (unless (string= (expand-file-name dir)
+                       (expand-file-name repo-root))
+        (pcase (read-answer (format "%s is not the root of a jj repo. Continue anyway? " dir)
+                            '(("yes" ?y "continue")
+                              ("no" ?n "cancel")
+                              ("init" ?i "initialise a repo here")))
+          ("yes" t)
+          ("no" (user-error "Cancelled"))
+          ("init" (jj-git--init-sync dir :colocate))
+          )))))
+
+  ;;;###autoload
   (defun jj-project-dash ()
     "Run `jj-dash' in the current project's root."
     (interactive)
@@ -2559,14 +2583,21 @@ need error handling in these. but I do like them being synchronous i think.
 
   (defun jj-workspace-root (&optional dir)
     "Return the root of the jj repository containing DIR, or `default-directory' if not provided."
-    (let ((default-directory dir))
-      (string-trim (jj-cmd-sync `("workspace" "root") :no-revert)
-                   nil
-                   ;; only trim a single trailing newline
-                   "\n")))
+    (let ((default-directory (or dir default-directory)))
+      (-let (((code . message) (jj-cmd-sync `("workspace" "root") :no-revert :no-error)))
+        (pcase code
+          (0 (string-trim message
+                          nil
+                          ;; only trim a single trailing newline
+                          "\n"))
+          ;; this command uses code 1 to signal a missing repo. maybe all commands?
+          (1 (signal 'jj-repo-missing (list default-directory)))
+          (_ (error "process exited with nonzero exit code %d" res))))))
 
   (defalias 'assert-jj 'jj-workspace-root
     "Throw an error unless we're in a jj repo.")
+
+  (define-error 'jj-repo-missing "Directory is not within a jj repository")
 #+end_src
 **** status query utils
 ***** revset
@@ -2730,11 +2761,12 @@ might actually not use these as I need a lexical variable anyway in most cases w
 *** Sync commands
 **** sync command utils
 #+begin_src elisp
-  (defun jj-cmd-sync (cmd &optional no-revert)
-    "Call jj with the given CMD, passing the default args first, and returning the output as a string. Signals an error if the command returns a nonzero exit code. When the command completes successfully, reverts the dash buffer for the repo (if there is one)."
+  (defun jj-cmd-sync (cmd &optional no-revert no-error)
+    "Call jj with the given CMD, passing the default args first, and returning the output as a string. Signals an error if the command returns a nonzero exit code. When the command completes successfully, reverts the dash buffer for the repo (if there is one, and NO-REVERT was nil).
+  When NO-ERROR, return the error code instead of raising an error. See `call-cmd' for details."
     (let ((cmd `("jj" ,@jj-global-default-args ,@cmd)))
       (prog1
-          (call-cmd cmd nil :string)
+          (call-cmd cmd nil :string nil no-error)
         (unless no-revert
           (jj-revert-dash-buffer default-directory)))))
 #+end_src
@@ -2992,6 +3024,14 @@ expose an ~error~ parameter, not an ~ok~ parameter.
           (jj-dash--async root-dir))
         (unless ok
           (message "jj init failed")))))
+  
+  (defun jj-git--init-sync (root-dir colocate)
+    (interactive (list (expand-file-name (read-directory-name "repository root: "))
+                       (yes-or-no-p "colocated repository?")))
+    (jj-cmd-sync "init"
+        `("git" "init"
+          ,@(jj--if-arg colocate nil "--colocate")
+          "--" ,root-dir)))
 #+end_src
 ***** jj bookmark
 ****** new

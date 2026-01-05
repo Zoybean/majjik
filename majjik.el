@@ -480,6 +480,18 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
   ;; erase while respecting narrowing
   (delete-region (point-min) (point-max)))
 
+(defun replace-buffer-contents-and-properties (source &optional max-secs max-costs)
+  (let ((buf (current-buffer)))
+    (replace-buffer-contents source max-secs max-costs)
+    (with-current-buffer source
+      (cl-loop for start = (point-min) then pos
+               for pos = (next-property-change start)
+               for end = (or pos
+                             (point-max))
+               for props = (text-properties-at start)
+               do (set-text-properties start end props buf)
+               while pos))))
+
 (defun jj--entitize-newlines (string)
   "Propertize all newlines in STRING with the corresponding escape glyph, with the `escape-glyph' face."
   (let* ((replacements `(("\n" . "^J")
@@ -537,6 +549,13 @@ See URL `https://docs.jj-vcs.dev/latest/filesets/' for more info."
                    (format "%s:%s"
                            (substring (symbol-name flag) 1)
                            (jj--quote-argument arg)))
+                  ;; identity operators
+                  (`(,(or 'or
+                          'and)
+                     ,form)
+                   ;; trick to only nest in quotes if an outer form requires it
+                   ;; outermost caller will unwrap any toplevel list
+                   (render form))
                   ;; operators: or, none (empty sum)
                   ((or `(or)
                        `(none))
@@ -1740,19 +1759,6 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 
 (defvar-local jj--indirect-buffers nil
   "Indirect buffers into the current buffer. Ought to be killed if we're reverting.")
-
-(defun replace-buffer-contents-and-properties (source &optional max-secs max-costs)
-  (let ((buf (current-buffer)))
-    (replace-buffer-contents source max-secs max-costs)
-    (with-current-buffer source
-      (cl-loop for start = (point-min) then pos
-               for pos = (next-property-change start)
-               for end = (or pos
-                             (point-max))
-               for props = (text-properties-at start)
-               do (set-text-properties start end props buf)
-               while pos))))
-
 (defun jj-dash--revert-async (&optional and-then)
   "Asynchronously get the new status, and reverts the buffer contents when those processes complete.
 Reverted buffer is the one that was active when this function was called."
@@ -1818,6 +1824,8 @@ Reverted buffer is the one that was active when this function was called."
 (defun jj-dash--async (repo-dir)
   "Show the status of the current jj repository in a buffer. Async - pops to the new buffer once the status is ready."
   (interactive (list (jj-workspace-root default-directory)))
+  ;; if this is called with a path that is not a repo root, signal an error
+  (should (string= repo-dir (jj-workspace-root repo-dir)))
   (let ((main-buf (get-buffer-create (jj-dash-buffer repo-dir))))
     (with-current-buffer main-buf
       (jj-dashboard-mode)
