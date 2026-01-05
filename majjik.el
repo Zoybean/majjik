@@ -1814,6 +1814,7 @@ Reverted buffer is the one that was active when this function was called."
       (start-jj-dash-blocking))
     (pop-to-buffer main-buf)))
 
+;;;###autoload
 (defun jj-dash--async (repo-dir)
   "Show the status of the current jj repository in a buffer. Async - pops to the new buffer once the status is ready."
   (interactive (list (jj-workspace-root default-directory)))
@@ -1826,6 +1827,7 @@ Reverted buffer is the one that was active when this function was called."
        (lambda ()
          (pop-to-buffer main-buf))))))
 
+;;;###autoload
 (defun jj-project-dash ()
   "Run `jj-dash' in the current project's root."
   (interactive)
