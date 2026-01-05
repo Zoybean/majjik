@@ -2763,50 +2763,54 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 ;; async command utils
 
 ;; [[file:majjik.org::*async command utils][async command utils:1]]
-(defun jj--standard-async-callback (name do-revert)
+(defun jj--standard-async-callback (name &optional no-revert silent-ok)
   "Returns a callback for `jj-cmd-async'. If NAME, print a message saying whether NAME was successful. If DO-REVERT, on success, revert the dash buffer for the relevant jj repo."
   (lambda (ok dir)
     (cond (ok
-           (when do-revert
+           (unless no-revert
              (jj-revert-dash-buffer-async dir))
-           (when name
+           (unless silent-ok
              (message "%s ok" name)))
           (t
-           (when name
-             (message "%s failed" name))))))
+           (message "%s failed" name)))))
 
-(defun jj-cmd-async (name cmd &optional callback)
+(defun jj-cmd-async (name cmd &optional no-revert silent-ok)
+  "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
+  (declare (indent 2))
+  (jj-cmd--async name cmd
+    (jj--standard-async-callback name no-revert silent-ok)))
+
+(defun jj-cmd--async (name cmd &optional callback)
   "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
   (declare (indent 2))
   (let* ((repo-dir default-directory)
          (buf (get-buffer-create (format "*jj-%s: %s*" name repo-dir))))
-    (prog1
-        (with-current-buffer buf
-          (jj-inspect-mode)
-          (setq-local default-directory repo-dir)
-          (let ((inhibit-read-only t))
-            (erase-accessible-buffer))
-          (let* ((buf (current-buffer))
-                 (err (generate-new-buffer (format "*jj-%s-stderr*" name)))
-                 (sentinel (make-jj-callback-sentinel
-                            ;; hacky - make something better once there's a standardised output buffer?
-                            (when callback
-                              (lambda (ok)
-                                (funcall callback ok repo-dir)))
-                            err))
-                 (filter (make-sticky-process-filter :sticky)))
-            ;; TODO add a process list to the dash buffer modeline
-            ;; pushing it here to a common list would be most of the way
-            (make-process
-             :name (format "jj-%s" name)
-             :buffer buf
-             :stderr err
-             :filter filter
-             :sentinel sentinel
-             :noquery t
-             :command `("jj"
-                        ,@jj-global-default-args
-                        ,@cmd)))))))
+    (with-current-buffer buf
+      (jj-inspect-mode)
+      (setq-local default-directory repo-dir)
+      (let ((inhibit-read-only t))
+        (erase-accessible-buffer))
+      (let* ((buf (current-buffer))
+             (err (generate-new-buffer (format "*jj-%s-stderr*" name)))
+             (sentinel (make-jj-callback-sentinel
+                        ;; hacky - make something better once there's a standardised output buffer?
+                        (when callback
+                          (lambda (ok)
+                            (funcall callback ok repo-dir)))
+                        err))
+             (filter (make-sticky-process-filter :sticky)))
+        ;; TODO add a process list to the dash buffer modeline
+        ;; pushing it here to a common list would be most of the way
+        (make-process
+         :name (format "jj-%s" name)
+         :buffer buf
+         :stderr err
+         :filter filter
+         :sentinel sentinel
+         :noquery t
+         :command `("jj"
+                    ,@jj-global-default-args
+                    ,@cmd))))))
 ;; async command utils:1 ends here
 
 ;; jj diff
@@ -2907,8 +2911,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 ;; [[file:majjik.org::*jj undo][jj undo:1]]
 (cl-defun jj-undo ()
   (interactive)
-  (jj-cmd-async "undo" `("undo")
-    (jj--standard-async-callback nil :revert)))
+  (jj-cmd-async "undo" `("undo") nil :silent-ok))
 ;; jj undo:1 ends here
 
 ;; jj redo
@@ -2916,8 +2919,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 ;; [[file:majjik.org::*jj redo][jj redo:1]]
 (cl-defun jj-redo ()
   (interactive)
-  (jj-cmd-async "redo" `("redo")
-    (jj--standard-async-callback nil :revert)))
+  (jj-cmd-async "redo" `("redo") nil :silent-ok))
 ;; jj redo:1 ends here
 
 ;; jj new
@@ -2935,7 +2937,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
         ,@(jj--if-arg after #'identity "--after")
         ,@(jj--if-arg no-edit nil "--no-edit")
         ,@(jj--if-arg message #'identity "-m"))
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 
 (cl-defun jj-new-on-dwim (parents-revset &key message no-edit)
   "Create a new commit after the chosen PARENTS-REVSET, with no children."
@@ -2973,7 +2975,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
       `("edit"
         "-r" ,rev
         ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; jj edit:1 ends here
 
 ;; jj desc
@@ -2986,7 +2988,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
       `("describe"
         "-r" ,revset
         "-m" ,message)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; jj desc:1 ends here
 
 ;; jj drop
@@ -2999,7 +3001,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (jj-cmd-async "abandon"
       `("abandon"
         "-r" ,revset)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; jj drop:1 ends here
 
 ;; jj git init
@@ -3039,7 +3041,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (jj-cmd-async "bookmark-create"
       `("bookmark" "create" ,bookmark
         "-r" ,rev)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; new:1 ends here
 
 ;; move
@@ -3054,7 +3056,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
       `("bookmark" "move" ,bookmark
         "--to" ,to-rev
         ,@(jj--if-arg allow-backwards nil "--allow-backwards"))
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; move:1 ends here
 
 ;; rename
@@ -3066,7 +3068,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
                      (read-string "New name: ")))
   (jj-cmd-async "bookmark-rename"
       `("bookmark" "rename" ,bookmark ,new-name)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; rename:1 ends here
 
 ;; delete
@@ -3080,7 +3082,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
     (user-error "cancelled"))
   (jj-cmd-async "bookmark-delete"
       `("bookmark" "delete" ,bookmark)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; delete:1 ends here
 
 ;; forget
@@ -3094,7 +3096,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
     (user-error "cancelled"))
   (jj-cmd-async "bookmark-forget"
       `("bookmark" "forget" ,bookmark)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; forget:1 ends here
 
 ;; track
@@ -3108,7 +3110,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (jj-cmd-async "bookmark-track"
       `("bookmark" "track" ,bookmark
         "--remote" ,remote)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 
 (defun jj-bookmark-track-remote (remote bookmark)
   "Track BOOKMARK which is from REMOTE. Only prompts for untracked bookmarks at the given REMOTE."
@@ -3119,7 +3121,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (jj-cmd-async "bookmark-track"
       `("bookmark" "track" ,bookmark
         "--remote" ,remote)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 
 (defun jj-bookmark-track-local (remote bookmark)
   "Track local BOOKMARK on REMOTE. Only prompts for local bookmarks."
@@ -3130,7 +3132,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (jj-cmd-async "bookmark-track"
       `("bookmark" "track" ,bookmark
         "--remote" ,remote)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; track:1 ends here
 
 ;; untrack
@@ -3150,7 +3152,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (jj-cmd-async "bookmark-untrack"
       `("bookmark" "untrack" ,bookmark
         ,@(jj--if-arg remotes (apply-partially #'apply #'jj-revs-as-revset) "--remote"))
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; untrack:1 ends here
 
 ;; track
@@ -3161,7 +3163,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (interactive (list (jj-get-untracked-file-dwim "File to track")))
   (jj-cmd-async "file-track"
       `("file" "track" ,(jj-files-as-fileset file))
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; track:1 ends here
 
 ;; untrack
@@ -3172,7 +3174,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (interactive (list (jj-get-tracked-file-dwim "File to untrack")))
   (jj-cmd-async "file-untrack"
       `("file" "untrack" ,(jj-files-as-fileset file))
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; untrack:1 ends here
 
 ;; delete
@@ -3186,7 +3188,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
     (user-error "cancelled"))
   (jj-cmd-async "rm"
       `("util" "exec" "rm" ,file)
-    (jj--standard-async-callback nil :revert)))
+    nil :silent-ok))
 ;; delete:1 ends here
 
 ;; jj squash/amend
@@ -3204,7 +3206,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
         `("squash"
           "-r" ,rev
           ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))
-      (jj--standard-async-callback nil :revert))))
+      nil :silent-ok)))
 
 (cl-defun jj-amend-into-dwim (rev &optional noconfirm ignore-immutable)
   "Squash changes from @ into the chosen revision."
@@ -3218,7 +3220,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
         `("squash"
           "--into" ,rev
           ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))
-      (jj--standard-async-callback nil :revert))))
+      nil :silent-ok)))
 ;; jj squash/amend:1 ends here
 
 ;; jj git push
@@ -3227,8 +3229,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 (defun jj-git-push ()
   "Push to git in the background."
   (interactive)
-  (jj-cmd-async "git-push" `("git" "push")
-    (jj--standard-async-callback "push" :revert)))
+  (jj-cmd-async "git-push" `("git" "push")))
 ;; jj git push:1 ends here
 
 ;; jj git fetch
@@ -3237,8 +3238,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 (defun jj-git-fetch ()
   "Fetch from git in the background."
   (interactive)
-  (jj-cmd-async "git-fetch" `("git" "fetch")
-    (jj--standard-async-callback "fetch" :revert)))
+  (jj-cmd-async "git-fetch" `("git" "fetch")))
 ;; jj git fetch:1 ends here
 
 ;; Provide
