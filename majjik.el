@@ -2803,7 +2803,9 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
     (with-current-buffer (jj--get-command-log-buf repo-dir)
       (goto-char (point-max))
       (let* ((inhibit-read-only t)
-             (header (concat "> " (mapconcat #'identity `("jj" ,@jj-global-default-args ,@cmd) " ") "\n"))
+             (header (concat "> " (mapconcat #'shell-quote-argument
+                                             `("jj" ,@jj-global-default-args ,@cmd) " ")
+                             "\n"))
              (stdout (jj-make-section-buffer name (propertize header 'face 'magit-section-heading) "\n"))
              (stderr (jj-make-section-buffer name (propertize "=== stderr ===\n" 'face 'magit-section-heading) "\n")))
         (let* ((sentinel (make-jj-callback-sentinel
