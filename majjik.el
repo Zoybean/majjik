@@ -2527,14 +2527,18 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 
 (defun jj-workspace-root (&optional dir)
   "Return the root of the jj repository containing DIR, or `default-directory' if not provided."
-  (let ((default-directory dir))
-    (string-trim (jj-cmd-sync `("workspace" "root") :no-revert)
-                 nil
-                 ;; only trim a single trailing newline
-                 "\n")))
+  (let ((default-directory (or dir default-directory)))
+    (-let (((code . message) (jj-cmd-sync `("workspace" "root") :no-revert :no-error)))
+      (pcase code
+        (0 (s-chomp message))
+        ;; this command uses code 1 to signal a missing repo. maybe all commands?
+        (1 (signal 'jj-repo-missing (list default-directory)))
+        (_ (error "process exited with nonzero exit code %d" res))))))
 
 (defalias 'assert-jj 'jj-workspace-root
   "Throw an error unless we're in a jj repo.")
+
+(define-error 'jj-repo-missing "Directory is not within a jj repository")
 ;; repo query commands:1 ends here
 
 ;; revset
@@ -2711,11 +2715,12 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; sync command utils
 
 ;; [[file:majjik.org::*sync command utils][sync command utils:1]]
-(defun jj-cmd-sync (cmd &optional no-revert)
-  "Call jj with the given CMD, passing the default args first, and returning the output as a string. Signals an error if the command returns a nonzero exit code. When the command completes successfully, reverts the dash buffer for the repo (if there is one)."
+(defun jj-cmd-sync (cmd &optional no-revert no-error)
+  "Call jj with the given CMD, passing the default args first, and returning the output as a string. Signals an error if the command returns a nonzero exit code. When the command completes successfully, reverts the dash buffer for the repo (if there is one, and NO-REVERT was nil).
+When NO-ERROR, return the error code instead of raising an error. See `call-cmd' for details."
   (let ((cmd `("jj" ,@jj-global-default-args ,@cmd)))
     (prog1
-        (call-cmd cmd nil :string)
+        (call-cmd cmd nil :string nil no-error)
       (unless no-revert
         (jj-revert-dash-buffer default-directory)))))
 ;; sync command utils:1 ends here
