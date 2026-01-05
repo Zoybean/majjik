@@ -1795,6 +1795,7 @@
         (start-jj-dash-blocking))
       (pop-to-buffer main-buf)))
 
+  ;;;###autoload
   (defun jj-dash--async (repo-dir)
     "Show the status of the current jj repository in a buffer. Async - pops to the new buffer once the status is ready."
     (interactive (list (jj-workspace-root default-directory)))
