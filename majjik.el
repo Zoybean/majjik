@@ -549,6 +549,13 @@ See URL `https://docs.jj-vcs.dev/latest/filesets/' for more info."
                    (format "%s:%s"
                            (substring (symbol-name flag) 1)
                            (jj--quote-argument arg)))
+                  ;; identity operators
+                  (`(,(or 'or
+                          'and)
+                     ,form)
+                   ;; trick to only nest in quotes if an outer form requires it
+                   ;; outermost caller will unwrap any toplevel list
+                   (render form))
                   ;; operators: or, none (empty sum)
                   ((or `(or)
                        `(none))
