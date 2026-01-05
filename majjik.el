@@ -1017,26 +1017,26 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
 - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
   `(progn
      (require 'json)
-     (define-short-documentation-group jj-entry
+     (define-short-documentation-group jj-log
        (define-jj-log-format
         :no-manual t)
-       (read-jj-entry
+       (read-jj-log-entry
         :no-manual t)
-       (insert-jj-entry
+       (insert-jj-log-entry
         :no-manual t)
-       (read-jj-elided
+       (read-jj-log-elided
         :no-manual t)
-       (insert-jj-elided
+       (insert-jj-log-elided
         :no-manual t)
-       (make-jj-entry
+       (make-jj-log-entry
         :args (&key header graph)
         :no-manual t)
-       (make-jj-graph
+       (make-jj-log-graph
         :no-manual t)
-       (make-jj-header
+       (make-jj-log-header
         :args (&key ,@(mapcar #'car fields))
         :no-manual t))
-     (defvar jj-entry-regex
+     (defvar jj-log-entry-regex
        ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
           `(rx line-start
                ;; graph pre
@@ -1059,8 +1059,8 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                    (* ,content)
                    ,jj--major-delim
                    "\n"))))
-       "Regex to match a full `jj-log' entry. This *should* match exactly the same content that `read-jj-entry' will parse.")
-     (defvar jj-elided-regex
+       "Regex to match a full `jj-log' entry. This *should* match exactly the same content that `read-jj-log-entry' will parse.")
+     (defvar jj-log-elided-regex
        ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
           `(rx line-start
                ;; graph pre
@@ -1073,7 +1073,7 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                ;; remaining graph
                (* (* ,content)
                   "\n")))
-       "Regex to match an elided section of `jj-log'. This *should* match exactly the same content that `read-jj-elided' will parse.")
+       "Regex to match an elided section of `jj-log'. This *should* match exactly the same content that `read-jj-log-elided' will parse.")
      (defvar jj-parseable-template
        (jj-template '(++ ,jj--major-delim
                          (join ,jj--delim
@@ -1084,9 +1084,9 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                          ;; there's already one with the header line, so count 1 fewer
                          ,@(cl-loop for n upfrom 1 below jj--count-graph-lines
                                     append `("\n" ,jj--major-delim))))
-       "Commit template to produce log entries parseable by `read-jj-entry'.")
-     (defun read-jj-entry ()
-       "With point at the beginning of the first line of a `jj-log-parseable' entry, parse the entire entry into a `jj-entry' struct."
+       "Commit template to produce log entries parseable by `read-jj-log-entry'.")
+     (defun read-jj-log-entry ()
+       "With point at the beginning of the first line of a `jj-log-parseable' entry, parse the entire entry into a `jj-log-entry' struct."
        ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
           `(cl-loop with (graph-pre graph-node graph-suf) = (progn
                                                               (should (bolp))
@@ -1131,10 +1131,10 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                                                       "\n"))
                              collect (match-string 1) into graph-tail
                              else return (error "failed to parse graph shape on line %d of commit %s" ix struct-props)
-                             finally return (make-jj-entry :header (apply #'make-jj-header struct-props)
-                                                           :graph (apply #'make-jj-graph graph-pre graph-node graph-suf graph-tail))))))
-     (defun read-jj-elided ()
-       "Read the graph portion of an elided section. This is just a `jj-graph' struct, but it's not read in the same."
+                             finally return (make-jj-log-entry :header (apply #'make-jj-log-header struct-props)
+                                                           :graph (apply #'make-jj-log-graph graph-pre graph-node graph-suf graph-tail))))))
+     (defun read-jj-log-elided ()
+       "Read the graph portion of an elided section. This is just a `jj-log-graph' struct, but it's not read in the same."
        ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
           `(cl-loop with (graph-pre graph-node graph-suf) = (progn
                                                               (should (bolp))
@@ -1157,18 +1157,18 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                                                 "\n")
                                             nil :noerr)
                     collect (match-string 1) into graph-tail
-                    finally return (make--jj-graph :first-line-prefix graph-pre
+                    finally return (make--jj-log-graph :first-line-prefix graph-pre
                                                    :first-line-node graph-node
                                                    :first-line-suffix graph-suf
                                                    :mandatory-segments graph-tail))))
-     (defun insert-jj-entry (entry)
+     (defun insert-jj-log-entry (entry)
        "Insert the ENTRY, formatted as a jj log entry."
        ,(cl-labels ((field (name-sym)
-                      `(,(intern (format "%s-%s" 'jj-header name-sym))
+                      `(,(intern (format "%s-%s" 'jj-log-header name-sym))
                         header)))
           `(let ((target-buffer (current-buffer))
-                 (header (jj-entry-header entry))
-                 (graph (jj-entry-graph entry)))
+                 (header (jj-log-entry-header entry))
+                 (graph (jj-log-entry-graph entry)))
              ;; open a buffer to make a mess in
              ;; we'll insert its contents later
              (with-temp-buffer
@@ -1201,20 +1201,20 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                ;; these will add new lines if there arent enough already
                (cl-loop initially (progn
                                     (goto-char (point-min))
-                                    (insert (jj-graph-first-line-prefix graph)
-                                            (propertize (jj-graph-first-line-node graph)
+                                    (insert (jj-log-graph-first-line-prefix graph)
+                                            (propertize (jj-log-graph-first-line-node graph)
                                                         'face '(:foreground "cyan")
                                                         'jj-object header)
-                                            (jj-graph-first-line-suffix graph))
+                                            (jj-log-graph-first-line-suffix graph))
                                     (forward-line 1))
-                        for (prefix . rest) on (jj-graph-mandatory-segments graph)
+                        for (prefix . rest) on (jj-log-graph-mandatory-segments graph)
                         do (progn
                              (cond ((and
                                      ;; last nonempty mandatory segment
                                      (not (cdr rest))
                                      (not (string= "" (string-trim prefix)))
                                      ;; no repeatable segments
-                                     (not (jj-graph-repeatable-segment graph)))
+                                     (not (jj-log-graph-repeatable-segment graph)))
                                     (insert (propertize prefix 'face '(:foreground "grey"))))
                                    (t
                                     (insert prefix)))
@@ -1224,8 +1224,8 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                                (insert "\n"))))
                ;; insert the repeatable graph prefix segments
                ;; these are added to all remaining lines, but no new lines are added
-               (cl-loop with tail = (or (jj-graph-repeatable-segment graph)
-                                        (car (last (jj-graph-mandatory-segments graph))))
+               (cl-loop with tail = (or (jj-log-graph-repeatable-segment graph)
+                                        (car (last (jj-log-graph-mandatory-segments graph))))
                         while (and (bolp)
                                    (not (eobp)))
                         do (progn (insert tail)
@@ -1236,7 +1236,7 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                (let ((content-buffer (current-buffer)))
                  (with-current-buffer target-buffer
                    (insert-buffer-substring content-buffer)))))))
-     (defun insert-jj-elided (graph)
+     (defun insert-jj-log-elided (graph)
        "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
        (let ((target-buffer (current-buffer)))
          ;; open a buffer to make a mess in
@@ -1247,12 +1247,12 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
            ;; these will add new lines if there arent enough already
            (cl-loop initially (progn
                                 (goto-char (point-min))
-                                (insert (jj-graph-first-line-prefix graph)
-                                        (propertize (jj-graph-first-line-node graph)
+                                (insert (jj-log-graph-first-line-prefix graph)
+                                        (propertize (jj-log-graph-first-line-node graph)
                                                     'face '(:foreground "grey"))
-                                        (jj-graph-first-line-suffix graph))
+                                        (jj-log-graph-first-line-suffix graph))
                                 (forward-line 1))
-                    for prefix in (jj-graph-mandatory-segments graph)
+                    for prefix in (jj-log-graph-mandatory-segments graph)
                     do (progn
                          (insert prefix)
                          (forward-line 1)
@@ -1265,17 +1265,17 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
            (let ((content-buffer (current-buffer)))
              (with-current-buffer target-buffer
                (insert-buffer-substring content-buffer))))))
-     (cl-defstruct jj-header
+     (cl-defstruct jj-log-header
        ;; semantic fields
        ,@(cl-loop for (name . props) in fields
                   collect name))))
 
-(cl-defstruct jj-entry
+(cl-defstruct jj-log-entry
   "A jj log entry with commit info and graph prefixes."
   header
   graph)
 
-(defun make-jj-graph (pre node suff &rest graph-prefixes)
+(defun make-jj-log-graph (pre node suff &rest graph-prefixes)
   "Make a jj graph struct from the given PRE NODE SUFF identifying the position of the node icon in the first line, and GRAPH-PREFIXES identifying the remainder of the graph."
   ;; figure out what part of the graph we can repeat, and what parts we can skip
   (-let* ((graph-partitioned
@@ -1294,19 +1294,19 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
               ;; repeatable list is identified by being a run
               `(,graph-mandatory . ,resolved-tail))
              (`(,graph-mandatory)
-              ;; no tail, so assume the repeatable list is empty. in `insert-jj-entry', assume the last mandatory is repeatable.
+              ;; no tail, so assume the repeatable list is empty. in `insert-jj-log-entry', assume the last mandatory is repeatable.
               ;; special case used to identify (and print in grey) the truncated marker of fully-separate subtrees
               ;; - this implementation is brittle AF. I really should set the truncation marker and search for it.
               `(,graph-mandatory))
              (illegal (error "I thought that jj graph output would always have at most one run in a set of `jj--count-graph-lines' lines, and that run would be at the end, but apparently not. graph segments: %s" graph-prefixes)))))
-    (make--jj-graph
+    (make--jj-log-graph
      :first-line-prefix pre
      :first-line-node node
      :first-line-suffix suff
      :mandatory-segments graph-mandatory
      :repeatable-segment resolved-tail)))
 
-(cl-defstruct (jj-graph (:constructor make--jj-graph))
+(cl-defstruct (jj-log-graph (:constructor make--jj-log-graph))
   "Specification for the line-prefixes needed to annotate any number of commit-info lines with the graph for that region of the log."
   first-line-prefix
   first-line-node
@@ -1373,10 +1373,10 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                  
                  (insert "@  puvwmkxr\"zoeyhewll@gmail.com\"2025-12-18 18:07:32f610054a\"bic\\n*big\\nmultiline\\nmessage\\nwith\\nhonestly,\\ntoo much \\ntext\\nright here\\n\"\n│  \n~  \n   \n   \n")
                  (goto-char (point-min))
-                 (read-jj-entry))))
+                 (read-jj-log-entry))))
     (should (equal entry
-                   #s(jj-entry
-                      #s(jj-header "puvwmkxr"
+                   #s(jj-log-entry
+                      #s(jj-log-header "puvwmkxr"
                                    "zoeyhewll@gmail.com"
                                    "2025-12-18 18:07:32"
                                    ""
@@ -1385,13 +1385,13 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                                    "f610054a"
                                    ""
                                    "bic\n*big\nmultiline\nmessage\nwith\nhonestly,\ntoo much \ntext\nright here\n")
-                      #s(jj-graph "" "@" "  "
+                      #s(jj-log-graph "" "@" "  "
                                   ("│  "
                                    "~  "
                                    "   ")
                                   nil))))
     (with-temp-buffer
-      (insert-jj-entry entry)
+      (insert-jj-log-entry entry)
       (should (string= (substring-no-properties (buffer-string))
                        "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n│  bic\n~  *big\n   multiline\n   message\n   with\n   honestly,\n   too much \n   text\n   right here\n"
                        )))))
@@ -1400,10 +1400,10 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
   (let ((entry (with-temp-buffer
                  (insert "@  puvwmkxr\"zoeyhewll@gmail.com\"2025-12-18 18:07:32f610054a\"\"\n│  \n~  \n   \n   \n")
                  (goto-char (point-min))
-                 (read-jj-entry))))
+                 (read-jj-log-entry))))
     (should (equal entry
-                   #s(jj-entry
-                      #s(jj-header "puvwmkxr"
+                   #s(jj-log-entry
+                      #s(jj-log-header "puvwmkxr"
                                    "zoeyhewll@gmail.com"
                                    "2025-12-18 18:07:32"
                                    ""
@@ -1412,25 +1412,25 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                                    "f610054a"
                                    ""
                                    "")
-                      #s(jj-graph "" "@" "  "
+                      #s(jj-log-graph "" "@" "  "
                                   ("│  "
                                    "~  "
                                    "   ")
                                   nil))))
     (with-temp-buffer
-      (insert-jj-entry entry)
+      (insert-jj-log-entry entry)
       (should (string= (substring-no-properties (buffer-string))
                        "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n│  \n~  \n   \n")))))
 
 (ert-deftest jj-round-trip-simple-underflow ()
   (let ((entry (with-temp-buffer
                  (insert "@  puvwmkxr\"zoeyhewll@gmail.com\"2025-12-18 18:07:32f610054a\"\"\n│  \n│  \n│  \n")
-                 (should (string-match-p jj-entry-regex (buffer-string)))
+                 (should (string-match-p jj-log-entry-regex (buffer-string)))
                  (goto-char (point-min))
-                 (read-jj-entry))))
+                 (read-jj-log-entry))))
     (should (equal entry
-                   #s(jj-entry
-                      #s(jj-header "puvwmkxr"
+                   #s(jj-log-entry
+                      #s(jj-log-header "puvwmkxr"
                                    "zoeyhewll@gmail.com"
                                    "2025-12-18 18:07:32"
                                    ""
@@ -1439,11 +1439,11 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                                    "f610054a"
                                    ""
                                    "")
-                      #s(jj-graph "" "@" "  "
+                      #s(jj-log-graph "" "@" "  "
                                   ()
                                   "│  "))))
     (with-temp-buffer
-      (insert-jj-entry entry)
+      (insert-jj-log-entry entry)
       (should (string= (substring-no-properties (buffer-string))
                        "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n")))))
 ;; Log format:1 ends here
@@ -2378,16 +2378,16 @@ Also sets `jj--current-status' in the initial buffer when the status process com
          (err (generate-new-buffer "*jj-log-stderr*"))
          (sentinel (make-jj-simple-sentinel err temp))
          (filter (cl-labels ((read-next ()
-                               (jj--try-read-each #'read-jj-entry #'read-jj-elided))
+                               (jj--try-read-each #'read-jj-log-entry #'read-jj-log-elided))
                              (print-entries (news)
                                (with-current-buffer buf
                                  (let ((inhibit-read-only t))
                                    (cl-loop for new in news
                                             do (pcase new
-                                                 ((pred jj-graph-p)
-                                                  (insert-jj-elided new))
-                                                 ((pred jj-entry-p)
-                                                  (insert-jj-entry new))))))))
+                                                 ((pred jj-log-graph-p)
+                                                  (insert-jj-log-elided new))
+                                                 ((pred jj-log-entry-p)
+                                                  (insert-jj-log-entry new))))))))
                    (make-jj-generic-buffered-filter temp #'read-next #'print-entries))))
     (make-process
      :name "jj-log"
@@ -2543,10 +2543,10 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun jj-get-revset-dwim (&optional prompt)
   "Get a revision or revset based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
   (pcase (jj-thing-at-point)
-    ((and cmt (pred jj-entry-p))
-     (jj-header-change-id (jj-entry-header cmt)))
-    ((and cmt (pred jj-header-p))
-     (jj-header-change-id cmt))
+    ((and cmt (pred jj-log-entry-p))
+     (jj-log-header-change-id (jj-log-entry-header cmt)))
+    ((and cmt (pred jj-log-header-p))
+     (jj-log-header-change-id cmt))
     (unmatched (jj-read-revset prompt))))
 ;; revset:1 ends here
 
@@ -2556,10 +2556,10 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun jj-get-revision-dwim (&optional prompt mutable)
   "Get a revision or revset based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT. If MUTABLE, only include mutable commits in the completion options."
   (pcase (jj-thing-at-point)
-    ((and cmt (pred jj-entry-p))
-     (jj-header-change-id (jj-entry-header cmt)))
-    ((and cmt (pred jj-header-p))
-     (jj-header-change-id cmt))
+    ((and cmt (pred jj-log-entry-p))
+     (jj-log-header-change-id (jj-log-entry-header cmt)))
+    ((and cmt (pred jj-log-header-p))
+     (jj-log-header-change-id cmt))
     (unmatched (jj-read-revision prompt (when mutable "~immutable()")))))
 ;; single revision:1 ends here
 
@@ -2574,8 +2574,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 
 (defun jj-obj-wc-p (obj)
   "Returns true if OBJ is the current working copy commit."
-  (and (jj-header-p obj)
-       (jj-rev-wc-p (jj-header-change-id obj))))
+  (and (jj-log-header-p obj)
+       (jj-rev-wc-p (jj-log-header-change-id obj))))
 ;; rev is wc:1 ends here
 
 ;; any
@@ -2636,7 +2636,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                             (jj-status-file-untracked-p jj-status-file-untracked-path))
                            equal)
       (jj-compatible-ident old new
-                           ((jj-header-p jj-header-change-id))
+                           ((jj-log-header-p jj-log-header-change-id))
                            equal)
       (jj-compatible-ident old new
                            ((jj-status-lineage-entry-p jj-status-lineage-entry-change-id))
