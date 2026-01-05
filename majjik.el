@@ -290,19 +290,17 @@ If INITIALLY-STAY is non-nil, point stays in place if it is at `bobp' even if th
 (defun jj--handle-proc-end (target-buf event error-buffer &rest other-buffers)
   "Call from a process sentinel on process exit to manage error message, status message, and buffer disposal."
   (unwind-protect
-      (when (buffer-live-p target-buf)
+      (when (buffer-live-p error-buffer)
         ;; exited abnormally
         (unless (string= event "finished\n")
-          (with-current-buffer target-buf
+          (with-current-buffer error-buffer
             (goto-char (point-max))
-            ;; add error status to output buffer
+            ;; add error status to error buffer
             (let ((inhibit-read-only t))
               (unless (bolp)
                 (insert "\n"))
-              (insert "\n")
               (insert (propertize event 'face '(:foreground "red")))
-              (insert "\n")
-              (insert-buffer-substring error-buffer)))))
+              (insert "\n")))))
     ;; always clean up the auxiliary buffers
     (kill-buffer error-buffer)
     (mapcar #'kill-buffer other-buffers)))
@@ -1731,7 +1729,8 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   "b b" #'jj-new-on-bookmark
   "f t" #'jj-file-track-dwim
   "f u" #'jj-file-untrack-dwim
-  "f k" #'jj-file-delete-dwim)
+  "f k" #'jj-file-delete-dwim
+  "$" #'jj-pop-to-command-log)
 
 (keymap-global-set "C-x j" #'jj-dash)
 ;; Keymaps:1 ends here
@@ -2760,6 +2759,23 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
                          :no-revert))))
 ;; jj bookmark list:1 ends here
 
+;; command log
+
+;; [[file:majjik.org::*command log][command log:1]]
+(defun jj-pop-to-command-log (repo-dir)
+  "Open the command-log buffer for the current repo."
+  (interactive (list default-directory))
+  (pop-to-buffer (jj--get-command-log-buf repo-dir)))
+
+(defun jj--get-command-log-buf (repo-dir)
+  "Get or create the command-log buffer for the given REPO-DIR, and ensure it is in the correct mode."
+  (let ((buf (get-buffer-create (format "*jj-command-log:%s*" repo-dir))))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'jj-inspect-mode)
+        (jj-inspect-mode)))
+    buf))
+;; command log:1 ends here
+
 ;; async command utils
 
 ;; [[file:majjik.org::*async command utils][async command utils:1]]
@@ -2770,9 +2786,9 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
            (unless no-revert
              (jj-revert-dash-buffer-async dir))
            (unless silent-ok
-             (message "%s ok" name)))
+             (message "`jj %s' ok" name)))
           (t
-           (message "%s failed" name)))))
+           (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))))))
 
 (defun jj-cmd-async (name cmd &optional no-revert silent-ok)
   "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
@@ -2783,34 +2799,32 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 (defun jj-cmd--async (name cmd &optional callback)
   "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
   (declare (indent 2))
-  (let* ((repo-dir default-directory)
-         (buf (get-buffer-create (format "*jj-%s: %s*" name repo-dir))))
-    (with-current-buffer buf
-      (jj-inspect-mode)
-      (setq-local default-directory repo-dir)
-      (let ((inhibit-read-only t))
-        (erase-accessible-buffer))
-      (let* ((buf (current-buffer))
-             (err (generate-new-buffer (format "*jj-%s-stderr*" name)))
-             (sentinel (make-jj-callback-sentinel
-                        ;; hacky - make something better once there's a standardised output buffer?
-                        (when callback
-                          (lambda (ok)
-                            (funcall callback ok repo-dir)))
-                        err))
-             (filter (make-sticky-process-filter :sticky)))
-        ;; TODO add a process list to the dash buffer modeline
-        ;; pushing it here to a common list would be most of the way
-        (make-process
-         :name (format "jj-%s" name)
-         :buffer buf
-         :stderr err
-         :filter filter
-         :sentinel sentinel
-         :noquery t
-         :command `("jj"
-                    ,@jj-global-default-args
-                    ,@cmd))))))
+  (let ((repo-dir default-directory))
+    (with-current-buffer (jj--get-command-log-buf repo-dir)
+      (goto-char (point-max))
+      (let* ((inhibit-read-only t)
+             (header (concat "> " (mapconcat #'identity `("jj" ,@jj-global-default-args ,@cmd) " ") "\n"))
+             (stdout (jj-make-section-buffer name (propertize header 'face 'magit-section-heading) "\n"))
+             (stderr (jj-make-section-buffer name (propertize "=== stderr ===\n" 'face 'magit-section-heading) "\n")))
+        (let* ((sentinel (make-jj-callback-sentinel
+                          ;; hacky - make something better once there's a standardised output buffer?
+                          (when callback
+                            (lambda (ok)
+                              (funcall callback ok repo-dir)))
+                          stderr))
+               (filter (make-sticky-process-filter :sticky)))
+          ;; TODO add a process list to the dash buffer modeline
+          ;; pushing it here to a common list would be most of the way
+          (make-process
+           :name (format "jj-%s" name)
+           :buffer stdout
+           :stderr stderr
+           :filter filter
+           :sentinel sentinel
+           :noquery t
+           :command `("jj"
+                      ,@jj-global-default-args
+                      ,@cmd)))))))
 ;; async command utils:1 ends here
 
 ;; jj diff
