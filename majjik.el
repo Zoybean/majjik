@@ -480,6 +480,18 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
   ;; erase while respecting narrowing
   (delete-region (point-min) (point-max)))
 
+(defun replace-buffer-contents-and-properties (source &optional max-secs max-costs)
+  (let ((buf (current-buffer)))
+    (replace-buffer-contents source max-secs max-costs)
+    (with-current-buffer source
+      (cl-loop for start = (point-min) then pos
+               for pos = (next-property-change start)
+               for end = (or pos
+                             (point-max))
+               for props = (text-properties-at start)
+               do (set-text-properties start end props buf)
+               while pos))))
+
 (defun jj--entitize-newlines (string)
   "Propertize all newlines in STRING with the corresponding escape glyph, with the `escape-glyph' face."
   (let* ((replacements `(("\n" . "^J")
@@ -1740,19 +1752,6 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 
 (defvar-local jj--indirect-buffers nil
   "Indirect buffers into the current buffer. Ought to be killed if we're reverting.")
-
-(defun replace-buffer-contents-and-properties (source &optional max-secs max-costs)
-  (let ((buf (current-buffer)))
-    (replace-buffer-contents source max-secs max-costs)
-    (with-current-buffer source
-      (cl-loop for start = (point-min) then pos
-               for pos = (next-property-change start)
-               for end = (or pos
-                             (point-max))
-               for props = (text-properties-at start)
-               do (set-text-properties start end props buf)
-               while pos))))
-
 (defun jj-dash--revert-async (&optional and-then)
   "Asynchronously get the new status, and reverts the buffer contents when those processes complete.
 Reverted buffer is the one that was active when this function was called."
