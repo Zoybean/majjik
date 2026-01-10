@@ -4045,10 +4045,12 @@ might actually not use these as I need a lexical variable anyway in most cases w
                  (concat "\n" (s-chomp out-str)))))
 
   (defun jj-kill-output (proc)
-    (kill-buffer (process-buffer (jj-process-process proc))))
+    (let* ((buf (process-buffer (jj-process-process proc))))
+      (kill-buffer buf)))
 
   (defun jj-kill-error (proc)
-    (kill-buffer (jj-process-stderr proc)))
+    (let* ((buf (jj-process-stderr proc)))
+      (kill-buffer buf)))
 
   (defun jj-print-crash (proc)
     (jj--insert-crash-event (jj-process-stderr proc) (jj-process-event proc)))
@@ -4561,15 +4563,13 @@ main functions intended to run commands for various purposes:
   - errors direct user to check secret buffer
   - stderr is killed always
 - for showing in the echo area
-  - verbose ok message
-  - variable verbosity error message
+  - verbose ok message, showing stdout and stderr
   - stdout is killed always
   - stderr is killed always
 - for showing in own buffer
-  - simple ok message
+  - simple ok message, showing stderr only
   - show output in buffer, which is killed on close
-  - stdout is only killed on error - the command is run for its output
-  - variable verbosity error message
+  - stdout is only killed on error, unless empty
   - stderr is killed always
 #+begin_src elisp
   (defun jj-cmd-async--for-status (name cmd)
