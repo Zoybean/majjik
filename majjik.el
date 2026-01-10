@@ -4481,6 +4481,8 @@ Returns the raw process, not the combined handler."
                  #'jj-kill-error)
                 #'jj-process-process))
 
+;; TODO there's some lingering buffers left around, possibly by this.
+;; look into it.
 (defun jj-cmd-async-view (cmd &optional no-revert verbose-error)
   "Run jj command CMD asynchronously, view the stdout output in its own buffer (if there is any), and message the stderr output in the echo area."
   (jj--peek
