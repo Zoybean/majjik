@@ -2631,6 +2631,7 @@ This is concatenated with an identifier for the repository to define the buffer 
   "d" #'jj-diff-entry-prefix
   "F" #'jj-git-fetch-prefix
   "P" #'jj-git-push-prefix
+  "B" #'jj-bookmark-prefix
   "b n" #'jj-bookmark-new-dwim
   "b m" #'jj-bookmark-move-dwim
   "b !" #'jj-bookmark-set-dwim
@@ -3399,10 +3400,10 @@ Also sets `jj--current-status' in the initial buffer when the status process com
              unless (string-match (rx "@") line)
              collect line)))
 
-(defun jj-list-non-tracking-local-bookmarks ()
-  "List local bookmarks that are not tracking any remote."
+(defun jj-list-non-tracking-local-bookmarks (&optional remote)
+  "List local bookmarks that are not tracking any remote, or not tracking REMOTE if provided."
   (let ((all (jj-list-local-bookmarks nil))
-        (tracked (jj-list-local-bookmarks :tracking)))
+        (tracked (jj-list-local-bookmarks (or remote :tracking))))
     (cl-set-difference all tracked :test #'equal)))
 
 (defun jj-list-remote-bookmarks (&optional remote tracked not-git)
@@ -4697,7 +4698,8 @@ Will likely fail for any interactive command."
                 (split-string-shell-command
                  (read-from-minibuffer "command line: jj " nil nil nil 'jj-cmd-hist))))
   (jj-with-editor
-   (jj-cmd-async-view args)))
+   (jj-cmd-async-view args
+                      nil :verbose-err)))
 ;; anything:1 ends here
 
 ;; jj help
@@ -4712,7 +4714,7 @@ Will likely fail for any interactive command."
                 (split-string-shell-command
                  (read-from-minibuffer "jj help " nil nil nil 'jj-help-hist))))
   (jj-cmd-async-view `("help" ,@args)
-                     :no-revert))
+                     :no-revert :verbose-err))
 ;; jj help:1 ends here
 
 ;; jj undo
@@ -5418,6 +5420,223 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
       `("bookmark" "untrack" ,bookmark
         ,@(jj--if-arg remotes (apply-partially #'apply #'jj-revs-as-revset) "--remote"))))
 ;; untrack:1 ends here
+
+;; entry
+
+;; [[file:majjik.org::*entry][entry:1]]
+(transient-define-prefix jj-bookmark-prefix ()
+  [["local"
+    ("c" "create" jj-bookmark-create-prefix)
+    ("m" "move" jj-bookmark-move-prefix)
+    ("r" "rename" jj-bookmark-rename-prefix)
+    ("x" "set" jj-bookmark-set-prefix)
+    ("DEL" "forget" jj-bookmark-forget-prefix)]
+   ["remote"
+    ("t" "track" jj-bookmark-track-prefix)
+    ("u" "untrack" jj-bookmark-untrack-prefix)
+    ("d" "delete" jj-bookmark-delete-prefix)]
+   ["list"
+    ("l" "list" jj-bookmark-list-prefix)]])
+;; entry:1 ends here
+
+;; create
+
+;; [[file:majjik.org::*create][create:1]]
+(transient-define-prefix jj-bookmark-create-prefix ()
+  :refresh-suffixes t
+  jj-global-group
+  ["targets"
+   ("-r" "revision" jj-multi-revision-argument
+    :multi-value repeat
+    :argument "-r")]
+  ["go"
+   ("n" "new" (lambda (names args)
+                (interactive (list (let ((crm-separator (rx (* blank)
+                                                            (any ", ")
+                                                            (* blank))))
+                                     (completing-read-multiple "new bookmark names: " ()))
+                                   (jj--transient-args)))
+                (jj-cmd-async-view
+                 `("bookmark" "create" ,@args "--" ,@names)
+                 nil :verbose-err))
+    :inapt-if-not (lambda () (transient--any-on-p "-r")))])
+;; create:1 ends here
+
+;; list
+;; this feels a little redundant - the completing-read-multiple lists the bookmarks while you're performing input for the transient. but, the list produced by jj is more thorough than the crm window.
+
+;; [[file:majjik.org::*list][list:1]]
+(transient-define-prefix jj-bookmark-list-prefix ()
+  :refresh-suffixes t
+  :incompatible '(("--all-remotes" "--remote="))
+  jj-global-group
+  ["targets"
+   ("-a" "all-remotes" "--all-remotes")
+   ("-m"  "remote" "--remote=")
+   ("-t" "tracked" "--tracked")
+   ("-c" "conflicted" "--conflicted")
+   ("-r" "revisions" jj-multi-revision-argument
+    :multi-value repeat
+    :argument "-r")
+   ("-T" "template" "--template=")
+   ("-S"   "sort" "--sort=")]
+  ["go"
+   ("l" "list" (lambda (names args)
+                 (interactive (list (let ((crm-separator (rx (* blank)
+                                                             (any ", ")
+                                                             (* blank))))
+                                      (completing-read-multiple "list bookmark names matching: " (jj-list-bookmarks)))
+                                    (jj--transient-args)))
+                 (jj-cmd-async-view
+                  `("bookmark" "list" ,@args "--" ,@names)
+                  nil :verbose-err)))])
+;; list:1 ends here
+
+;; set
+
+;; [[file:majjik.org::*set][set:1]]
+(transient-define-prefix jj-bookmark-set-prefix ()
+  :refresh-suffixes t
+  jj-global-group
+  [["targets"
+    ("-r" "revision" jj-multi-revision-argument
+     :multi-value repeat
+     :argument "-r")]
+   ["meta"
+    ("-B" "allow backwards" "-B")]]
+  ["go"
+   ("x" "set" (lambda (names args)
+                (interactive (list (let ((crm-separator (rx (* blank)
+                                                            (any ", ")
+                                                            (* blank))))
+                                     (completing-read-multiple "set bookmarks: " (jj-list-local-bookmarks)))
+                                   (jj--transient-args)))
+                (jj-cmd-async-view
+                 `("bookmark" "set" ,@args "--" ,@names)
+                 nil :verbose-err))
+    :inapt-if-not (lambda () (transient--any-on-p "-r")))])
+;; set:1 ends here
+
+;; move
+
+;; [[file:majjik.org::*move][move:1]]
+(transient-define-prefix jj-bookmark-move-prefix ()
+  :refresh-suffixes t
+  jj-global-group
+  [["targets"
+    ;; for now, this needs some way for me to only prompt
+    ;; for branch name if this argument is not provided.
+    ;; it doesn't fit the current `jj--ensure-arg' interface,
+    ;; so I can't be bothered for now.
+    ;; ("-f" "from" jj-multi-revision-argument
+    ;;  :multi-value repeat
+    ;;  :argument "-f")
+    ("-t" "to" jj-single-revision-argument
+     :argument "-t")]
+   ["meta"
+    ("-B" "allow backwards" "-B")]]
+  ["go"
+   ("m" "move" (lambda (names args)
+                 (interactive (list (let ((crm-separator (rx (* blank)
+                                                             (any ", ")
+                                                             (* blank))))
+                                      (completing-read-multiple "move bookmarks: " (jj-list-local-bookmarks)))
+                                    (jj--transient-args)))
+                 (jj-cmd-async-view
+                  `("bookmark" "move" ,@args "--" ,@names)
+                  nil :verbose-err))
+    :inapt-if-not (lambda () (transient--any-on-p "-t")))])
+;; move:1 ends here
+
+;; track
+
+;; [[file:majjik.org::*track][track:1]]
+(transient-define-prefix jj-bookmark-track-prefix ()
+  :refresh-suffixes t
+  jj-global-group
+  ["args"
+   ("-m" "remote" "--remote="
+    :reader (lambda (p s h)
+              (completing-read p (jj-list-git-remotes) nil t s h)))]
+  ["go"
+   ("t" "track" (lambda (names args)
+                  (interactive (let* ((crm-separator (rx (* blank)
+                                                         (any ", ")
+                                                         (* blank)))
+                                      (args (jj--transient-args))
+                                      (remote (transient-arg-value "--remote=" args))
+                                      (candidates (or `(,@(jj-list-untracked-remote-bookmarks remote :not-git)
+                                                        ,@(jj-list-non-tracking-local-bookmarks remote))
+                                                      (user-error "All bookmarks tracked for this remote."))))
+                                 (list (completing-read-multiple "track bookmarks: " candidates)
+                                       args)))
+                  (jj-cmd-async-view `("bookmark" "track" ,@args "--" ,names)))
+    :inapt-if-not (lambda () (transient--any-on-p "--remote=")))])
+;; track:1 ends here
+
+;; untrack
+
+;; [[file:majjik.org::*untrack][untrack:1]]
+(transient-define-prefix jj-bookmark-untrack-prefix ()
+  :refresh-suffixes t
+  jj-global-group
+  ["args"
+   ("-m" "remote" "--remote="
+    :reader (lambda (p s h)
+              (completing-read p (jj-list-git-remotes) nil t s h)))]
+  ["go"
+   ("u" "untrack" (lambda (names args)
+                    (interactive (let* ((crm-separator (rx (* blank)
+                                                           (any ", ")
+                                                           (* blank)))
+                                        (args (jj--transient-args))
+                                        (remote (transient-arg-value "--remote=" args))
+                                        (candidates (or (jj-list-local-bookmarks remote)
+                                                        (user-error "No tracked bookmarks on this remote."))))
+                                   (list (completing-read-multiple "untrack bookmarks: " candidates)
+                                         (jj--transient-args))))
+                    (jj-cmd-async-view `("bookmark" "untrack" ,@args "--" ,@names)))
+    :inapt-if-not (lambda () (transient--any-on-p "--remote=")))])
+
+(transient-define-prefix jj-bookmark-rename-prefix ()
+  jj-global-group
+  ["go"
+   ("r" "rename" (lambda (old new)
+                   (interactive (list (completing-read "rename bookmark: " (jj-list-bookmarks))
+                                      (completing-read "new name: " (jj-list-bookmarks))))
+                   (jj-cmd-async-view `("bookmark" "rename" "--" ,old ,new))))])
+;; untrack:1 ends here
+
+;; delete
+
+;; [[file:majjik.org::*delete][delete:1]]
+(transient-define-prefix jj-bookmark-delete-prefix ()
+  jj-global-group
+  ["go"
+   ("k" "delete" (lambda (names)
+                   (interactive (list (let ((crm-separator (rx (* blank)
+                                                               (any ", ")
+                                                               (* blank))))
+                                        (completing-read-multiple "delete bookmarks: " (jj-list-bookmarks)))))
+                   (jj-cmd-async-view `("bookmark" "delete" "--" ,@names))))])
+;; delete:1 ends here
+
+;; forget
+
+;; [[file:majjik.org::*forget][forget:1]]
+(transient-define-prefix jj-bookmark-forget-prefix ()
+  jj-global-group
+  ["args"
+   ("-M" "include remotes" "--include-remotes")]
+  ["go"
+   ("DEL" "forget" (lambda (names args)
+                     (interactive (list (let ((crm-separator (rx (* blank)
+                                                                 (any ", ")
+                                                                 (* blank))))
+                                          (completing-read-multiple "forget bookmarks: " (jj-list-bookmarks)))
+                                        (jj--transient-args)))
+                     (jj-cmd-async-view `("bookmark" "forget" ,@args "--" ,@names))))])
+;; forget:1 ends here
 
 ;; track
 
