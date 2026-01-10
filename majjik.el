@@ -3834,18 +3834,16 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
                                (funcall fn proc))
                              builders))))
 
-;; (let* ((cmd '("log"))
-;;        (proc (jj-cmd-async cmd)))
-;;   (promise-then proc
-;;                 (lambda (proc)
-;;                   (funcall (jj-post-message
-;;                             (jj-format-trimmed
-;;                              #'jj-format-see-log
-;;                              #'jj-format-simple-ok
-;;                              #'jj-format-stdout 
-;;                              #'jj-format-stderr))
-;;                            proc)))
-;;   (sit-for 5))
+(defun jj-trim-with-editor (proc)
+  "Delete all occurrences of the \"Waiting for Emacs\" message from the start of PROC's output buffer."
+  (let ((buf (process-buffer (jj-process-process proc))))
+    (with-current-buffer buf
+      (save-excursion
+        (goto-char (point-min))
+        (while (looking-at (rx line-start
+                               "Waiting for Emacs..."
+                               line-end))
+          (delete-line))))))
 
 (defun jj-format-simple-ok (proc)
   (format "`jj %s' ok. " (jj--replace-newlines
@@ -3908,27 +3906,16 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
                    (jj--apply-font-lock-properties
                     (buffer-string)))))
     (if (jj--empty-string-p out-str)
-                 ""
-               (concat "\n" (s-chomp out-str)))))
+        (format "no standard output. %s" (jj-process-event proc))
+      (concat "\n" (s-chomp out-str)))))
 
 (defun jj-format-stdout (proc)
   (let ((out-str (with-current-buffer (process-buffer (jj-process-process proc))
                    (jj--apply-font-lock-properties
                     (buffer-string)))))
     (if (jj--empty-string-p out-str)
-                 ""
-               (concat "\n" (s-chomp out-str)))))
-
-(defun jj-format-stdout-trimmed (proc)
-  (let ((out-str (with-current-buffer (process-buffer (jj-process-process proc))
-                   (save-excursion
-                     (goto-char (point-min))
-                     (forward-line 10)
-                     (jj--apply-font-lock-properties
-                      (buffer-substring (point-min) (point)))))))
-    (if (jj--empty-string-p out-str)
-                 ""
-               (concat "\n" (s-chomp out-str)))))
+        ""
+      (concat "\n" (s-chomp out-str)))))
 
 (defun jj-kill-output (proc)
   (kill-buffer (process-buffer (jj-process-process proc))))
@@ -4488,6 +4475,7 @@ Returns the raw process, not the combined handler."
   (jj--peek
    (jj-cmd-async cmd)
    (jj--call-each
+    #'jj-trim-with-editor
     (jj-post-message
      (jj-format-trimmed
          #'jj-format-see-log
@@ -4515,12 +4503,14 @@ Returns the raw process, not the combined handler."
   "Run jj command CMD asynchronously, and message the combined stdout and stderr output in the echo area."
   (jj--peek
    (jj-cmd-async cmd)
-   (jj-post-message
-    (jj-format-trimmed
-        #'jj-format-see-log
-      #'jj-format-simple-ok
-      #'jj-format-stdout
-      #'jj-format-stderr))
+   (jj--call-each
+    #'jj-trim-with-editor
+    (jj-post-message
+     (jj-format-trimmed
+         #'jj-format-see-log
+       #'jj-format-simple-ok
+       #'jj-format-stdout
+       #'jj-format-stderr)))
    (jj--call-each
     (if verbose-error
         (jj-post-message
@@ -5978,7 +5968,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
    ("e" "edit" (lambda (args)
                  (interactive (list (jj--transient-args)))
                  (jj-with-editor
-                  (jj-cmd-async-view `("config" "edit" ,@args))))
+                  (jj-cmd-async-message `("config" "edit" ,@args))))
     :inapt-if-not (lambda ()
                     (transient--any-on-p "--user" "--repo" "--workspace")))
    ])
