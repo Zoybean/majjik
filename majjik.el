@@ -7,7 +7,7 @@
 ;; Version: 0.1.0
 ;; Keywords: vc
 ;; URL: https://github.com/Zoybean/majjik
-;; Package-Requires: (dash s eieio with-editor promise transient llama)
+;; Package-Requires: (dash s eieio with-editor magit-section promise transient llama)
 
 ;;; Commentary:
 
@@ -24,6 +24,7 @@
 (require 'transient)
 (require 'llama)
 (require 'string-edit)
+(require 'magit-section)
 ;; Require:1 ends here
 
 ;; collect-repeat
@@ -1866,16 +1867,37 @@ If the line is an elided entry, returns a single string, which is the prefix bef
            do (progn (insert tail)
                      (forward-line 1))))
 
+(defclass jj-log-entry-section (magit-section)
+  ((data :initarg :data)))
+
 (defun insert-jj-graph-log-maybe-elided (entry)
   (pcase entry
     ((pred jj-log-graph-p)
-     (insert-jj-log-elided entry))
+     (magit-insert-section sec
+       (elided)
+       (magit-insert-heading (with-temp-buffer
+                               (insert-jj-log-elided entry)
+                               (s-chomp (buffer-string))))))
     ((pred jj-log-entry-p)
      (let ((header (jj-log-entry-header entry)))
-       (with-insert-temp-buffer
-         (save-excursion (insert-jj-log-header header))
-         (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
-         (add-text-properties (point-min) (point-max) `(jj-object ,header)))))))
+       (-let (((line-0 line-1 . rest)
+               (s-split "\n" (with-temp-buffer
+                               (save-excursion (insert-jj-log-header header))
+                               (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
+                               (add-text-properties (point-min) (point-max) `(jj-object ,header))
+                               (s-chomp (buffer-string))))))
+         (jj-insert-log-entry-section entry line-0 line-1 rest))))))
+
+(defun jj-insert-log-entry-section (entry line-0 &optional line-1 rest)
+  (magit-insert-section sec
+    (jj-log-entry-section entry :collapsed)
+    (oset sec data entry)
+    (magit-insert-heading (concat (s-join "\n" `(,line-0 ,@(opt line-1)))
+                                  "\n"))
+    (when rest
+      (magit-insert-section-body
+        (dolist (line rest)
+          (insert line "\n"))))))
 ;; plumbing:1 ends here
 
 ;; formats
@@ -2601,7 +2623,7 @@ This is concatenated with an identifier for the repository to define the buffer 
 
 ;; [[file:majjik.org::*Keymaps][Keymaps:1]]
 (defvar-keymap jj-inspect-mode-map
-  :parent special-mode-map
+  :parent magit-section-mode-map
   "," #'jj-inspect-sexp-at-point
   "RET" #'jj-inspect-thing-at-point)
 
@@ -2666,7 +2688,7 @@ This is concatenated with an identifier for the repository to define the buffer 
 (defvar jj--silent-revert nil
   "If non-nil, don't display messages for reverting the status buffer unless there is an error.")
 
-(define-derived-mode jj-inspect-mode special-mode "jj-inspect"
+(define-derived-mode jj-inspect-mode magit-section-mode "jj-inspect"
   "Parent mode for most jj modes, defining basic operations")
 
 (define-derived-mode jj-dashboard-mode jj-inspect-mode "jj-dash"
@@ -2685,19 +2707,9 @@ Reverted buffer is the one that was active when this function was called."
         (dash-buf (current-buffer))
         (temp-buf (generate-new-buffer "*jj-dash-replacement*")))
     (cl-labels ((end-ok (_ok)
-                  (unwind-protect
-                      (when (buffer-live-p dash-buf)
-                        (with-current-buffer dash-buf
-                          (let ((inhibit-read-only t)
-                                (bob (bobp)))
-                            (replace-buffer-contents-and-properties temp-buf 10)
-                            (when bob
-                              (goto-char (point-min))))
-                          (setq jj--current-status
-                                (buffer-local-value 'jj--current-status temp-buf))
-                          (unless silent
-                            (message "`jj status' ok"))))
-                    (cleanup)))
+                  (unless silent
+                    (message "`jj status' ok"))
+                  (cleanup))
                 (end-err (errs)
                   (message "jj status update failed: %s" errs)
                   (cleanup))
@@ -2706,8 +2718,9 @@ Reverted buffer is the one that was active when this function was called."
       (unless silent
         (message "`jj status'..."))
       (promise-then
-       (with-current-buffer temp-buf
-         (start-jj-dash-async))
+       (with-current-buffer dash-buf
+         (let ((inhibit-read-only t))
+           (start-jj-dash-async)))
        #'end-ok
        #'end-err))))
 
@@ -3113,43 +3126,73 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                bookmarks-conflict)
       status
     (let ((list-prefix (propertize "- " 'face '(:foreground "grey"))))
-      (cond (files-changed
-             (insert "Working copy changes:\n")
-             (cl-loop for change in files-changed
-                      for (type from to) = (slot-values change
-                                             (status path-source path-target))
-                      for (color . elems) = (pcase-exhaustive type
-                                              ("modified" `(cyan "M" ,to))
-                                              ("added" `(green "A" ,to))
-                                              ("removed" `(red "D" ,from))
-                                              ("copied" `(green "C" "{" ,from "=>" ,to "}"))
-                                              ("renamed" `(cyan "R" "{" ,from "=>" ,to "}")))
-                      do (insert list-prefix)
-                      (insert (propertize (mapconcat #'identity elems " ")
-                                          'face `(:foreground ,(format "%s" color))
-                                          'jj-object change)
-                              "\n")))
-            (t (insert "Working copy unchanged\n")))
-      (insert "Working copy  (@) : ")
-      (insert-jj-status-lineage-entry commit-working-copy)
-      (cl-loop for parent in commits-parent
-               do (insert "Parent commit (@-): ")
-               (insert-jj-status-lineage-entry parent))
+      (magit-insert-section sec
+        (jj-status-files-changed files-changed)
+        (cond (files-changed
+               (magit-insert-heading "Working copy changes:\n")
+               (magit-insert-section-body
+                 (cl-loop for change in files-changed
+                          for (type from to) = (slot-values change
+                                                 (status path-source path-target))
+                          for (color . elems) = (pcase-exhaustive type
+                                                  ("modified" `(cyan "M" ,to))
+                                                  ("added" `(green "A" ,to))
+                                                  ("removed" `(red "D" ,from))
+                                                  ("copied" `(green "C" "{" ,from "=>" ,to "}"))
+                                                  ("renamed" `(cyan "R" "{" ,from "=>" ,to "}")))
+                          do (magit-insert-section sec
+                               (jj-status-wc-change)
+                               (magit-insert-heading
+                                 (propertize (concat list-prefix
+                                                     (mapconcat #'identity elems " ")
+                                                     "\n")
+                                             'face `(:foreground ,(format "%s" color))
+                                             'jj-object change))
+                               ))))
+              (t (magit-insert-heading "Working copy unchanged\n"))))
+      (magit-insert-section sec
+        (jj-status-lineage-entry `())
+        (magit-insert-heading "Lineage:")
+        (magit-insert-section-body
+          (magit-insert-section sec
+            (jj-status-lineage-entry)
+            (insert "Working copy  (@) : ")
+            (insert-jj-status-lineage-entry commit-working-copy))
+          (cl-loop for parent in commits-parent
+                   do (magit-insert-section sec
+                        (jj-status-lineage-entry)
+                        (insert "Parent commit (@-): ")
+                        (insert-jj-status-lineage-entry parent)))))
       (when files-conflict
-        (insert "Unresolved file conflicts:\n")
-        (cl-loop for conflict in files-conflict
-                 do (insert list-prefix)
-                 (insert-jj-status-file-conflict conflict)))
+        (magit-insert-section sec
+          (jj-status-files-conflict files-conflict)
+          (magit-insert-heading "Unresolved file conflicts:\n")
+          (magit-insert-section-body
+            (cl-loop for conflict in files-conflict
+                     do (magit-insert-section sec
+                          (jj-status-file-conflict conflict)
+                          (insert list-prefix)
+                          (insert-jj-status-file-conflict conflict))))))
       (when bookmarks-conflict
-        (insert "Unresolved bookmark conflicts:\n")
-        (cl-loop for conflict in bookmarks-conflict
-                 do (insert list-prefix)
-                 (insert-jj-status-bookmark-conflict conflict)))
+        (magit-insert-section sec
+          (jj-status-bookmarks-conflict bookmarks-conflict)
+          (magit-insert-heading "Unresolved bookmark conflicts:\n")
+          (magit-insert-section-body
+            (cl-loop for conflict in bookmarks-conflict
+                     do (magit-insert-section sec
+                          (jj-status-bookmark-conflict conflict)
+                          (insert list-prefix)
+                          (insert-jj-status-bookmark-conflict conflict))))))
       (when files-untracked
-        (insert "Untracked files:\n")
-        (cl-loop for file in files-untracked
-                 do (insert list-prefix)
-                 (insert-jj-status-file-untracked file))))))
+        (magit-insert-section sec
+          (jj-status-files-untracked files-untracked)
+          (magit-insert-heading "Untracked files:\n")
+          (magit-insert-section-body
+            (cl-loop for file in files-untracked
+                     do (magit-insert-section sec
+                          (jj-status-file-untracked file)
+                          (insert list-prefix)
+                          (insert-jj-status-file-untracked file)))))))))
 
 (ert-deftest jj-test-insert-status ()
   (with-temp-buffer
@@ -3214,67 +3257,77 @@ Also sets `jj--current-status' in the initial buffer when the status process com
     (let ((inhibit-read-only t))
       (erase-accessible-buffer))
     (let ((buf (current-buffer)))
-      (promise-all
-       `[,(with-current-buffer
-              (jj-make-section-buffer "log" "Log:\n" "\n")
-            (start-jj-log-async))
-         ,(promise-then
-           (jj-get-status-async)
-           (lambda (stat)
-             (if (buffer-live-p buf)
-                 (with-current-buffer buf
-                   (setq-local jj--current-status stat)
-                   (goto-char (point-min))
-                   (let ((inhibit-read-only t))
-                     (insert-jj-status stat)))
-               (error (format "dash output buffer %s deleted" buf)))))]))))
+      (promise-then
+       (promise-all
+        `[,(jj-log-entries-async)
+          ,(jj-get-status-async)])
+       (lambda (results)
+         (unless (buffer-live-p buf)
+           (error (format "dash output buffer %s deleted" buf)))
+         (with-current-buffer buf
+           (-let (([log-entries stat] results))
+             (setq-local jj--current-status stat)
+             (let ((inhibit-read-only t))
+               (erase-accessible-buffer)
+               (magit-insert-section (root)
+                 (magit-insert-section-body
+                   (magit-insert-section sec
+                     (jj-status-section stat)
+                     (magit-insert-heading "Status:\n")
+                     (magit-insert-section-body
+                       (insert-jj-status stat)))
+                   (magit-insert-section sec
+                     (jj-log-section log-entries)
+                     (magit-insert-heading "Log:\n")
+                     (when log-entries
+                       (magit-insert-section-body
+                         (dolist (entry log-entries)
+                           (insert-jj-graph-log-maybe-elided entry)))))))
+               ))))))))
 ;; status piping fns:1 ends here
 
 ;; section
 
 ;; [[file:majjik.org::*section][section:1]]
-(defun start-jj-log-async (&optional revset fileset)
+(defun jj-log-entries-async (&optional revset fileset)
   "Make a jj log in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer. Ignores `jj--last-revs' and `jj--last-files'."
   (let ((inhibit-read-only t))
     (erase-accessible-buffer))
-  (promise-new
-   (lambda (resolve reject)
-     (let* ((buf (current-buffer))
-            (temp (generate-new-buffer "*jj-log-temp*"))
-            (err (generate-new-buffer "*jj-log-stderr*"))
-            (sentinel (make-jj-simple-sentinel err temp))
-            (filter (cl-labels ((read-next ()
-                                  (ignore-errors (jj-read-graph-and-maybe-elided)))
-                                (print-entries (news)
-                                  (with-current-buffer buf
-                                    (let ((inhibit-read-only t))
-                                      ;; (mapc #'insert-jj-graph-log-maybe-elided news)
-                                      (cl-loop for new in news
-                                               do (insert-jj-graph-log-maybe-elided new))))))
-                      (make-jj-generic-buffered-filter temp #'read-next #'print-entries))))
-       (let ((proc (make-process
-                    :name "jj-log"
-                    :buffer buf
-                    :stderr err
-                    :filter filter
-                    :sentinel sentinel
-                    :noquery t
-                    :command `("jj" "log"
-                               "-T" ,jj-parseable-template
-                               ,@(jj--if-arg revset #'identity "-r")
-                               ,@(jj--if-arg fileset #'identity "--")
-                               ,@jj-global-default-args
-                               ,@(and jj-do-debug jj-global-debug-args)
-                               ,@jj-parsing-default-args
-                               "--config" ,(format "templates.log_node='%s'"
-                                                   (jj--toml-quote-string jj-log-node-template))))))
-         ;; handle the promise state
-         (add-function :after (process-sentinel proc)
-                       (make-jj-callback-sentinel
-                        (lambda (exit-status event)
-                          (if (eq exit-status 0)
-                              (funcall resolve proc)
-                            (funcall reject (cons proc event)))))))))))
+  (let ((entries nil))
+    (promise-new
+     (lambda (resolve reject)
+       (let* ((buf (current-buffer))
+              (temp (generate-new-buffer "*jj-log-temp*"))
+              (err (generate-new-buffer "*jj-log-stderr*"))
+              (sentinel (make-jj-simple-sentinel err temp))
+              (filter (cl-labels ((read-next ()
+                                    (ignore-errors (jj-read-graph-and-maybe-elided)))
+                                  (push-entries (news)
+                                    (setf entries (nconc entries news))))
+                        (make-jj-generic-buffered-filter temp #'read-next #'push-entries))))
+         (let ((proc (make-process
+                      :name "jj-log"
+                      :buffer buf
+                      :stderr err
+                      :filter filter
+                      :sentinel sentinel
+                      :noquery t
+                      :command `("jj" "log"
+                                 "-T" ,jj-parseable-template
+                                 ,@(jj--if-arg revset #'identity "-r")
+                                 ,@(jj--if-arg fileset #'identity "--")
+                                 ,@jj-global-default-args
+                                 ,@(and jj-do-debug jj-global-debug-args)
+                                 ,@jj-parsing-default-args
+                                 "--config" ,(format "templates.log_node='%s'"
+                                                     (jj--toml-quote-string jj-log-node-template))))))
+           ;; handle the promise state
+           (add-function :after (process-sentinel proc)
+                         (make-jj-callback-sentinel
+                          (lambda (exit-status event)
+                            (if (eq exit-status 0)
+                                (funcall resolve entries)
+                              (funcall reject (cons proc event))))))))))))
 ;; section:1 ends here
 
 ;; find and update dash buffer
