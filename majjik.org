@@ -482,6 +482,182 @@
 likely due to all the overriding text properties happening in this buffer.
 cursor jumps strangely when moving ~previous-line~ in the first column.
 cursor appears to jump to top of screen when inside a collapsed section as it collapses.
+***** TODO COMMENT sectioned mutable process log
+****** proof of concept
+#+begin_src elisp
+  ;; -*- lexical-binding: t; -*-
+  (let ((buf (generate-new-buffer "log"))
+        (val `(:log))
+        (sec-parts))
+    (with-current-buffer buf
+      (magit-insert-section (root)
+        (magit-insert-section sec
+          (foo val)
+          (let ((header-regions
+                 (xo/insert-sectioned-heading
+                  '("["
+                    (:code . "   ")
+                    "]> jj "
+                    (:args . "<args >")
+                    "(cmd)\n"))))
+            (setq sec-parts `(,sec ,@header-regions)))))
+      (jj-inspect-mode)
+      (let* ((sec (car sec-parts))
+             (parts (cdr sec-parts))
+             (code (alist-get :code (dbg parts)))
+             (args (alist-get :args parts))
+             (buf-code (with-current-buffer (clone-indirect-buffer "code-buf" nil)
+                         (narrow-to-region (car code) (cdr code))
+                         (current-buffer)))
+             (ovl-args (make-overlay (car args) (cdr args)))
+             (fn (let ((count -1))
+                   (lambda ()
+                     (with-current-buffer buf
+                       (xo/modify-section-header sec
+                         (lambda ()
+                           (with-current-buffer buf-code
+                             (let ((str (buffer-string))
+                                   (inhibit-redisplay t))
+                               (erase-accessible-buffer)
+                               (insert
+                                (pcase count
+                                  (-1
+                                   (propertize "run"
+                                               'font-lock-face '(:foreground "yellow")))
+                                  (0
+                                   (propertize "  0"
+                                               'font-lock-face '(:foreground "green")))
+                                  (_
+                                   (propertize (format "%3d" count)
+                                               'font-lock-face '(:foreground "red")))))
+                               (cl-incf count)))))
+                       (xo/modify-section-body sec
+                         (lambda ()
+                           (goto-char (point-max))
+                           (insert (format "foo %d\n" count)))))))))
+        (push ovl-args (cdr val))
+        (run-at-time "1 sec" nil fn)
+        (run-at-time "2 sec" nil fn)
+        (run-at-time "3 sec" nil fn)
+        (run-at-time "4 sec" nil fn)
+        (run-at-time "5 sec" nil fn)
+        (run-at-time "6 sec" nil fn)))
+
+    (pop-to-buffer buf))
+
+  (define-advice magit-section-show (:after (sec) xo/magit-section-show-args)
+    (pcase (oref sec value)
+      (`(:log ,ovl-args)
+       (overlay-put ovl-args 'display nil))))
+
+  (define-advice magit-section-hide (:after (sec) xo/magit-section-hide-args)
+    (pcase (oref sec value)
+      (`(:log ,ovl-args)
+       (overlay-put ovl-args 'display ""))))
+
+  (defun xo/modify-section-header (sec fun)
+    "Update the heading of SEC by running FUN narrowed to the section's body.
+  Update the properties and markers appropriately to expand the header to the new contents."
+    (declare (indent 1))
+    (save-excursion
+      (with-restriction (oref sec start) (oref sec content)
+        (let ((inhibit-read-only t))
+          (funcall fun)
+          (move-marker (oref sec content) (point-max))
+          (xo/propertize-buffer-for-section sec)))))
+
+  (defun xo/modify-section-body (sec fun)
+    "Update the body of SEC by running FUN narrowed to the section's body.
+  Update the properties and markers appropriately to expand the body to the new contents."
+    (declare (indent 1))
+    (save-excursion
+      (with-restriction (oref sec content) (oref sec end)
+        (let ((inhibit-read-only t))
+          (funcall fun)
+          (move-marker (oref sec end) (point-max))
+          (xo/propertize-buffer-for-section sec)
+          (when (oref sec hidden)
+            (magit-section-hide sec))))))
+
+  (defun xo/propertize-buffer-for-section (sec)
+    "Apply SEC as the `magit-section' property for all of the accessible buffer that does not already have a `magit-section'"
+    (cl-loop for start = (point-min) then pos
+             for pos = (next-property-change start)
+             for end = (or pos
+                           (point-max))
+             for sec-here = (or (get-text-property start 'magit-section)
+                                sec)
+             do (put-text-property start end 'magit-section sec-here)
+             while pos))
+
+  (defun xo/insert-sectioned-heading (header-parts)
+    "Insert all of HEADER-PARTS as a magit section heading.
+  Returns an alist of buffer regions. For each LABEL, the returned alist contains an
+  entry (LABEL START . END) where START and END are markers to where the
+  corresponding labeled string starts and ends."
+    (xo/insert-sectioned header-parts
+                         #'magit-insert-heading))
+
+
+#+end_src
+****** TODO draft replacement
+#+begin_src elisp
+  (defun jj--make-process-log-entry (name cmd &optional min-cmd hide-args)
+    "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, MIN-CMD is a shorter version of CMD, e.g. omitting majjik's default arguments."
+    (let ((repo-dir default-directory))
+      (with-current-buffer (jj--get-command-log-buf repo-dir)
+        (let* ((inhibit-read-only t)
+               (display-name (jj--replace-newlines name)))
+          (goto-char (point-max))
+          (magit-insert-section sec
+            (jj-proc-log-section)
+            (map-let (:start
+                      :code 
+                      :args
+                      :cmd
+                      :content
+                      :stdout
+                      :stderr
+                      :end)
+                `(,@(xo/insert-sectioned-heading
+                     `(:start
+                       (:code . "   ")
+                       "> jj "
+                       (:args . ,(propertize (jj--replace-newlines
+                                              (mapconcat #'shell-quote-argument hide-args " "))
+                                             'font-lock-face 'shadow))
+                       " "
+                       (:cmd . ,(jj--replace-newlines
+                                 (mapconcat #'shell-quote-argument cmd " ")))
+                       "\n"))
+                  ,@(xo/insert-sectioned
+                     `(:content
+                       "\n"
+                       :stdout
+                       "\n"
+                       :stderr
+                       "\n"
+                       :end)))
+              (let* ((code-buf (xo/make-narrowed-indirect (format "*code-section %s*" display-name) (car code) (cdr code)))
+                     (stdout (xo/make-narrowed-indirect (format "*stdout-section %s*" display-name) stdout stdout))
+                     (stderr (xo/make-narrowed-indirect (format "*stderr-section %s*" display-name) stderr stderr))
+                     ;; these need to be overlays,
+                     ;; so we can toggle their properties as a unit
+                     (ovl-args (make-overlay (car args) (cdr args)))
+                     (ovl-collapse (make-overlay content end))
+                     ;; these all also need to be overlays,
+                     ;; so they keep applying as text is added
+                     (ovl-control (make-overlay start end)))
+                (make-jj--process-log-entry
+                 :name name
+                 :buf-code code-buf
+                 :buf-stdout stdout
+                 :buf-stderr stderr
+                 :ovl-control ovl-control
+                 :ovl-collapse ovl-collapse
+                 :ovl-args ovl-args))))))))
+#+end_src
+****** TODO replacement
 **** sentinels and filters
 #+begin_src elisp
   (defun jj--sticky-insert (marker insert-fn sticky-top)
