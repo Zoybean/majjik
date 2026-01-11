@@ -265,7 +265,7 @@ When returning both a string result and an exit code, they are returned as a con
 (defun jj--make-process-log-section-buffers (name cmd)
   "Return a triple of buffers (CODE STDOUT . STDERR) for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams."
   (let ((repo-dir default-directory))
-    (with-current-buffer (jj--get-command-log-buf (expand-file-name repo-dir))
+    (with-current-buffer (jj--get-command-log-buf repo-dir)
       (goto-char (point-max))
       (let* ((inhibit-read-only t)
              (code-buf (jj-make-section-buffer name "(" ") "))
@@ -2818,7 +2818,7 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 
 (defun jj--get-command-log-buf (repo-dir)
   "Get or create the command-log buffer for the given REPO-DIR, and ensure it is in the correct mode."
-  (let ((buf (get-buffer-create (format "*jj-command-log:%s*" repo-dir))))
+  (let ((buf (get-buffer-create (format "*jj-command-log:%s*" (expand-file-name repo-dir)))))
     (with-current-buffer buf
       (unless (derived-mode-p 'jj-inspect-mode)
         (jj-inspect-mode)))
