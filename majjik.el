@@ -263,18 +263,49 @@ When returning both a string result and an exit code, they are returned as a con
 
 ;; [[file:majjik.org::*async processes][async processes:1]]
 (defun jj--make-process-log-section-buffers (name cmd)
-  "Return a triple of buffers (CODE STDOUT . STDERR) for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams."
+  "Return a triple of buffers (CODE STDOUT . STDERR) for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams.
+Also sets up folding so that TAB anywhere within a command will toggle the display of the full log."
   (let ((repo-dir default-directory))
     (with-current-buffer (jj--get-command-log-buf repo-dir)
       (goto-char (point-max))
       (let* ((inhibit-read-only t)
+             (mark-control-start (point-marker))
              (code-buf (jj-make-section-buffer name "(" ") "))
              (header (concat "> " (mapconcat #'shell-quote-argument
-                                             `("jj" ,@jj-global-default-args ,@cmd) " ")
-                             "\n"))
-             (stdout (jj-make-section-buffer name (propertize header 'face 'magit-section-heading) "\n"))
-             (stderr (jj-make-section-buffer name (propertize "=== stderr ===\n" 'face 'magit-section-heading) "\n")))
+                                             `("jj" ,@jj-global-default-args ,@cmd) " ")))
+             (header-end
+              (progn
+                (insert (propertize header 'face 'magit-section-heading))
+                (point-marker)))
+             (stdout (jj-make-section-buffer name "\n" "\n"))
+             (stderr (jj-make-section-buffer name (propertize "=== stderr ===\n" 'face 'magit-section-heading) "\n"))
+             (mark-collapse-end (copy-marker (point-max)))
+             (mark-control-end (progn
+                                 (goto-char (point-max))
+                                 (insert "\n")
+                                 (copy-marker (point))))
+             (ovl-collapse (make-overlay header-end mark-collapse-end))
+             (ovl-control (make-overlay mark-control-start mark-control-end)))
+        (overlay-put ovl-collapse 'display "...")
+        (overlay-put ovl-control
+         'keymap (jj--make-toggle-keymap
+                  (jj--make-toggle-overlay-ellipsis ovl-collapse "...")))
         `(,code-buf ,stdout . ,stderr)))))
+
+(defun jj--make-toggle-keymap (toggle-fn)
+  "Make a keymap that binds TAB to TOGGLE-FN."
+  (let ((map (make-sparse-keymap)))
+    (keymap-set map "TAB" toggle-fn)
+    map))
+
+(defun jj--make-toggle-overlay-ellipsis (overlay string)
+  "Make a function that toggles the display property of OVERLAY between nil and STRING."
+  (lambda ()
+    (interactive)
+    (overlay-put overlay 'display
+                 (if (overlay-get overlay 'display)
+                     nil
+                   string))))
 
 (defun jj--set-initial-run-status (code-buf)
   (with-current-buffer code-buf
@@ -1698,10 +1729,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
     ;; never colourise output
     "--color=never"
     ;; never request a pager
-    "--no-pager"
-    ;; never print secondary output
-    "--quiet"
-    ))
+    "--no-pager"))
 ;; Default args:1 ends here
 
 ;; Readers
@@ -1952,6 +1980,7 @@ Reverted buffer is the one that was active when this function was called."
      :command `("jj" "show"
                 "--no-patch"
                 "-T" ,(jj-show-status-template 'self)
+                "--quiet"
                 ,@jj-global-default-args))))
 ;; jj-show for status section:1 ends here
 
@@ -1995,7 +2024,8 @@ Reverted buffer is the one that was active when this function was called."
      :noquery t
      :command `("jj" "file" "list-untracked"
                 "-T" ,(jj-status-file-untracked-template 'self)
-                ,@jj-global-default-args))))
+                ,@jj-global-default-args
+                "--quiet"))))
 ;; jj-file for untracked files:1 ends here
 
 ;; jj-bookmark-list for bookmark conflicts
@@ -2019,7 +2049,8 @@ Reverted buffer is the one that was active when this function was called."
      :command `("jj" "bookmark" "list"
                 ,@(jj--if-arg revset #'identity "-r")
                 ,@other-args
-                ,@jj-global-default-args))))
+                ,@jj-global-default-args
+                "--quiet"))))
 ;; jj-bookmark-list for bookmark conflicts:1 ends here
 
 ;; Combined struct and output formatter
@@ -2473,6 +2504,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                 ,@(jj--if-arg revset #'identity "-r")
                 ,@(jj--if-arg fileset #'identity "--")
                 ,@jj-global-default-args
+                "--quiet"
                 "--config" ,(format "templates.log_node='%s'"
                                     (jj--toml-quote-string jj-log-node-template))))))
 ;; jj-log:1 ends here
@@ -2825,52 +2857,81 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
     buf))
 ;; command log:1 ends here
 
-;; callbacks
+;; async command utils
 
-;; [[file:majjik.org::*callbacks][callbacks:1]]
-(defun jj--standard-async-callback (name &optional no-revert silent-ok)
-  "Returns a callback for `jj-cmd-async'. If NAME, print a message saying whether NAME was successful. If DO-REVERT, on success, revert the dash buffer for the relevant jj repo."
-  (lambda (code event dir)
-    (cond ((eq code 0)
-           (unless no-revert
-             (jj-revert-dash-buffer-async dir))
-           (unless silent-ok
-             (message "`jj %s' ok" name)))
-          (t
-           (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))))))
+;; [[file:majjik.org::*async command utils][async command utils:1]]
+(defalias 'jj-cmd-async 'jj-cmd-promise)
 
-(defun jj-cmd-async (name cmd &optional no-revert silent-ok)
-  "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
+(defun jj-cmd-promise (name cmd &optional no-revert silent-ok no-kill-output)
+  "Run CMD asynchronously, returning a promise of its completion.
+
+On success, reverts the repo's dash buffer unless NO-REVERT, prints a message unless SILENT-OK, kills the output buffer unless NO-KILL-OUTPUT, and returns the process. On error, prints a message indicating the command log buffer, and returns a cons (PROCESS . EVENT)."
   (declare (indent 2))
-  (jj-cmd--async name cmd
-    (jj--standard-async-callback name no-revert silent-ok)))
+  (promise-then
+   (jj-cmd--promise name cmd)
+   (jj--make-async-success-callback name no-revert silent-ok no-kill-output)
+   (jj--make-async-failure-callback name)))
 
-(defun jj-cmd--async (name cmd &optional callback)
-  "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of 3 arguments, EXIT, EVENT, and DIR. DIR is the directory that was current for the command."
+(defun jj--make-async-success-callback (name &optional no-revert silent-ok no-kill-output)
+  (lambda (proc)
+    (unless no-revert
+      (jj-revert-dash-buffer-async
+       (buffer-local-value 'default-directory
+                           (process-buffer proc))))
+    (unless silent-ok
+      (message "`jj %s' ok" name))
+    (unless no-kill-output
+      (kill-buffer (process-buffer proc)))
+    proc))
+
+(defun jj--make-async-failure-callback (name)
+  (-lambda ((proc . event))
+    (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))))
+
+(defun jj-cmd--promise (name cmd)
+  "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
   (declare (indent 2))
   (let ((repo-dir default-directory))
     (-let (((code stdout . stderr) (jj--make-process-log-section-buffers name cmd)))
-      (let ((proc (make-process
-                   :name (format "jj-%s" name)
-                   :buffer stdout
-                   :stderr stderr
-                   :sentinel (jj--make-update-exit-code-sentinel code)
-                   :noquery t
-                   :command `("jj"
-                              ,@jj-global-default-args
-                              ,@cmd))))
-        (jj--set-initial-run-status code)
-        (add-function :after (process-sentinel proc)
-                      (jj--make-print-status-sentinel stderr))
-        (when callback
-          (add-function :after (process-sentinel proc)
-                        (make-jj-callback-sentinel
-                         (lambda (code event)
-                           (funcall callback code event repo-dir)))))
-        (add-function :after (process-sentinel proc)
-                      (jj--make-cleanup-sentinel stderr stdout code))
-        ))))
-;; callbacks:1 ends here
+      (promise-new
+       (lambda (resolve reject)
+         (let ((proc (make-process
+                      :name (format "jj-%s" name)
+                      :buffer stdout
+                      :stderr stderr
+                      :sentinel (jj--make-update-exit-code-sentinel code)
+                      :noquery t
+                      :command `("jj"
+                                 ,@jj-global-default-args
+                                 ,@cmd))))
+           (jj--set-initial-run-status code)
+           (add-function :after (process-sentinel proc)
+                         (jj--make-print-status-sentinel stderr))
+           (add-function :after (process-sentinel proc)
+                         (make-jj-callback-sentinel
+                          (lambda (code event)
+                            (if (eq code 0)
+                                (funcall resolve proc)
+                              (funcall reject (cons proc event))))))
+           ;; this always runs before the subsequent callbacks,
+           ;; which means `resolve' and `reject' are not themselves callbacks
+           (add-function :after (process-sentinel proc)
+                         (jj--make-cleanup-sentinel stderr code))))))))
+;; async command utils:1 ends here
+
+;; util
+
+;; [[file:majjik.org::*util][util:1]]
+(defun jj--make-async-copy-cleanup-pop-callback (to-buf)
+  "For jj commands which open up a new output buffer, make a callback to copy from the process buffer into TO-BUF,
+then kill the process buffer and pop to TO-BUF."
+  (lambda (proc)
+    (with-current-buffer to-buf
+      (let ((inhibit-read-only t))
+        (replace-buffer-contents (process-buffer proc)))
+      (kill-buffer (process-buffer proc)))
+    (pop-to-buffer to-buf)))
+;; util:1 ends here
 
 ;; jj diff
 
@@ -2884,30 +2945,19 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
       (view-mode-enter nil #'kill-buffer)
       (setq-local default-directory repo-dir)
       (let ((inhibit-read-only t))
-        (erase-accessible-buffer))
-      (let ((err (generate-new-buffer "*jj-diff-stderr*")))
-        (let ((proc (make-process
-                     :name "jj-diff"
-                     :buffer (current-buffer)
-                     :stderr err
-                     :noquery t
-                     :command `("jj" ,@jj-global-default-args
-                                "diff"
-                                "--git"
-                                ,@(jj--if-arg at #'identity "--revisions")
-                                ,@(jj--if-arg from #'identity "--from")
-                                ,@(jj--if-arg to #'identity "--to")
-                                "--"
-                                ,@(jj--if-arg fileset #'identity nil)))))
-          (add-function :after (process-sentinel proc)
-                        (jj--make-print-status-sentinel err))
-          (add-function :after (process-sentinel proc)
-                        (make-jj-callback-sentinel
-                         (lambda (code event)
-                           (when (= code 0)
-                             (pop-to-buffer main-buf)))))
-          (add-function :after (process-sentinel proc)
-                        (jj--make-cleanup-sentinel err)))))))
+        (erase-accessible-buffer)))
+    (promise-then
+     (jj-cmd-async
+         "diff"
+         `("diff"
+           "--git"
+           ,@(jj--if-arg at #'identity "--revisions")
+           ,@(jj--if-arg from #'identity "--from")
+           ,@(jj--if-arg to #'identity "--to")
+           "--"
+           ,@(jj--if-arg fileset #'identity nil))
+       :no-revert :silent-ok :no-kill-output)
+     (jj--make-async-copy-cleanup-pop-callback main-buf))))
 
 (defun jj-diff-at (revset &optional fileset)
   "View the diff for REVISION, optionally limited to files in FILESET."
@@ -2926,47 +2976,22 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (let* ((repo-dir default-directory)
          (main-buf (get-buffer-create (format "*jj-show %s:%s:%s*" repo-dir commit fileset))))
     (with-current-buffer main-buf
+      ;; TODO get a better mode for full commit view
       (diff-mode)
       (view-mode-enter nil #'kill-buffer)
       (setq-local default-directory repo-dir)
       (let ((inhibit-read-only t))
-        (erase-accessible-buffer))
-      (let* ((err (generate-new-buffer "*jj-show-stderr*")))
-        ;; (with-section "show"
-        (let ((proc (make-process
-                     :name "jj-show"
-                     :buffer (current-buffer)
-                     :stderr err
-                     :noquery t
-                     :command `("jj" ,@jj-global-default-args
-                                "show"
-                                "--git"
-                                "-r" ,commit
-                                "--"
-                                ,@(jj--if-arg fileset #'identity nil)))))
-          (add-function :after (process-sentinel proc)
-                        (jj--make-print-status-sentinel err))
-          (add-function :after (process-sentinel proc)
-                        (make-jj-callback-sentinel
-                         (lambda (code event)
-                           (when (= code 0)
-                             (pop-to-buffer main-buf)))))
-          (add-function :after (process-sentinel proc)
-                        (jj--make-cleanup-sentinel err)))
-        ;; )
-        ;; (with-section "diff"
-        ;;               (make-process
-        ;;                :name "jj-diff"
-        ;;                :buffer (current-buffer)
-        ;;                :stderr err
-        ;;                :filter filter
-        ;;                :sentinel sentinel
-        ;;                :noquery t
-        ;;                :command `("jj" ,@jj-global-default-args
-        ;;                           "diff"
-        ;;                           "--git"
-        ;;                           ,@(jj--if-arg at #'identity "--revisions"))))
-        ))))
+        (erase-accessible-buffer)))
+    (promise-then
+     (jj-cmd-async
+         "diff"
+         `("show"
+           "--git"
+           "-r" ,commit
+           "--"
+           ,@(jj--if-arg fileset #'identity nil))
+       :no-revert :silent-ok :no-kill-output)
+     (jj--make-async-copy-cleanup-pop-callback main-buf))))
 ;; jj show:1 ends here
 
 ;; jj undo
