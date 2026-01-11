@@ -270,8 +270,7 @@
         (let* ((inhibit-read-only t)
                (mark-control-start (point-marker))
                (code-buf (jj-make-section-buffer name "(" ") "))
-               (header (concat "> " (mapconcat #'shell-quote-argument
-                                               `("jj" ,@jj-global-default-args ,@cmd) " ")))
+               (header (concat "> " (mapconcat #'shell-quote-argument cmd " ")))
                (header-end
                 (progn
                   (insert (propertize header 'face 'magit-section-heading))
@@ -1722,10 +1721,16 @@
   (defvar jj-global-default-args
     '(;; never auto-track new files
       "--config" "snapshot.auto-track='none()'"
-      ;; never colourise output
-      "--color=never"
       ;; never request a pager
       "--no-pager"))
+  (defvar jj-parsing-default-args
+    '(;; never colourise output
+      "--color=never"
+      ;; omit extra output
+      "--quiet"))
+  (defvar jj-logging-default-args
+    '(;; never colourise output (for now)
+      "--color=never"))
 #+end_src
 ** Readers
 #+begin_src elisp
@@ -1968,8 +1973,8 @@ so far, the only significant differences in parity that I'm aware of, are:
        :command `("jj" "show"
                   "--no-patch"
                   "-T" ,(jj-show-status-template 'self)
-                  "--quiet"
-                  ,@jj-global-default-args))))
+                  ,@jj-global-default-args
+                  ,@jj-parsing-default-args))))
 #+end_src
 **** COMMENT jj-show for diff section
 
@@ -1991,7 +1996,7 @@ so far, the only significant differences in parity that I'm aware of, are:
                   "--no-patch"
                   "-T" ,(jj-status-diff-template 'self)
                   ,@jj-global-default-args
-                  "--quiet"))))
+                  ,@jj-parsing-default-args))))
 #+end_src
 **** jj-file for untracked files
 
@@ -2033,7 +2038,7 @@ so far, the only significant differences in parity that I'm aware of, are:
        :command `("jj" "file" "list-untracked"
                   "-T" ,(jj-status-file-untracked-template 'self)
                   ,@jj-global-default-args
-                  "--quiet"))))
+                  ,@jj-parsing-default-args))))
 #+end_src
 
 **** jj-bookmark-list for bookmark conflicts
@@ -2057,7 +2062,7 @@ so far, the only significant differences in parity that I'm aware of, are:
                   ,@(jj--if-arg revset #'identity "-r")
                   ,@other-args
                   ,@jj-global-default-args
-                  "--quiet"))))
+                  ,@jj-parsing-default-args))))
 #+end_src
 **** TODO ensure these are distinct from similar-name commands
 these section commands should be named to be sure that theydont collide with user-facing commands like jj-show for viewing a commit in its own buffer
@@ -2508,7 +2513,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                   ,@(jj--if-arg revset #'identity "-r")
                   ,@(jj--if-arg fileset #'identity "--")
                   ,@jj-global-default-args
-                  "--quiet"
+                  ,@jj-parsing-default-args
                   "--config" ,(format "templates.log_node='%s'"
                                       (jj--toml-quote-string jj-log-node-template))))))
 #+end_src
@@ -2852,7 +2857,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
   (defun jj-cmd-sync (cmd &optional no-revert no-error)
     "Call jj with the given CMD, passing the default args first, and returning the output as a string. Signals an error if the command returns a nonzero exit code. When the command completes successfully, reverts the dash buffer for the repo (if there is one, and NO-REVERT was nil).
   When NO-ERROR, return the error code instead of raising an error. See `call-cmd' for details."
-    (let ((cmd `("jj" ,@jj-global-default-args ,@cmd)))
+    (let ((cmd `("jj" ,@jj-global-default-args ,@jj-logging-default-args ,@cmd)))
       (prog1
           (call-cmd cmd nil :string nil no-error)
         (unless no-revert
@@ -2918,7 +2923,11 @@ might actually not use these as I need a lexical variable anyway in most cases w
     "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
     (declare (indent 2))
     (let ((repo-dir default-directory))
-      (-let (((code stdout . stderr) (jj--make-process-log-section-buffers name cmd)))
+      (-let* ((full-cmd `("jj"
+                          ,@jj-global-default-args
+                          ,@jj-logging-default-args
+                          ,@cmd))
+              ((code stdout . stderr) (jj--make-process-log-section-buffers name full-cmd)))
         (promise-new
          (lambda (resolve reject)
            (let ((proc (make-process
@@ -2927,9 +2936,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
                         :stderr stderr
                         :sentinel (jj--make-update-exit-code-sentinel code)
                         :noquery t
-                        :command `("jj"
-                                   ,@jj-global-default-args
-                                   ,@cmd))))
+                        :command full-cmd)))
              (jj--set-initial-run-status code)
              (add-function :after (process-sentinel proc)
                            (jj--make-print-status-sentinel stderr))
