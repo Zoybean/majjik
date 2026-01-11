@@ -373,16 +373,18 @@ When returning both a string result and an exit code, they are returned as a con
               :documentation "Buffer for process standard error.")
   (ovl-control nil :type overlay
                :documentation "Overlay for the area through which the user may interact with the process.")
-  (min-cmd nil :type string
-                :documentation "Abbreviated command string.")
-  (ovl-cmd nil :type overlay
-           :documentation "Overlay for the command string, which should be replaced with the min command string when collapsed.")
+   (min-cmd nil :type string
+           :documentation "Abbreviated command string.")
+   (ovl-cmd nil :type overlay
+            :documentation "Overlay for the command string, which should be replaced with the min command string when collapsed.")
+  (ovl-args nil :type overlay
+            :documentation "Overlay for the default args string, which should be hidden when collapsed.")
   (ovl-collapse nil :type overlay
                 :documentation "Overlay for the area which should be collapsible.")
   (ovl-err nil :type overlay
            :documentation "Overlay for the process standard error."))
 
-(defun jj--make-process-log-entry (name cmd &optional min-cmd)
+(defun jj--make-process-log-entry (name cmd &optional min-cmd hide-args)
   "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, MIN-CMD is a shorter version of CMD, e.g. omitting majjik's default arguments."
   (let ((repo-dir default-directory))
     (with-current-buffer (jj--get-command-log-buf repo-dir)
@@ -394,14 +396,19 @@ When returning both a string result and an exit code, they are returned as a con
              (inhibit-read-only t)
              (mark-control-start (point-marker))
              (code-buf (jj-make-section-buffer (jj--replace-newlines name) inv inv))
-             (header (propertize (jj--replace-newlines
-                                  (mapconcat #'shell-quote-argument cmd " "))
-                                 'face 'magit-section-heading))
-             (mark-header-start (progn (insert "> ")
-                                  (point-marker)))
+             (args (jj--replace-newlines
+                    (mapconcat #'shell-quote-argument hide-args " ")))
+             (cmd (jj--replace-newlines
+                   (mapconcat #'shell-quote-argument cmd " ")))
+             (mark-args-start (progn (insert "> jj ")
+                                     (point-marker)))
+             (mark-args-end (progn
+                              (insert (propertize args 'font-lock-face 'shadow) " ")
+                              (point-marker)))
              (mark-header-end (progn
-                                (insert header)
-                                (point-marker)))
+                                (insert cmd)
+                                (point-marker)
+                                ))
              (stdout (jj-make-section-buffer (jj--replace-newlines name) "\n" zws))
              (mark-err-start (point-marker))
              (stderr (jj-make-section-buffer (jj--replace-newlines name) zws "\n"))
@@ -409,7 +416,7 @@ When returning both a string result and an exit code, they are returned as a con
              (mark-control-end (point-marker))
              ;; this needs to be an overlay,
              ;; so we can toggle its properties as a unit
-             (ovl-cmd (make-overlay mark-header-start mark-header-end))
+             (ovl-args (make-overlay mark-args-start mark-args-end))
              (ovl-collapse (make-overlay mark-header-end mark-collapse-end))
              ;; these all also need to be overlays,
              ;; so they keep applying as text is added
@@ -423,10 +430,7 @@ When returning both a string result and an exit code, they are returned as a con
          :buf-stderr stderr
          :ovl-control ovl-control
          :ovl-collapse ovl-collapse
-         :ovl-cmd ovl-cmd
-         :min-cmd (and min-cmd
-                       (jj--replace-newlines
-                        (jj--cmd-abbrev min-cmd)))
+         :ovl-args ovl-args
          :ovl-err ovl-err)))))
 
 (defun jj--set-initial-run-status (code-buf)
@@ -4108,18 +4112,23 @@ Does not use `process-mark', but instead manages internal alist of markers per b
 
 (defun jj-cmd--with-standard-args (cmd)
   "Return CMD with added arguments for using emacs as editor, and all the applicable configured arguments for a logging command."
+  `(,@(jj-cmd--standard-args)
+    ,@cmd))
+
+(defun jj-cmd--standard-args ()
+  "Return CMD with added arguments for using emacs as editor, and all the applicable configured arguments for a logging command."
   `(,@jj-current-dynamic-args
     ,@jj-global-default-args
     ,@(and jj-do-debug jj-global-debug-args)
-    ,@jj-logging-default-args
-    ,@cmd))
+    ,@jj-logging-default-args))
 
 (defun jj-cmd--promise (name cmd &optional output-buffer)
   "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
   (declare (indent 2))
   (let ((repo-dir default-directory))
-    (let ((full-cmd `("jj" ,@(jj-cmd--with-standard-args cmd)))
-          (min-cmd `("jj" ,@cmd)))
+    (let ((full-cmd `(,@(jj-cmd--with-standard-args cmd)))
+          (min-cmd `(,@cmd))
+          (hide-args (jj-cmd--standard-args)))
       (pcase-let (((and proc-entry
                         (cl-struct jj--process-log-entry
                                    buf-code
@@ -4128,7 +4137,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                                    ovl-control
                                    ovl-collapse
                                    ovl-err))
-                   (jj--make-process-log-entry name full-cmd min-cmd)))
+                   (jj--make-process-log-entry name cmd min-cmd hide-args)))
         (promise-new
          (lambda (resolve reject)
            (let* ((proc (make-process
@@ -4140,7 +4149,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                          :filter (jj--make-ansi-color-multi-filter `(,buf-stdout
                                                                      ,@(opt output-buffer)))
                          :noquery t
-                         :command full-cmd))
+                         :command `("jj" ,@full-cmd)))
                   (jj-proc (make-jj-process :process proc
                                             :stderr buf-stderr
                                             :log-entry proc-entry)))
@@ -4390,8 +4399,7 @@ Sometimes this does not actually succeed at killing the process."
     ((cl-struct jj--process-log-entry
                 ovl-control
                 ovl-collapse
-                ovl-cmd
-                min-cmd)
+                ovl-args)
      ;; store for next time
      (overlay-put ovl-collapse
                   'jj--section-collapsed
@@ -4422,12 +4430,12 @@ Sometimes this does not actually succeed at killing the process."
                   ;; setting it nil. this still overrides the corresponding
                   ;; text properties, unfortunately
                   (and collapsed jj--process-ellipsis))
-     (overlay-put ovl-cmd
+     (overlay-put ovl-args
                   'display
                   ;; there's no way to remove an overlay property except by
                   ;; setting it nil. this still overrides the corresponding
                   ;; text properties, unfortunately
-                  (and collapsed min-cmd)))))
+                  (and collapsed "")))))
 
 (defvar jj--process-ellipsis "\n"
   "String to show instead of process output when collapsing.")
