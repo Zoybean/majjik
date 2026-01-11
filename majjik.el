@@ -271,8 +271,7 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
       (let* ((inhibit-read-only t)
              (mark-control-start (point-marker))
              (code-buf (jj-make-section-buffer name "(" ") "))
-             (header (concat "> " (mapconcat #'shell-quote-argument
-                                             `("jj" ,@jj-global-default-args ,@cmd) " ")))
+             (header (concat "> " (mapconcat #'shell-quote-argument cmd " ")))
              (header-end
               (progn
                 (insert (propertize header 'face 'magit-section-heading))
@@ -1734,10 +1733,16 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 (defvar jj-global-default-args
   '(;; never auto-track new files
     "--config" "snapshot.auto-track='none()'"
-    ;; never colourise output
-    "--color=never"
     ;; never request a pager
     "--no-pager"))
+(defvar jj-parsing-default-args
+  '(;; never colourise output
+    "--color=never"
+    ;; omit extra output
+    "--quiet"))
+(defvar jj-logging-default-args
+  '(;; never colourise output (for now)
+    "--color=never"))
 ;; Default args:1 ends here
 
 ;; Readers
@@ -1988,8 +1993,8 @@ Reverted buffer is the one that was active when this function was called."
      :command `("jj" "show"
                 "--no-patch"
                 "-T" ,(jj-show-status-template 'self)
-                "--quiet"
-                ,@jj-global-default-args))))
+                ,@jj-global-default-args
+                ,@jj-parsing-default-args))))
 ;; jj-show for status section:1 ends here
 
 ;; jj-file for untracked files
@@ -2033,7 +2038,7 @@ Reverted buffer is the one that was active when this function was called."
      :command `("jj" "file" "list-untracked"
                 "-T" ,(jj-status-file-untracked-template 'self)
                 ,@jj-global-default-args
-                "--quiet"))))
+                ,@jj-parsing-default-args))))
 ;; jj-file for untracked files:1 ends here
 
 ;; jj-bookmark-list for bookmark conflicts
@@ -2058,7 +2063,7 @@ Reverted buffer is the one that was active when this function was called."
                 ,@(jj--if-arg revset #'identity "-r")
                 ,@other-args
                 ,@jj-global-default-args
-                "--quiet"))))
+                ,@jj-parsing-default-args))))
 ;; jj-bookmark-list for bookmark conflicts:1 ends here
 
 ;; Combined struct and output formatter
@@ -2512,7 +2517,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                 ,@(jj--if-arg revset #'identity "-r")
                 ,@(jj--if-arg fileset #'identity "--")
                 ,@jj-global-default-args
-                "--quiet"
+                ,@jj-parsing-default-args
                 "--config" ,(format "templates.log_node='%s'"
                                     (jj--toml-quote-string jj-log-node-template))))))
 ;; jj-log:1 ends here
@@ -2830,7 +2835,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun jj-cmd-sync (cmd &optional no-revert no-error)
   "Call jj with the given CMD, passing the default args first, and returning the output as a string. Signals an error if the command returns a nonzero exit code. When the command completes successfully, reverts the dash buffer for the repo (if there is one, and NO-REVERT was nil).
 When NO-ERROR, return the error code instead of raising an error. See `call-cmd' for details."
-  (let ((cmd `("jj" ,@jj-global-default-args ,@cmd)))
+  (let ((cmd `("jj" ,@jj-global-default-args ,@jj-logging-default-args ,@cmd)))
     (prog1
         (call-cmd cmd nil :string nil no-error)
       (unless no-revert
@@ -2900,7 +2905,11 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
   "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
   (declare (indent 2))
   (let ((repo-dir default-directory))
-    (-let (((code stdout . stderr) (jj--make-process-log-section-buffers name cmd)))
+    (-let* ((full-cmd `("jj"
+                        ,@jj-global-default-args
+                        ,@jj-logging-default-args
+                        ,@cmd))
+            ((code stdout . stderr) (jj--make-process-log-section-buffers name full-cmd)))
       (promise-new
        (lambda (resolve reject)
          (let ((proc (make-process
@@ -2909,9 +2918,7 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                       :stderr stderr
                       :sentinel (jj--make-update-exit-code-sentinel code)
                       :noquery t
-                      :command `("jj"
-                                 ,@jj-global-default-args
-                                 ,@cmd))))
+                      :command full-cmd)))
            (jj--set-initial-run-status code)
            (add-function :after (process-sentinel proc)
                          (jj--make-print-status-sentinel stderr))
