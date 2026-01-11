@@ -261,6 +261,52 @@
 #+end_src
 *** async processes
 #+begin_src elisp
+  (defun jj--make-process-log-section-buffers (name cmd)
+    "Return a triple of buffers (CODE STDOUT . STDERR) for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams."
+    (let ((repo-dir default-directory))
+      (with-current-buffer (jj--get-command-log-buf (expand-file-name repo-dir))
+        (goto-char (point-max))
+        (let* ((inhibit-read-only t)
+               (code-buf (jj-make-section-buffer name "(" ") "))
+               (header (concat "> " (mapconcat #'shell-quote-argument
+                                               `("jj" ,@jj-global-default-args ,@cmd) " ")
+                               "\n"))
+               (stdout (jj-make-section-buffer name (propertize header 'face 'magit-section-heading) "\n"))
+               (stderr (jj-make-section-buffer name (propertize "=== stderr ===\n" 'face 'magit-section-heading) "\n")))
+          `(,code-buf ,stdout . ,stderr)))))
+
+  (defun jj--set-initial-run-status (code-buf)
+    (with-current-buffer code-buf
+      (let ((inhibit-read-only t))
+        (replace-region-contents
+         (point-min) (point-max)
+         (lambda () (propertize "run" 'face '(:foreground "yellow")))))))
+
+  (defun jj--make-update-exit-code-sentinel (code-buf)
+    "Process sentinel to update the contents of CODE-BUF (a buffer) with the exit status of the process."
+    (lambda (proc event)
+      (with-current-buffer code-buf
+        (let ((inhibit-read-only t))
+          (replace-region-contents
+           (point-min) (point-max)
+           (lambda ()
+             (cond ((process-live-p proc)
+                    ;; process is still running
+                    ;; what's it doing?
+                    (propertize
+                     (format "%s" (process-status proc))
+                     'face `(:foreground
+                             "yellow")))
+                   (t
+                    ;; process is done. how'd it exit?
+                    (let ((code (process-exit-status proc)))
+                      (propertize
+                       (format "%d" code)
+                       'face `(:foreground
+                               ,(pcase code
+                                  (0 "green")
+                                  (_ "red")))))))))))))
+
   (defun jj--sticky-insert (marker insert-fn sticky-top)
     "Move to MARKER, call INSERT-FN, update the marker, and move point if it's at the marker. If STICKY-TOP and point is at the beginning of the buffer, it will not move even if it is at the marker."
     (let ((moving (and (= (point) marker)
@@ -286,40 +332,42 @@
                              (lambda () (insert string))
                              initially-stay)))))
 
-  (defun jj--handle-proc-end (target-buf event error-buffer &rest other-buffers)
-    "Call from a process sentinel on process exit to manage error message, status message, and buffer disposal."
-    (unwind-protect
-        (when (buffer-live-p error-buffer)
-          ;; exited abnormally
-          (unless (string= event "finished\n")
-            (with-current-buffer error-buffer
+  (defun jj--make-print-status-sentinel (buffer)
+    (lambda (proc event)
+      (unless (process-live-p proc)
+        (when (buffer-live-p buffer)
+          (unless (= (process-exit-status proc) 0)
+            ;; exited abnormally
+            (with-current-buffer buffer
               (goto-char (point-max))
               ;; add error status to error buffer
               (let ((inhibit-read-only t))
                 (unless (bolp)
                   (insert "\n"))
-                (insert (propertize event 'face '(:foreground "red")))
-                (insert "\n")))))
-      ;; always clean up the auxiliary buffers
-      (kill-buffer error-buffer)
-      (mapcar #'kill-buffer other-buffers)))
+                (insert
+                 (propertize event 'face '(:foreground "red"))
+                 "\n"))))))))
+
+  (defun jj--make-cleanup-sentinel (&rest buffers)
+    "Kill BUFFERS if process is no longer live."
+    (lambda (proc event)
+      (unless (process-live-p proc)
+        (mapcar #'kill-buffer buffers))))
 
   (defun make-jj-simple-sentinel (error-buffer &rest other-buffers)
     "Make a simple process sentinel, to insert ERROR-BUFFER's contents if the process ends unexpectedly, then kill it and all OTHER-BUFFERS."
-    (apply #'make-jj-callback-sentinel nil error-buffer other-buffers))
+    (let ((status (jj--make-print-status-sentinel error-buffer))
+          (cleanup (apply #'jj--make-cleanup-sentinel error-buffer other-buffers)))
+      (lambda (proc event)
+        (funcall status proc event)
+        (funcall cleanup proc event))))
 
-  (defun make-jj-callback-sentinel (end-callback error-buffer &rest other-buffers)
-    "Make a simple process sentinel, to insert ERROR-BUFFER's contents if the process ends unexpectedly, then kill it and all OTHER-BUFFERS, and finally call END-CALLBACK with a success indicator (t if ok, nil if error)."
+  (defun make-jj-callback-sentinel (end-callback)
+    "Make a simple process sentinel, to call END-CALLBACK with 2 arguments: the exit code and end event."
     (lambda (proc event)
-      (:documentation (format "Process sentinel that kills its auxiliary buffers when the process ends. If the process ends unsuccessfully, inserts the error buffer's content.%s" (if end-callback (format " Then finally calls %s" end-callback) "")))
-      (unless (process-live-p proc)
-        (apply #'jj--handle-proc-end
-               (process-buffer proc)
-               event
-               error-buffer
-               other-buffers)
-        (when end-callback
-          (funcall end-callback (string= event "finished\n"))))))
+      (funcall end-callback
+               (process-exit-status proc)
+               event)))
 
   (defun make-jj-generic-buffered-filter (intermediate-buffer read-next callback)
     "Make a process filter for an arbitrary process.
@@ -2231,7 +2279,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                         ;; when one process dies, mark it not running
                         (setf running (cl-delete proc running))
                         ;; maybe mark it failed
-                        (unless (string= event "finished\n")
+                        (unless (= (process-exit-status proc) 0)
                           (push proc failed))
                         ;; and if it was the last one, clean up.
                         (unless running
@@ -2291,7 +2339,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
           (cl-labels ((died (proc event)
                         ;; when log process dies, mark it not running
                         (setf running (cl-delete proc running))
-                        (unless (string= event "finished\n")
+                        (unless (= (process-exit-status proc) 0)
                           (push proc fails))
                         (unless running
                           (cleanup))))
@@ -2794,11 +2842,12 @@ might actually not use these as I need a lexical variable anyway in most cases w
       buf))
 #+end_src
 **** async command utils
+***** callbacks
 #+begin_src elisp
   (defun jj--standard-async-callback (name &optional no-revert silent-ok)
     "Returns a callback for `jj-cmd-async'. If NAME, print a message saying whether NAME was successful. If DO-REVERT, on success, revert the dash buffer for the relevant jj repo."
-    (lambda (ok dir)
-      (cond (ok
+    (lambda (code event dir)
+      (cond ((eq code 0)
              (unless no-revert
                (jj-revert-dash-buffer-async dir))
              (unless silent-ok
@@ -2813,36 +2862,57 @@ might actually not use these as I need a lexical variable anyway in most cases w
       (jj--standard-async-callback name no-revert silent-ok)))
 
   (defun jj-cmd--async (name cmd &optional callback)
-    "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
+    "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of 3 arguments, EXIT, EVENT, and DIR. DIR is the directory that was current for the command."
     (declare (indent 2))
     (let ((repo-dir default-directory))
-      (with-current-buffer (jj--get-command-log-buf repo-dir)
-        (goto-char (point-max))
-        (let* ((inhibit-read-only t)
-               (header (concat "> " (mapconcat #'shell-quote-argument
-                                               `("jj" ,@jj-global-default-args ,@cmd) " ")
-                               "\n"))
-               (stdout (jj-make-section-buffer name (propertize header 'face 'magit-section-heading) "\n"))
-               (stderr (jj-make-section-buffer name (propertize "=== stderr ===\n" 'face 'magit-section-heading) "\n")))
-          (let* ((sentinel (make-jj-callback-sentinel
-                            ;; hacky - make something better once there's a standardised output buffer?
-                            (when callback
-                              (lambda (ok)
-                                (funcall callback ok repo-dir)))
-                            stderr))
-                 (filter (make-sticky-process-filter :sticky)))
-            ;; TODO add a process list to the dash buffer modeline
-            ;; pushing it here to a common list would be most of the way
-            (make-process
-             :name (format "jj-%s" name)
-             :buffer stdout
-             :stderr stderr
-             :filter filter
-             :sentinel sentinel
-             :noquery t
-             :command `("jj"
-                        ,@jj-global-default-args
-                        ,@cmd)))))))
+      (-let (((code stdout . stderr) (jj--make-process-log-section-buffers name cmd)))
+        (let ((proc (make-process
+                     :name (format "jj-%s" name)
+                     :buffer stdout
+                     :stderr stderr
+                     :sentinel (jj--make-update-exit-code-sentinel code)
+                     :noquery t
+                     :command `("jj"
+                                ,@jj-global-default-args
+                                ,@cmd))))
+          (jj--set-initial-run-status code)
+          (add-function :after (process-sentinel proc)
+                        (jj--make-print-status-sentinel stderr))
+          (when callback
+            (add-function :after (process-sentinel proc)
+                          (make-jj-callback-sentinel
+                           (lambda (code event)
+                             (funcall callback code event repo-dir)))))
+          (add-function :after (process-sentinel proc)
+                        (jj--make-cleanup-sentinel stderr stdout code))
+          ))))
+#+end_src
+***** promises - scratch
+#+begin_src elisp :tangle no
+
+  (setq default-directory "~/repos/jj-test")
+
+  (let ((name "foo")
+        (cmd '("show" "-r" "@")))
+    (let ((repo-dir default-directory))
+      (-let (((code stdout . stderr) (jj--make-process-log-section-buffers name cmd)))
+        (let ((proc (make-process
+                     :name (format "jj-%s" name)
+                     :buffer stdout
+                     :stderr stderr
+                     :sentinel (jj--make-update-exit-code-sentinel code)
+                     :noquery t
+                     :command `("jj"
+                                ,@jj-global-default-args
+                                ,@cmd))))
+          (jj--set-initial-run-status code)
+          (add-function :after (process-sentinel proc)
+                        (jj--make-print-status-sentinel stderr))
+          (when callback
+            (add-function :after (process-sentinel proc)
+                          ()))
+          (add-function :after (process-sentinel proc)
+                        (jj--make-cleanup-sentinel stderr stdout code))))))
 #+end_src
 ***** TODO this callback interface sucks
 expose an ~error~ parameter, not an ~ok~ parameter.
@@ -2860,27 +2930,29 @@ expose an ~error~ parameter, not an ~ok~ parameter.
         (setq-local default-directory repo-dir)
         (let ((inhibit-read-only t))
           (erase-accessible-buffer))
-        (let* ((err (generate-new-buffer "*jj-diff-stderr*"))
-               (sentinel (make-jj-callback-sentinel
-                          (lambda (ok)
-                            (when ok (pop-to-buffer main-buf)))
-                          err))
-               (filter (make-sticky-process-filter :sticky)))
-          (make-process
-           :name "jj-diff"
-           :buffer (current-buffer)
-           :stderr err
-           :filter filter
-           :sentinel sentinel
-           :noquery t
-           :command `("jj" ,@jj-global-default-args
-                      "diff"
-                      "--git"
-                      ,@(jj--if-arg at #'identity "--revisions")
-                      ,@(jj--if-arg from #'identity "--from")
-                      ,@(jj--if-arg to #'identity "--to")
-                      "--"
-                      ,@(jj--if-arg fileset #'identity nil)))))))
+        (let ((err (generate-new-buffer "*jj-diff-stderr*")))
+          (let ((proc (make-process
+                       :name "jj-diff"
+                       :buffer (current-buffer)
+                       :stderr err
+                       :noquery t
+                       :command `("jj" ,@jj-global-default-args
+                                  "diff"
+                                  "--git"
+                                  ,@(jj--if-arg at #'identity "--revisions")
+                                  ,@(jj--if-arg from #'identity "--from")
+                                  ,@(jj--if-arg to #'identity "--to")
+                                  "--"
+                                  ,@(jj--if-arg fileset #'identity nil)))))
+            (add-function :after (process-sentinel proc)
+                          (jj--make-print-status-sentinel err))
+            (add-function :after (process-sentinel proc)
+                          (make-jj-callback-sentinel
+                           (lambda (code event)
+                             (when (= code 0)
+                               (pop-to-buffer main-buf)))))
+            (add-function :after (process-sentinel proc)
+                          (jj--make-cleanup-sentinel err)))))))
 
   (defun jj-diff-at (revset &optional fileset)
     "View the diff for REVISION, optionally limited to files in FILESET."
@@ -2902,26 +2974,28 @@ expose an ~error~ parameter, not an ~ok~ parameter.
         (setq-local default-directory repo-dir)
         (let ((inhibit-read-only t))
           (erase-accessible-buffer))
-        (let* ((err (generate-new-buffer "*jj-show-stderr*"))
-               (sentinel (make-jj-callback-sentinel
-                          (lambda (ok)
-                            (when ok (pop-to-buffer main-buf)))
-                          err))
-               (filter (make-sticky-process-filter :sticky)))
+        (let* ((err (generate-new-buffer "*jj-show-stderr*")))
           ;; (with-section "show"
-          (make-process
-           :name "jj-show"
-           :buffer (current-buffer)
-           :stderr err
-           :filter filter
-           :sentinel sentinel
-           :noquery t
-           :command `("jj" ,@jj-global-default-args
-                      "show"
-                      "--git"
-                      "-r" ,commit
-                      "--"
-                      ,@(jj--if-arg fileset #'identity nil)))
+          (let ((proc (make-process
+                       :name "jj-show"
+                       :buffer (current-buffer)
+                       :stderr err
+                       :noquery t
+                       :command `("jj" ,@jj-global-default-args
+                                  "show"
+                                  "--git"
+                                  "-r" ,commit
+                                  "--"
+                                  ,@(jj--if-arg fileset #'identity nil)))))
+            (add-function :after (process-sentinel proc)
+                          (jj--make-print-status-sentinel err))
+            (add-function :after (process-sentinel proc)
+                          (make-jj-callback-sentinel
+                           (lambda (code event)
+                             (when (= code 0)
+                               (pop-to-buffer main-buf)))))
+            (add-function :after (process-sentinel proc)
+                          (jj--make-cleanup-sentinel err)))
           ;; )
           ;; (with-section "diff"
           ;;               (make-process
