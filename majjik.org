@@ -277,15 +277,23 @@
                   (insert (propertize header 'face 'magit-section-heading))
                   (point-marker)))
                (stdout (jj-make-section-buffer name "\n" "\n"))
-               (stderr (jj-make-section-buffer name (propertize "=== stderr ===\n" 'face 'magit-section-heading) "\n"))
+               (mark-err-start (point-marker))
+               (stderr (jj-make-section-buffer name (propertize "\n" 'face 'magit-section-heading) "\n"))
                (mark-collapse-end (copy-marker (point-max)))
                (mark-control-end (progn
                                    (goto-char (point-max))
                                    (insert "\n")
                                    (copy-marker (point))))
+               ;; this needs to be an overlay,
+               ;; so we can toggle its properties as a unit
                (ovl-collapse (make-overlay header-end mark-collapse-end))
+               ;; these two also need to be overlays,
+               ;; so they keep applying as text is added
+               (ovl-err (make-overlay mark-err-start mark-collapse-end))
                (ovl-control (make-overlay mark-control-start mark-control-end)))
           (overlay-put ovl-collapse 'display "...")
+          (overlay-put ovl-err
+           'face '(:foreground "grey"))
           (overlay-put ovl-control
            'keymap (jj--make-toggle-keymap
                     (jj--make-toggle-overlay-ellipsis ovl-collapse "...")))
