@@ -262,18 +262,49 @@
 *** async processes
 #+begin_src elisp
   (defun jj--make-process-log-section-buffers (name cmd)
-    "Return a triple of buffers (CODE STDOUT . STDERR) for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams."
+    "Return a triple of buffers (CODE STDOUT . STDERR) for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams.
+  Also sets up folding so that TAB anywhere within a command will toggle the display of the full log."
     (let ((repo-dir default-directory))
       (with-current-buffer (jj--get-command-log-buf (expand-file-name repo-dir))
         (goto-char (point-max))
         (let* ((inhibit-read-only t)
+               (mark-control-start (point-marker))
                (code-buf (jj-make-section-buffer name "(" ") "))
                (header (concat "> " (mapconcat #'shell-quote-argument
-                                               `("jj" ,@jj-global-default-args ,@cmd) " ")
-                               "\n"))
-               (stdout (jj-make-section-buffer name (propertize header 'face 'magit-section-heading) "\n"))
-               (stderr (jj-make-section-buffer name (propertize "=== stderr ===\n" 'face 'magit-section-heading) "\n")))
+                                               `("jj" ,@jj-global-default-args ,@cmd) " ")))
+               (header-end
+                (progn
+                  (insert (propertize header 'face 'magit-section-heading))
+                  (point-marker)))
+               (stdout (jj-make-section-buffer name "\n" "\n"))
+               (stderr (jj-make-section-buffer name (propertize "=== stderr ===\n" 'face 'magit-section-heading) "\n"))
+               (mark-collapse-end (copy-marker (point-max)))
+               (mark-control-end (progn
+                                   (goto-char (point-max))
+                                   (insert "\n")
+                                   (copy-marker (point))))
+               (ovl-collapse (make-overlay header-end mark-collapse-end))
+               (ovl-control (make-overlay mark-control-start mark-control-end)))
+          (overlay-put ovl-collapse 'display "...")
+          (overlay-put ovl-control
+           'keymap (jj--make-toggle-keymap
+                    (jj--make-toggle-overlay-ellipsis ovl-collapse "...")))
           `(,code-buf ,stdout . ,stderr)))))
+
+  (defun jj--make-toggle-keymap (toggle-fn)
+    "Make a keymap that binds TAB to TOGGLE-FN."
+    (let ((map (make-sparse-keymap)))
+      (keymap-set map "TAB" toggle-fn)
+      map))
+
+  (defun jj--make-toggle-overlay-ellipsis (overlay string)
+    "Make a function that toggles the display property of OVERLAY between nil and STRING."
+    (lambda ()
+      (interactive)
+      (overlay-put overlay 'display
+                   (if (overlay-get overlay 'display)
+                       nil
+                     string))))
 
   (defun jj--set-initial-run-status (code-buf)
     (with-current-buffer code-buf
