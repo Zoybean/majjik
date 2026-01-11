@@ -4072,20 +4072,45 @@ On success, returns the (PROCESS ERR-BUF). On error, returns (PROCESS ERR-BUF EV
 
 ;; copied and heavily modified from `comint-osc-process-output'
 (defun jj--make-ansi-color-multi-filter (buffers)
-  "Process filter for writing to multiple output buffers. Converts ANSI color sequences in the output."
-  (lambda (proc string)
+  "Process filter for writing to multiple output buffers. Converts ANSI color sequences in the output.
+Does not use `process-mark', but instead manages internal alist of markers per buffer."
+  (let ((buf-proc-mark-alist))
+    ;; alist mapping buffers to sets of markers.
+    ;; each such set is a cons of a marker and an alist.
+    ;; the first marker is the position of point at the time of this call, serving as the default position.
+    ;; each of the alists is mapping processes to markers within that buffer.
     (dolist (buf buffers)
-      (when (buffer-live-p buf)
-        (with-current-buffer buf
-          (let* ((inhibit-read-only t)
-                 (mark (process-mark proc)))
-            (save-excursion
-              (goto-char mark)
-              ;; this already handles partial sequences, and assumes
-              ;; sequential calls apply to contiguous chunks of output.
-              ;; it must be run in the buffer it's inserting into.
-              (insert (ansi-color-apply string))
-              (set-marker mark (point)))))))))
+      ;; set the default marker for each buffer
+      (push `(,buf ,(copy-marker (point)) . nil)
+            buf-proc-mark-alist))
+    (cl-labels ((marker (buf proc)
+                  (-let* ((m-pma (alist-get buf buf-proc-mark-alist))
+                          ((default-mark . proc-mark-alist)
+                           m-pma))
+                    (if-let ((proc-mark (alist-get proc proc-mark-alist)))
+                        proc-mark
+                      (let ((mark (copy-marker default-mark)))
+                        (push `(,proc . ,mark)
+                              ;; need to push to an existing object
+                              ;; otherwise I'm just mutating a local
+                              (cdr m-pma))
+                        mark)))))
+      (lambda (proc string)
+        (dolist (buf buffers)
+          ;; insert in each buffer
+          (when (buffer-live-p buf)
+            (with-current-buffer buf
+              (let* ((inhibit-read-only t)
+                     ;; get the process marker for the current buffer
+                     (mark (marker buf proc)))
+                (save-excursion
+                  (goto-char mark)
+                  ;; this already handles partial sequences, and assumes
+                  ;; sequential calls apply to contiguous chunks of output.
+                  ;; it must be run in the buffer it's inserting into.
+                  (insert (ansi-color-apply string))
+                  ;; advance the process marker in this buffer
+                  (set-marker mark (point)))))))))))
 
 (defun jj-cmd--with-standard-args (cmd)
   "Return CMD with added arguments for using emacs as editor, and all the applicable configured arguments for a logging command."
