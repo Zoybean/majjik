@@ -2825,52 +2825,81 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
     buf))
 ;; command log:1 ends here
 
-;; callbacks
+;; async command utils
 
-;; [[file:majjik.org::*callbacks][callbacks:1]]
-(defun jj--standard-async-callback (name &optional no-revert silent-ok)
-  "Returns a callback for `jj-cmd-async'. If NAME, print a message saying whether NAME was successful. If DO-REVERT, on success, revert the dash buffer for the relevant jj repo."
-  (lambda (code event dir)
-    (cond ((eq code 0)
-           (unless no-revert
-             (jj-revert-dash-buffer-async dir))
-           (unless silent-ok
-             (message "`jj %s' ok" name)))
-          (t
-           (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))))))
+;; [[file:majjik.org::*async command utils][async command utils:1]]
+(defalias 'jj-cmd-async 'jj-cmd-promise)
 
-(defun jj-cmd-async (name cmd &optional no-revert silent-ok)
-  "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of two arguments, OK and DIR. OK is non-nil if the command succeeded. DIR is the directory that was current for the command."
+(defun jj-cmd-promise (name cmd &optional no-revert silent-ok no-kill-output)
+  "Run CMD asynchronously, returning a promise of its completion.
+
+On success, reverts the repo's dash buffer unless NO-REVERT, prints a message unless SILENT-OK, kills the output buffer unless NO-KILL-OUTPUT, and returns the process. On error, prints a message indicating the command log buffer, and returns a cons (PROCESS . EVENT)."
   (declare (indent 2))
-  (jj-cmd--async name cmd
-    (jj--standard-async-callback name no-revert silent-ok)))
+  (promise-then
+   (jj-cmd--promise name cmd)
+   (jj--make-async-success-callback name no-revert silent-ok no-kill-output)
+   (jj--make-async-failure-callback name)))
 
-(defun jj-cmd--async (name cmd &optional callback)
-  "Run CMD asynchronously, calling CALLBACK on completion. CALLBACK should be a function of 3 arguments, EXIT, EVENT, and DIR. DIR is the directory that was current for the command."
+(defun jj--make-async-success-callback (name &optional no-revert silent-ok no-kill-output)
+  (lambda (proc)
+    (unless no-revert
+      (jj-revert-dash-buffer-async
+       (buffer-local-value 'default-directory
+                           (process-buffer proc))))
+    (unless silent-ok
+      (message "`jj %s' ok" name))
+    (unless no-kill-output
+      (kill-buffer (process-buffer proc)))
+    proc))
+
+(defun jj--make-async-failure-callback (name)
+  (-lambda ((proc . event))
+    (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))))
+
+(defun jj-cmd--promise (name cmd)
+  "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
   (declare (indent 2))
   (let ((repo-dir default-directory))
     (-let (((code stdout . stderr) (jj--make-process-log-section-buffers name cmd)))
-      (let ((proc (make-process
-                   :name (format "jj-%s" name)
-                   :buffer stdout
-                   :stderr stderr
-                   :sentinel (jj--make-update-exit-code-sentinel code)
-                   :noquery t
-                   :command `("jj"
-                              ,@jj-global-default-args
-                              ,@cmd))))
-        (jj--set-initial-run-status code)
-        (add-function :after (process-sentinel proc)
-                      (jj--make-print-status-sentinel stderr))
-        (when callback
-          (add-function :after (process-sentinel proc)
-                        (make-jj-callback-sentinel
-                         (lambda (code event)
-                           (funcall callback code event repo-dir)))))
-        (add-function :after (process-sentinel proc)
-                      (jj--make-cleanup-sentinel stderr stdout code))
-        ))))
-;; callbacks:1 ends here
+      (promise-new
+       (lambda (resolve reject)
+         (let ((proc (make-process
+                      :name (format "jj-%s" name)
+                      :buffer stdout
+                      :stderr stderr
+                      :sentinel (jj--make-update-exit-code-sentinel code)
+                      :noquery t
+                      :command `("jj"
+                                 ,@jj-global-default-args
+                                 ,@cmd))))
+           (jj--set-initial-run-status code)
+           (add-function :after (process-sentinel proc)
+                         (jj--make-print-status-sentinel stderr))
+           (add-function :after (process-sentinel proc)
+                         (make-jj-callback-sentinel
+                          (lambda (code event)
+                            (if (eq code 0)
+                                (funcall resolve proc)
+                              (funcall reject (cons proc event))))))
+           ;; this always runs before the subsequent callbacks,
+           ;; which means `resolve' and `reject' are not themselves callbacks
+           (add-function :after (process-sentinel proc)
+                         (jj--make-cleanup-sentinel stderr code))))))))
+;; async command utils:1 ends here
+
+;; util
+
+;; [[file:majjik.org::*util][util:1]]
+(defun jj--make-async-copy-cleanup-pop-callback (to-buf)
+  "For jj commands which open up a new output buffer, make a callback to copy from the process buffer into TO-BUF,
+then kill the process buffer and pop to TO-BUF."
+  (lambda (proc)
+    (with-current-buffer to-buf
+      (let ((inhibit-read-only t))
+        (replace-buffer-contents (process-buffer proc)))
+      (kill-buffer (process-buffer proc)))
+    (pop-to-buffer to-buf)))
+;; util:1 ends here
 
 ;; jj diff
 
@@ -2884,30 +2913,19 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
       (view-mode-enter nil #'kill-buffer)
       (setq-local default-directory repo-dir)
       (let ((inhibit-read-only t))
-        (erase-accessible-buffer))
-      (let ((err (generate-new-buffer "*jj-diff-stderr*")))
-        (let ((proc (make-process
-                     :name "jj-diff"
-                     :buffer (current-buffer)
-                     :stderr err
-                     :noquery t
-                     :command `("jj" ,@jj-global-default-args
-                                "diff"
-                                "--git"
-                                ,@(jj--if-arg at #'identity "--revisions")
-                                ,@(jj--if-arg from #'identity "--from")
-                                ,@(jj--if-arg to #'identity "--to")
-                                "--"
-                                ,@(jj--if-arg fileset #'identity nil)))))
-          (add-function :after (process-sentinel proc)
-                        (jj--make-print-status-sentinel err))
-          (add-function :after (process-sentinel proc)
-                        (make-jj-callback-sentinel
-                         (lambda (code event)
-                           (when (= code 0)
-                             (pop-to-buffer main-buf)))))
-          (add-function :after (process-sentinel proc)
-                        (jj--make-cleanup-sentinel err)))))))
+        (erase-accessible-buffer)))
+    (promise-then
+     (jj-cmd-async
+         "diff"
+         `("diff"
+           "--git"
+           ,@(jj--if-arg at #'identity "--revisions")
+           ,@(jj--if-arg from #'identity "--from")
+           ,@(jj--if-arg to #'identity "--to")
+           "--"
+           ,@(jj--if-arg fileset #'identity nil))
+       :no-revert :silent-ok :no-kill-output)
+     (jj--make-async-copy-cleanup-pop-callback main-buf))))
 
 (defun jj-diff-at (revset &optional fileset)
   "View the diff for REVISION, optionally limited to files in FILESET."
@@ -2926,47 +2944,22 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (let* ((repo-dir default-directory)
          (main-buf (get-buffer-create (format "*jj-show %s:%s:%s*" repo-dir commit fileset))))
     (with-current-buffer main-buf
+      ;; TODO get a better mode for full commit view
       (diff-mode)
       (view-mode-enter nil #'kill-buffer)
       (setq-local default-directory repo-dir)
       (let ((inhibit-read-only t))
-        (erase-accessible-buffer))
-      (let* ((err (generate-new-buffer "*jj-show-stderr*")))
-        ;; (with-section "show"
-        (let ((proc (make-process
-                     :name "jj-show"
-                     :buffer (current-buffer)
-                     :stderr err
-                     :noquery t
-                     :command `("jj" ,@jj-global-default-args
-                                "show"
-                                "--git"
-                                "-r" ,commit
-                                "--"
-                                ,@(jj--if-arg fileset #'identity nil)))))
-          (add-function :after (process-sentinel proc)
-                        (jj--make-print-status-sentinel err))
-          (add-function :after (process-sentinel proc)
-                        (make-jj-callback-sentinel
-                         (lambda (code event)
-                           (when (= code 0)
-                             (pop-to-buffer main-buf)))))
-          (add-function :after (process-sentinel proc)
-                        (jj--make-cleanup-sentinel err)))
-        ;; )
-        ;; (with-section "diff"
-        ;;               (make-process
-        ;;                :name "jj-diff"
-        ;;                :buffer (current-buffer)
-        ;;                :stderr err
-        ;;                :filter filter
-        ;;                :sentinel sentinel
-        ;;                :noquery t
-        ;;                :command `("jj" ,@jj-global-default-args
-        ;;                           "diff"
-        ;;                           "--git"
-        ;;                           ,@(jj--if-arg at #'identity "--revisions"))))
-        ))))
+        (erase-accessible-buffer)))
+    (promise-then
+     (jj-cmd-async
+         "diff"
+         `("show"
+           "--git"
+           "-r" ,commit
+           "--"
+           ,@(jj--if-arg fileset #'identity nil))
+       :no-revert :silent-ok :no-kill-output)
+     (jj--make-async-copy-cleanup-pop-callback main-buf))))
 ;; jj show:1 ends here
 
 ;; jj undo
