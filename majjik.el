@@ -7,7 +7,7 @@
 ;; Version: 0.1.0
 ;; Keywords: vc
 ;; URL: https://github.com/Zoybean/majjik
-;; Package-Requires: (dash s eieio with-editor)
+;; Package-Requires: (dash s eieio with-editor promise)
 
 ;;; Commentary:
 
@@ -20,6 +20,7 @@
 (require 's)
 (require 'eieio)
 (require 'with-editor)
+(require 'promise)
 ;; Require:1 ends here
 
 ;; collect-repeat
@@ -1730,17 +1731,17 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 ;; Default args
 
 ;; [[file:majjik.org::*Default args][Default args:1]]
-(defvar jj-global-default-args
+(defconst jj-global-default-args
   '(;; never auto-track new files
     "--config" "snapshot.auto-track='none()'"
     ;; never request a pager
     "--no-pager"))
-(defvar jj-parsing-default-args
+(defconst jj-parsing-default-args
   '(;; never colourise output
     "--color=never"
     ;; omit extra output
     "--quiet"))
-(defvar jj-logging-default-args
+(defconst jj-logging-default-args
   '(;; never colourise output (for now)
     "--color=never"))
 ;; Default args:1 ends here
@@ -2001,26 +2002,6 @@ Reverted buffer is the one that was active when this function was called."
 
 
 ;; [[file:majjik.org::*jj-file for untracked files][jj-file for untracked files:1]]
-(defvar jj-file-untracked-regex
-  (rx "? " ?\" (* nonl) ?\" "\n")
-  "Regex matching a line that looks like it is a jj untracked-file entry.")
-
-(defun jj-file-untracked--revert (&rest _)
-  (start-jj-file-untracked))
-
-(defun jj-file-untracked (repo-dir)
-  "Run jj file list-untracked asynchronously in REPO-DIR. Returns the process and opens the corresponding buffer."
-  (interactive (list (read-directory-name "jj repo: ")))
-  (let* ((repo-dir (expand-file-name repo-dir))
-         (buf (get-buffer-create (format "*jj-file-untracked: %s*" repo-dir))))
-    (prog1
-        (with-current-buffer buf
-          (jj-inspect-mode)
-          (setq-local default-directory repo-dir
-                      revert-buffer-function #'jj-file-untracked--revert)
-          (start-jj-file-untracked))
-      (pop-to-buffer buf))))
-
 (defun start-jj-file-untracked ()
   "Make a jj file-untracked in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer."
   (let ((inhibit-read-only t))
@@ -2462,29 +2443,9 @@ Also sets `jj--current-status' in the initial buffer when the status process com
         (accept-process-output log nil nil :only)))))
 ;; status piping fns:1 ends here
 
-;; jj-log
+;; section
 
-;; [[file:majjik.org::*jj-log][jj-log:1]]
-(defun jj-log--revert (&rest _)
-  (start-jj-log jj--last-revs jj--last-files))
-
-(defun jj-log (repo-dir &optional revset fileset)
-  "Run jj log asynchronously in REPO-DIR, with the given REVSET, FILESET, and TEMPLATE string arguments. Returns the process and opens the corresponding buffer."
-  (interactive (list (read-directory-name "jj repo: ")
-                     (jj-read-revset)
-                     (jj-read-fileset)))
-  (let* ((repo-dir (expand-file-name repo-dir))
-         (buf (get-buffer-create (format "*jj-log: %s*" repo-dir))))
-    (prog1
-        (with-current-buffer buf
-          (jj-inspect-mode)
-          (setq-local default-directory repo-dir
-                      jj--last-revs revset
-                      jj--last-files fileset
-                      revert-buffer-function #'jj-log--revert)
-          (start-jj-log revset fileset))
-      (pop-to-buffer buf))))
-
+;; [[file:majjik.org::*section][section:1]]
 (defun start-jj-log (&optional revset fileset)
   "Make a jj log in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer. Ignores `jj--last-revs' and `jj--last-files'."
   (let ((inhibit-read-only t))
@@ -2520,7 +2481,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                 ,@jj-parsing-default-args
                 "--config" ,(format "templates.log_node='%s'"
                                     (jj--toml-quote-string jj-log-node-template))))))
-;; jj-log:1 ends here
+;; section:1 ends here
 
 ;; find and update dash buffer
 
@@ -2650,7 +2611,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
         (0 (s-chomp message))
         ;; this command uses code 1 to signal a missing repo. maybe all commands?
         (1 (signal 'jj-repo-missing (list default-directory)))
-        (_ (error "process exited with nonzero exit code %d" res))))))
+        (_ (error "process exited with nonzero exit code %d" code))))))
 
 (defalias 'assert-jj 'jj-workspace-root
   "Throw an error unless we're in a jj repo.")
