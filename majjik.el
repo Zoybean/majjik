@@ -2899,6 +2899,18 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
   (-lambda ((proc . event))
     (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))))
 
+(defun jj--default-stderr-sentinel (proc event)
+  "Process sentinel for stderr buffers. If the process is dead, and was not successful, and the buffer exists, insert the event into the buffer."
+  (unless (process-live-p proc)
+    (unless (= 0 (process-exit-status proc))
+      (when (buffer-live-p (process-buffer proc))
+        (with-current-buffer (process-buffer proc)
+          (save-excursion
+            (goto-char (process-mark proc))
+            (unless (bolp)
+              (insert "\n"))
+            (insert event)))))))
+
 (defun jj-cmd--promise (name cmd &optional output-buffer)
   "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
   (declare (indent 2))
@@ -2919,6 +2931,8 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                       :command full-cmd)))
            (when output-buffer
              (kill-buffer stdout))
+           (set-process-sentinel (get-buffer-process stderr)
+                                 #'jj--default-stderr-sentinel)
            (jj--set-initial-run-status code)
            (add-function :after (process-sentinel proc)
                          (jj--make-print-status-sentinel stderr))
