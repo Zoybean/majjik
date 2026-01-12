@@ -269,20 +269,25 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
   (let ((repo-dir default-directory))
     (with-current-buffer (jj--get-command-log-buf repo-dir)
       (goto-char (point-max))
-      (let* ((inhibit-read-only t)
+      (let* (;; zero-width-space
+             (zws "\u200B")
+             (inhibit-read-only t)
              (mark-control-start (point-marker))
-             (code-buf (jj-make-section-buffer name "(" ") "))
-             (header (concat "> " (mapconcat #'shell-quote-argument cmd " ")))
+             (code-buf (jj-make-section-buffer name zws zws))
+             (header (concat "> "
+                             (propertize (mapconcat #'shell-quote-argument cmd " ") 'face 'magit-section-heading)
+                             "\n"))
              (header-end
               (progn
-                (insert (propertize header 'face 'magit-section-heading))
+                (insert header)
                 (point-marker)))
-             (stdout (jj-make-section-buffer name "\n" "\n"))
-             (mark-err-start (point-marker))
-             (stderr (jj-make-section-buffer name (propertize "\n" 'face 'magit-section-heading) "\n"))
-             (mark-collapse-end (copy-marker (point-max)))
+             ;; zero-width space
+             (stdout (jj-make-section-buffer name zws "\n"))
+             (mark-err-start (copy-marker (point)))
+             ;; zero-width space
+             (stderr (jj-make-section-buffer name zws "\n"))
+             (mark-collapse-end (copy-marker (point)))
              (mark-control-end (progn
-                                 (goto-char (point-max))
                                  (insert "\n")
                                  (copy-marker (point))))
              ;; this needs to be an overlay,
@@ -294,10 +299,10 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
              (ovl-control (make-overlay mark-control-start mark-control-end)))
         (overlay-put ovl-collapse 'display "...")
         (overlay-put ovl-err
-         'face '(:foreground "grey"))
+                     'face '(:foreground "grey"))
         (overlay-put ovl-control
-         'keymap (jj--make-toggle-keymap
-                  (jj--make-toggle-overlay-ellipsis ovl-collapse "...")))
+                     'keymap (jj--make-toggle-keymap
+                              (jj--make-toggle-overlay-ellipsis ovl-collapse "...")))
         `(,code-buf ,stdout . ,stderr)))))
 
 (defun jj--make-toggle-keymap (toggle-fn)
@@ -341,7 +346,7 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
                   ;; process is done. how'd it exit?
                   (let ((code (process-exit-status proc)))
                     (propertize
-                     (format "%d" code)
+                     (format "%3d" code)
                      'face `(:foreground
                              ,(pcase code
                                 (0 "green")
@@ -2960,7 +2965,7 @@ then kill the process buffer and pop to TO-BUF."
         (erase-accessible-buffer)))
     (promise-then
      (jj-cmd-async
-         "diff"
+         "show"
          `("show"
            "--git"
            "-r" ,commit
