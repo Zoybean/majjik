@@ -320,7 +320,11 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
                (collapsed nil)
                (toggle (lambda ()
                          (interactive)
-                         (setq collapsed (not collapsed))
+                         (setq collapsed
+                               ;; collapse regardless if output is empty
+                               (or (jj--empty-output-p (jj--overlay-text ovl-collapse))
+                                   ;; otherwise, toggle properly
+                                   (not collapsed)))
                          (overlay-put ovl-collapse
                                       'before-string
                                       (propertize " " 'display
@@ -335,9 +339,8 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
                                       (cond (collapsed
                                              ellipsis)
                                             (t
-                                             `(when (jj--empty-output-p (jj--overlay-text ,ovl-collapse)) .
-                                                    ;; stay collapsed if theres nothing to show
-                                                    ,ellipsis)))))))
+                                             nil)))
+                         )))
           (funcall toggle)
           (overlay-put ovl-err 'face '(:foreground "grey"))
           (overlay-put ovl-control 'keymap
