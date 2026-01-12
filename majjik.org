@@ -323,24 +323,30 @@
                            (setq collapsed
                                  ;; collapse regardless if output is empty
                                  (or (jj--empty-output-p (jj--overlay-text ovl-collapse))
-                                     ;; otherwise, toggle properly
+                                     ;; otherwise, toggle
                                      (not collapsed)))
-                           (overlay-put ovl-collapse
+                           (overlay-put ovl-control
                                         'before-string
-                                        (propertize " " 'display
+                                        (concat
+                                         ;; i've put 2 hidden spaces to work around some display quirks.
+                                         ;; for some reason, if the before-string is invisible,
+                                         ;; and the display property is nil (conditional or otherwise),
+                                         ;; then the colour disappears from the exit code.
+                                         (propertize " " 'display
                                                     `(when (not (jj--empty-output-p (jj--overlay-text ,ovl-collapse))) .
                                                            ;; hide fringe when content empty
                                                            ,(cond (collapsed
                                                                    fringe>)
                                                                   (t
-                                                                   fringev)))))
+                                                                   fringev)))
+                                                    'invisible t)
+                                         (propertize " " 'display "")))
                            (overlay-put ovl-collapse
                                         'display
                                         (cond (collapsed
                                                ellipsis)
                                               (t
-                                               nil)))
-                           )))
+                                               nil))))))
             (funcall toggle)
             (overlay-put ovl-err 'face '(:foreground "grey"))
             (overlay-put ovl-control 'keymap
