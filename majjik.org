@@ -420,7 +420,7 @@
                 (unless (bolp)
                   (insert "\n"))
                 (insert
-                 (propertize event 'face '(:foreground "red"))
+                 (propertize (s-chomp event) 'face '(:foreground "red"))
                  "\n"))))))))
 
   (defun jj--make-cleanup-sentinel (&rest buffers)

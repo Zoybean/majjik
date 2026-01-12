@@ -420,7 +420,7 @@ If INITIALLY-STAY is non-nil, point stays in place if it is at `bobp' even if th
               (unless (bolp)
                 (insert "\n"))
               (insert
-               (propertize event 'face '(:foreground "red"))
+               (propertize (s-chomp event) 'face '(:foreground "red"))
                "\n"))))))))
 
 (defun jj--make-cleanup-sentinel (&rest buffers)
