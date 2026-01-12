@@ -293,42 +293,45 @@
                (zws "\u200B")
                (inhibit-read-only t)
                (mark-control-start (point-marker))
-               (mark-fringe-start (point-marker))
-               (mark-fringe-end (progn
-                                  ;; this is only here so there's a character to
-                                  ;; apply a fringe display to.
-                                  ;; the character ends up invisible.
-                                  (insert zws)
-                                  (copy-marker (point))))
-               (code-buf (jj-make-section-buffer name zws zws))
+               (code-buf (jj-make-section-buffer name "" zws))
                (header (propertize (mapconcat #'shell-quote-argument cmd " ")
                                    'face 'magit-section-heading))
                (mark-header-end (progn
-                                  (insert "> " header "\n")
+                                  (insert "> " header)
                                   (point-marker)))
-               (stdout (jj-make-section-buffer name zws zws))
-               (mark-err-start (copy-marker (point)))
+               (stdout (jj-make-section-buffer name "\n" zws))
+               (mark-err-start (point-marker))
                (stderr (jj-make-section-buffer name zws "\n"))
-               (mark-collapse-end (copy-marker (point)))
-               (mark-control-end (copy-marker (point)))
+               (mark-collapse-end (point-marker))
+               (mark-control-end (point-marker))
                ;; this needs to be an overlay,
                ;; so we can toggle its properties as a unit
-               (ovl-collapse (make-overlay mark-header-end mark-control-end))
+               (ovl-collapse (make-overlay mark-header-end mark-collapse-end))
                ;; these all also need to be overlays,
                ;; so they keep applying as text is added
                (ovl-err (make-overlay mark-err-start mark-collapse-end))
                (ovl-control (make-overlay mark-control-start mark-control-end))
-               (ovl-fringe (make-overlay mark-fringe-start mark-fringe-end))
                )
-          (let* ((ellipsis "")
+          (let* ((ellipsis "\n")
                  (fringe> '(left-fringe jj-fringe-bitmap> fringe))
                  (fringev '(left-fringe jj-fringe-bitmapv fringe))
+                 (collapsed nil)
                  (toggle (lambda ()
                            (interactive)
-                           ;; toggle fringe between > and v
-                           (jj--toggle-overlay-display ovl-fringe fringe> fringev)
-                           ;; toggle collapsible section visibility
-                           (jj--toggle-overlay-display ovl-collapse ellipsis))))
+                           (setq collapsed (not collapsed))
+                           (overlay-put ovl-collapse
+                                        'before-string
+                                        (propertize " " 'display
+                                                    (cond (collapsed
+                                                           fringe>)
+                                                          (t
+                                                           fringev))))
+                           (overlay-put ovl-collapse
+                                        'display
+                                        (cond (collapsed
+                                               ellipsis)
+                                              (t
+                                               nil))))))
             (funcall toggle)
             (overlay-put ovl-err 'face '(:foreground "grey"))
             (overlay-put ovl-control 'keymap
@@ -340,15 +343,6 @@
     (let ((map (make-sparse-keymap)))
       (keymap-set map "TAB" toggle-fn)
       map))
-
-  (defun jj--toggle-overlay-display (overlay display-form-0 &optional display-form-1)
-    "Toggle the display property of OVERLAY between nil and DISPLAY-FORM."
-    (overlay-put overlay 'display
-                 (pcase (overlay-get overlay 'display)
-                   ((pred (eq display-form-0))
-                    display-form-1)
-                   (_
-                    display-form-0))))
 
   (defun jj--set-initial-run-status (code-buf)
     (with-current-buffer code-buf
