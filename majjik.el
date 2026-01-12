@@ -263,6 +263,26 @@ When returning both a string result and an exit code, they are returned as a con
 ;; async processes
 
 ;; [[file:majjik.org::*async processes][async processes:1]]
+(define-fringe-bitmap 'jj-fringe-bitmap>
+  [#b01100000
+   #b00110000
+   #b00011000
+   #b00001100
+   #b00011000
+   #b00110000
+   #b01100000
+   #b00000000])
+
+(define-fringe-bitmap 'jj-fringe-bitmapv
+  [#b00000000
+   #b10000010
+   #b11000110
+   #b01101100
+   #b00111000
+   #b00010000
+   #b00000000
+   #b00000000])
+
 (defun jj--make-process-log-section-buffers (name cmd)
   "Return a triple of buffers (CODE STDOUT . STDERR) for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams.
 Also sets up folding so that TAB anywhere within a command will toggle the display of the full log."
@@ -273,37 +293,47 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
              (zws "\u200B")
              (inhibit-read-only t)
              (mark-control-start (point-marker))
+             (mark-fringe-start (point-marker))
+             (mark-fringe-end (progn
+                                ;; this is only here so there's a character to
+                                ;; apply a fringe display to.
+                                ;; the character ends up invisible.
+                                (insert zws)
+                                (copy-marker (point))))
              (code-buf (jj-make-section-buffer name zws zws))
-             (header (concat "> "
-                             (propertize (mapconcat #'shell-quote-argument cmd " ") 'face 'magit-section-heading)
-                             "\n"))
-             (header-end
-              (progn
-                (insert header)
-                (point-marker)))
-             ;; zero-width space
-             (stdout (jj-make-section-buffer name zws "\n"))
+             (header (propertize (mapconcat #'shell-quote-argument cmd " ")
+                                 'face 'magit-section-heading))
+             (mark-header-end (progn
+                                (insert "> " header "\n")
+                                (point-marker)))
+             (stdout (jj-make-section-buffer name zws zws))
              (mark-err-start (copy-marker (point)))
-             ;; zero-width space
              (stderr (jj-make-section-buffer name zws "\n"))
              (mark-collapse-end (copy-marker (point)))
-             (mark-control-end (progn
-                                 (insert "\n")
-                                 (copy-marker (point))))
+             (mark-control-end (copy-marker (point)))
              ;; this needs to be an overlay,
              ;; so we can toggle its properties as a unit
-             (ovl-collapse (make-overlay header-end mark-collapse-end))
-             ;; these two also need to be overlays,
+             (ovl-collapse (make-overlay mark-header-end mark-control-end))
+             ;; these all also need to be overlays,
              ;; so they keep applying as text is added
              (ovl-err (make-overlay mark-err-start mark-collapse-end))
-             (ovl-control (make-overlay mark-control-start mark-control-end)))
-        (overlay-put ovl-collapse 'display "...")
-        (overlay-put ovl-err
-                     'face '(:foreground "grey"))
-        (overlay-put ovl-control
-                     'keymap (jj--make-toggle-keymap
-                              (jj--make-toggle-overlay-ellipsis ovl-collapse "...")))
-        `(,code-buf ,stdout . ,stderr)))))
+             (ovl-control (make-overlay mark-control-start mark-control-end))
+             (ovl-fringe (make-overlay mark-fringe-start mark-fringe-end))
+             )
+        (let* ((ellipsis "")
+               (fringe> '(left-fringe jj-fringe-bitmap> fringe))
+               (fringev '(left-fringe jj-fringe-bitmapv fringe))
+               (toggle (lambda ()
+                         (interactive)
+                         ;; toggle fringe between > and v
+                         (jj--toggle-overlay-display ovl-fringe fringe> fringev)
+                         ;; toggle collapsible section visibility
+                         (jj--toggle-overlay-display ovl-collapse ellipsis))))
+          (funcall toggle)
+          (overlay-put ovl-err 'face '(:foreground "grey"))
+          (overlay-put ovl-control 'keymap
+                       (jj--make-toggle-keymap toggle))
+          `(,code-buf ,stdout . ,stderr))))))
 
 (defun jj--make-toggle-keymap (toggle-fn)
   "Make a keymap that binds TAB to TOGGLE-FN."
@@ -311,14 +341,14 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
     (keymap-set map "TAB" toggle-fn)
     map))
 
-(defun jj--make-toggle-overlay-ellipsis (overlay string)
-  "Make a function that toggles the display property of OVERLAY between nil and STRING."
-  (lambda ()
-    (interactive)
-    (overlay-put overlay 'display
-                 (if (overlay-get overlay 'display)
-                     nil
-                   string))))
+(defun jj--toggle-overlay-display (overlay display-form-0 &optional display-form-1)
+  "Toggle the display property of OVERLAY between nil and DISPLAY-FORM."
+  (overlay-put overlay 'display
+               (pcase (overlay-get overlay 'display)
+                 ((pred (eq display-form-0))
+                  display-form-1)
+                 (_
+                  display-form-0))))
 
 (defun jj--set-initial-run-status (code-buf)
   (with-current-buffer code-buf
