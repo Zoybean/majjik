@@ -289,11 +289,13 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
   (let ((repo-dir default-directory))
     (with-current-buffer (jj--get-command-log-buf repo-dir)
       (goto-char (point-max))
-      (let* (;; zero-width-space
+      (let* (;; pretending to be a zero-width-space
+             (inv (propertize " " 'display ""))
+             ;; real zero-width-space
              (zws "\u200B")
              (inhibit-read-only t)
              (mark-control-start (point-marker))
-             (code-buf (jj-make-section-buffer name "" zws))
+             (code-buf (jj-make-section-buffer name inv inv))
              (header (propertize (mapconcat #'shell-quote-argument cmd " ")
                                  'face 'magit-section-heading))
              (mark-header-end (progn
@@ -322,21 +324,36 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
                          (overlay-put ovl-collapse
                                       'before-string
                                       (propertize " " 'display
-                                                  (cond (collapsed
-                                                         fringe>)
-                                                        (t
-                                                         fringev))))
+                                                  `(when (not (jj--empty-output-p (jj--overlay-text ,ovl-collapse))) .
+                                                         ;; hide fringe when content empty
+                                                         ,(cond (collapsed
+                                                                 fringe>)
+                                                                (t
+                                                                 fringev)))))
                          (overlay-put ovl-collapse
                                       'display
                                       (cond (collapsed
                                              ellipsis)
                                             (t
-                                             nil))))))
+                                             `(when (jj--empty-output-p (jj--overlay-text ,ovl-collapse)) .
+                                                    ;; stay collapsed if theres nothing to show
+                                                    ,ellipsis)))))))
           (funcall toggle)
           (overlay-put ovl-err 'face '(:foreground "grey"))
           (overlay-put ovl-control 'keymap
                        (jj--make-toggle-keymap toggle))
           `(,code-buf ,stdout . ,stderr))))))
+
+(defun jj--empty-output-p (string)
+  "Returns non-nil when STRING is only unicode whitespace."
+  (string-match-p (rx string-start
+                      (* (any space))
+                      string-end)
+                  string))
+
+(defun jj--overlay-text (ovl)
+  (with-current-buffer (overlay-buffer ovl)
+    (buffer-substring (overlay-start ovl) (overlay-end ovl))))
 
 (defun jj--make-toggle-keymap (toggle-fn)
   "Make a keymap that binds TAB to TOGGLE-FN."
