@@ -260,9 +260,9 @@ When returning both a string result and an exit code, they are returned as a con
            (error "process exited with nonzero exit code %d" res)))))))
 ;; sync processes:1 ends here
 
-;; async processes
+;; command-log management 
 
-;; [[file:majjik.org::*async processes][async processes:1]]
+;; [[file:majjik.org::*command-log management][command-log management:1]]
 (define-fringe-bitmap 'jj-fringe-bitmap>
   [#b01100000
    #b00110000
@@ -333,13 +333,13 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
                                        ;; and the display property is nil (conditional or otherwise),
                                        ;; then the colour disappears from the exit code.
                                        (propertize " " 'display
-                                                  `(when (not (jj--empty-output-p (jj--overlay-text ,ovl-collapse))) .
-                                                         ;; hide fringe when content empty
-                                                         ,(cond (collapsed
-                                                                 fringe>)
-                                                                (t
-                                                                 fringev)))
-                                                  'invisible t)
+                                                   `(when (not (jj--empty-output-p (jj--overlay-text ,ovl-collapse))) .
+                                                          ;; hide fringe when content empty
+                                                          ,(cond (collapsed
+                                                                  fringe>)
+                                                                 (t
+                                                                  fringev)))
+                                                   'invisible t)
                                        (propertize " " 'display "")))
                          (overlay-put ovl-collapse
                                       'display
@@ -401,7 +401,11 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
                              ,(pcase code
                                 (0 "green")
                                 (_ "red")))))))))))))
+;; command-log management:1 ends here
 
+;; sentinels and filters
+
+;; [[file:majjik.org::*sentinels and filters][sentinels and filters:1]]
 (defun jj--sticky-insert (marker insert-fn sticky-top)
   "Move to MARKER, call INSERT-FN, update the marker, and move point if it's at the marker. If STICKY-TOP and point is at the beginning of the buffer, it will not move even if it is at the marker."
   (let ((moving (and (= (point) marker)
@@ -483,7 +487,7 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
             ;; delete them and send the list to the callback
             (funcall callback news)
             (delete-region (point-min) (point))))))))
-;; async processes:1 ends here
+;; sentinels and filters:1 ends here
 
 ;; log utils
 
