@@ -652,6 +652,34 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
 (ert-deftest jj-test-entitize-newlines ()
   (should (string= "foo\r\nbar"
                    (jj--entitize-newlines "foo\r\nbar"))))
+
+;; modified from subr-x.el `add-display-text-property'
+(defun push-text-property (start end prop value
+                                        &optional object)
+  "Push VALUE to the property PROP in the text from START to END.
+If any text in the region has a non-nil PROP property, those
+properties are retained as the `cdr' of the new property value, with VALUE as the `car'.
+
+If OBJECT is non-nil, it should be a string or a buffer.  If nil,
+this defaults to the current buffer."
+  (let ((sub-start start)
+        (sub-end 0)
+        ;; assuming single-threaded, I can just call this once.
+        (end (if (stringp object)
+                 (min (length object) end)
+               (min end (point-max))))
+        prop-list)
+    (while (< sub-end end)
+      ;; step over all the various instances of the PROP property in the range
+      (setq sub-end (next-single-property-change sub-start prop object end))
+      ;; get the current properties
+      (setq prop-list (get-text-property sub-start prop object))
+      ;; update the list
+      ;; this works even if the old value was not a list, since `push' conses on the front
+      (push value prop-list)
+      ;; update the property
+      (put-text-property sub-start sub-end prop prop-list object)
+      (setq sub-start sub-end))))
 ;; rendering utils:1 ends here
 
 ;; Fileset
@@ -1351,8 +1379,10 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                                                     (funcall printer val header)
                                                   val))))
                              (insert sep (apply #'propertize
-                                                `(,printed
+                                                `(,printed ;; value to propertize
+                                                  ;; properties
                                                   help-echo ,(symbol-name name)
+                                                  jj-field-path (,name)
                                                   ,@(jj--if-arg face #'identity 'face))))))
                ;; ensure commit text ends on a newline
                (unless (bolp)
