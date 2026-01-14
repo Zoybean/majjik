@@ -3165,6 +3165,8 @@ need error handling in these. but I do like them being synchronous i think.
        (jj-log-header-change-id (jj-log-entry-header cmt)))
       ((and cmt (pred jj-log-header-p))
        (jj-log-header-change-id cmt))
+      ((and lin (pred jj-status-lineage-entry-p))
+       (jj-status-lineage-entry-change-id lin))
       (unmatched (jj-read-revset prompt))))
 #+end_src
 ***** single revision

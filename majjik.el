@@ -3096,6 +3096,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
      (jj-log-header-change-id (jj-log-entry-header cmt)))
     ((and cmt (pred jj-log-header-p))
      (jj-log-header-change-id cmt))
+    ((and lin (pred jj-status-lineage-entry-p))
+     (jj-status-lineage-entry-change-id lin))
     (unmatched (jj-read-revset prompt))))
 ;; revset:1 ends here
 
