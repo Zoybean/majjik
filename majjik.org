@@ -1372,11 +1372,14 @@ cursor appears to jump to top of screen when inside a collapsed section as it co
                                                   (if printer
                                                       (funcall printer val header)
                                                     val))))
+                               ;; combine the field property
+                               ;; (push-text-property 0 (length printed)
+                               ;;                     jj-field-path (,name) printed)
                                (insert sep (apply #'propertize
                                                   `(,printed ;; value to propertize
                                                     ;; properties
+                                                    jj-field ,name 
                                                     help-echo ,(symbol-name name)
-                                                    jj-field-path (,name)
                                                     ,@(jj--if-arg face #'identity 'face))))))
                  ;; ensure commit text ends on a newline
                  (unless (bolp)
@@ -2873,15 +2876,33 @@ need error handling in these. but I do like them being synchronous i think.
   (defun jj-thing-at-point ()
     (get-text-property (point) 'jj-object))
 
-  (defun jj-inspect-sexp-at-point (thing)
-    "When point is in a jj object, show that object's data in its own buffer."
-    (interactive (list (jj-thing-at-point)))
-    (unless thing (user-error "Not at a jj object"))
+  (defun jj-field-at-point ()
+    (get-text-property (point) 'jj-field))
+
+  (defun jj-struct-slot-value (slot inst)
+    (cl-struct-slot-value
+     ;; assumes first index into the structure identifies the type
+     (aref inst 0)
+     slot inst))
+
+  (defun jj-inspect-sexp-at-point (object &optional field)
+    "When point is in a jj OBJECT, show that OBJECT's data in its own buffer.
+  When it is additionally on a FIELD of the OBJECT, also print that FIELD's name and value."
+    (interactive (list (jj-thing-at-point) (jj-field-at-point)))
+    (unless object (user-error "Not at a jj object"))
     (let ((buf (get-buffer-create "*jj-sexp*")))
       (with-current-buffer buf
         (let ((inhibit-read-only t))
           (erase-buffer)
-          (insert (jj--entitize-newlines (format "%S" thing)))))
+          (insert (jj--entitize-newlines (format "%S" object)))
+          (when field
+            (insert "\n"
+                    (format-message "field `%s': " field)
+                    (jj--entitize-newlines
+                     (format "%S"
+                             (jj-struct-slot-value
+                              field
+                              object)))))))
       (pop-to-buffer buf)
       (special-mode)))
 
