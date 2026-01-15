@@ -1527,6 +1527,21 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
                     ,jj--delim))
   "Node format to ensure log nodes can be parsed.")
 
+(defun jj--make-list-parser (sep)
+  (lambda (s)
+    (s-split sep s :omit)))
+(defun jj--make-list-printer (sep)
+  (lambda (vals _header)
+    (s-join sep vals)))
+
+(defun jj--bool-parser (s)
+  (json-parse-string s :false-object nil))
+(defun jj--make-bool-printer (present-tag &optional absent-tag)
+  (lambda (val _entry)
+    (if val
+        present-tag
+      absent-tag)))
+
 (define-jj-log-format
  (change-id
   :face '(:foreground "magenta")
@@ -1540,26 +1555,31 @@ Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the fol
   :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
  (bookmarks
   :face '(:foreground "magenta")
+  :parser (jj--make-list-parser " ")
+  :printer (jj--make-list-printer " ")
   :form (:chain self (.bookmarks)))
  (tags
   :face '(:foreground "yellow")
+  :parser (jj--make-list-parser " ")
+  :printer (jj--make-list-printer " ")
   :form (:chain self (.tags)))
  (working-copies
   :face '(:foreground "green")
+  :parser (jj--make-list-parser " ")
+  :printer (jj--make-list-printer " ")
   :form (:chain self (.working_copies)))
  (commit-id
   :face '(:foreground "light blue")
   :form (:chain self (.commit_id) (format_short_commit_id)))
  (conflict
   :face '(:foreground "red")
-  :form (if (:chain self (.conflict)) "conflict"))
+  :parser #'jj--bool-parser
+  :printer (jj--make-bool-printer "conflict")
+  :form (:chain self (.conflict)))
  (empty
   :face '(:foreground "green")
-  :parser (lambda (s)
-            (json-parse-string s :false-object nil))
-  :printer (lambda (empty _entry)
-             (when empty
-               "(empty)"))
+  :parser #'jj--bool-parser
+  :printer (jj--make-bool-printer "(empty)")
   :separator "\n"
   :form (:chain self (.empty)))
  (description
