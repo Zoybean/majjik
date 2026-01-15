@@ -1522,19 +1522,25 @@ cursor appears to jump to top of screen when inside a collapsed section as it co
     "Node format to ensure log nodes can be parsed.")
 
   (defun jj--make-list-parser (sep)
+    "Make a function to parse a list, separated by SEP"
     (lambda (s)
       (s-split sep s :omit)))
+
   (defun jj--make-list-printer (sep)
+    "Make a function to format a list in the log, separated by SEP"
     (lambda (vals _header)
       (s-join sep vals)))
 
-  (defun jj--bool-parser (s)
+  (defun jj--parse-json-bool (s)
+    "Parse a json-encoded boolean"
     (json-parse-string s :false-object nil))
-  (defun jj--make-bool-printer (present-tag &optional absent-tag)
+
+  (defun jj--make-opt-printer (&optional present-override absent-override)
+    "Make a function to format an optional entry in the log. If PRESENT-OVERRIDE is non-nil, it is returned instead of a non-nil value. If ABSENT-OVERRIDE is non-nil, it is returned instead of nil."
     (lambda (val _entry)
       (if val
-          present-tag
-        absent-tag)))
+          (or present-override val)
+        absent-override)))
 
   (define-jj-log-format
    (change-id
@@ -1567,21 +1573,22 @@ cursor appears to jump to top of screen when inside a collapsed section as it co
     :form (:chain self (.commit_id) (format_short_commit_id)))
    (conflict
     :face '(:foreground "red")
-    :parser #'jj--bool-parser
-    :printer (jj--make-bool-printer "conflict")
-    :form (:chain self (.conflict)))
+    :parser #'s-presence
+    ;; :printer (jj--make-opt-printer "conflict")
+    :form (if (:chain self (.conflict)) "conflict"))
    (empty
     :face '(:foreground "green")
-    :parser #'jj--bool-parser
-    :printer (jj--make-bool-printer "(empty)")
+    :parser #'s-presence
+    :printer (jj--make-opt-printer "(empty)")
     :separator "\n"
-    :form (:chain self (.empty)))
+    :form (if (:chain self (.empty)) "empty"))
    (description
-    :parser #'json-parse-string
+    :parser (lambda (s)
+              (s-presence (json-parse-string s)))
     :separator "\n"
-    :printer (lambda (desc _entry)
-               (or (s-presence desc)
-                   (propertize "(no description)" 'face '(:foreground "orange"))))
+    :printer (jj--make-opt-printer
+              nil
+              (propertize "(no description)" 'face '(:foreground "orange")))
     :form (:chain self (.description) (.escape_json))))
 
   (ert-deftest jj-round-trip-truncate-overflow ()
