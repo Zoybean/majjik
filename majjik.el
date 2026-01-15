@@ -2730,8 +2730,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                              :no-revert)
                 :omit))
 
-(defun jj-workspace-root (&optional dir)
-  "Return the root of the jj repository containing DIR, or `default-directory' if not provided."
+(defun jj--workspace-root-process (&optional dir)
+  "Return the root of the jj repository containing DIR, or `default-directory' if not provided. Uses jj to locate the root, rather than traversing in lisp code."
   (let ((default-directory (or dir default-directory)))
     (-let (((code . message) (jj-cmd-sync `("workspace" "root") :no-revert :no-error)))
       (pcase code
@@ -2739,6 +2739,13 @@ Also sets `jj--current-status' in the initial buffer when the status process com
         ;; this command uses code 1 to signal a missing repo. maybe all commands?
         (1 (signal 'jj-repo-missing (list default-directory)))
         (_ (error "process exited with nonzero exit code %d" code))))))
+
+(defun jj--workspace-root-lisp (&optional dir)
+  "Return the root of the jj repository containing DIR, or `default-directory' if not provided. Performs the traversal in lisp, rather than calling on jj."
+  (locate-dominating-file (or dir default-directory) ".jj"))
+
+  (defalias 'jj-workspace-root 'jj--workspace-root-lisp
+  "Return the root of the jj repository containing DIR, or `default-directory' if not provided.")
 
 (defalias 'assert-jj 'jj-workspace-root
   "Throw an error unless we're in a jj repo.")
