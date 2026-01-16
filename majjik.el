@@ -339,7 +339,8 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
                                                                   fringe>)
                                                                  (t
                                                                   fringev)))
-                                                   'invisible t)
+                                                   'invisible t
+                                                   'cursor-intangible t)
                                        (propertize " " 'display "")))
                          (overlay-put ovl-collapse
                                       'display
@@ -3054,7 +3055,8 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
   (let ((buf (get-buffer-create (format "*jj-command-log:%s*" (expand-file-name repo-dir)))))
     (with-current-buffer buf
       (unless (derived-mode-p 'jj-inspect-mode)
-        (jj-inspect-mode)))
+        (jj-inspect-mode)
+        (cursor-intangible-mode t)))
     buf))
 ;; command log:1 ends here
 
