@@ -3012,7 +3012,8 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
 
 (defun jj--make-async-failure-callback (name)
   (-lambda ((proc . event))
-    (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))))
+    (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))
+    (error "process failure: %s: %s" proc event)))
 
 (defun jj--default-stderr-sentinel (proc event)
   "Process sentinel for stderr buffers. If the process is dead, and was not successful, and the buffer exists, insert the event into the buffer."
