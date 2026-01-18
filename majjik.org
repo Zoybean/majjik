@@ -2151,7 +2151,79 @@ so far, the only significant differences in parity that I'm aware of, are:
                   ,@jj-global-default-args
                   ,@jj-parsing-default-args))))
 #+end_src
+**** jj-file for tracked, set ops for untracked
+#+begin_src elisp
+  (defun jj--list-tree-untracked (root tracked-paths &optional full-search absolute-paths)
+    "Given a ROOT directory and a list TRACKED-PATHS of file paths, return the list of all untracked file paths.
+  When FULL-SEARCH, list all untracked files. Otherwise, return directory name instead of contents whenever all of a directory's contents are untracked.
+  When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths relative to ROOT."
+    (let* ((root (file-name-as-directory (expand-file-name root)))
+           (untracked-paths (cl-loop with stack = ()
+                                     with untracked = ()
+                                     with tracked = (mapcar (lambda (trk)
+                                                              (expand-file-name trk root))
+                                                            tracked-paths)
+                                     for dir = root then (pop stack)
+                                     for list = (directory-files dir :full
+                                                                 (rx  (|
+                                                                       ;; non-dot covers any normal path that might include a .
+                                                                       (not ".")
+                                                                       ;; 3 (or more, implicitly) covers any case where a path is only ., but it's still not a relative path
+                                                                       (= 3 ".")
+                                                                       )))
+                                     do (cl-loop for file in list
+                                                 do (pcase file
+                                                      ((and (pred file-directory-p)
+                                                            (let dir (file-name-as-directory file)))
+                                                       (if (or full-search
+                                                               (-any (lambda (trk)
+                                                                       (string-prefix-p dir trk))
+                                                                     tracked))
+                                                           ;; partly-tracked subdir or searching all dirs, revisit
+                                                           (push dir stack)
+                                                         ;; fully untracked subdir and we're cutting search there
+                                                         (push dir untracked)))
+                                                      (_ (if (-any (lambda (trk)
+                                                                     (string= file trk))
+                                                                   tracked)
+                                                             ;; tracked file, ignore
+                                                             ()
+                                                           ;; untracked file, collect
+                                                           (push file untracked)))))
+                                     while stack
+                                     finally return untracked)))
+      (if absolute-paths
+          untracked-paths
+        (mapcar (lambda (path)
+                  (string-trim-left path (rx (literal root))))
+                untracked-paths))))
 
+  (ert-deftest jj-test-tree-untracked ()
+    (let* ((default-directory (make-temp-file "test-track-" :dir))
+           (tracked '("ta" "dt/ta" "dt/tb" "dp/ta"))
+           (untracked '("ua" "dp/ua" "dp/du/ua" "dp/du/ub" "du/ua" "du/ub"))
+           (untracked-trim '("ua" "dp/ua" "dp/du/" "du/"))
+           (untracked-abs (mapcar (lambda (u)
+                                    (expand-file-name u))
+                                  untracked))
+           (untracked-trim-abs (mapcar (lambda (u)
+                                    (expand-file-name u))
+                                  untracked-trim))
+           (all-files `(,@tracked ,@untracked)))
+      (mapcar (lambda (f)
+                (make-empty-file f :parents))
+              all-files)
+      (let ((actual (jj--list-tree-untracked "." tracked)))
+        (should (seq-set-equal-p untracked-trim actual #'string=)))
+      (let ((actual (jj--list-tree-untracked "." tracked nil :abs)))
+        (should (seq-set-equal-p untracked-trim-abs actual #'string=)))
+      (let ((actual (jj--list-tree-untracked "." tracked :all :abs)))
+        (should (seq-set-equal-p untracked-abs actual #'string=)))
+      (let ((actual (jj--list-tree-untracked "." tracked :all)))
+        (should (seq-set-equal-p untracked actual #'string=)))
+      (delete-directory default-directory :rec)
+      :ok))
+#+end_src
 **** jj-bookmark-list for bookmark conflicts
 
 #+begin_src elisp
