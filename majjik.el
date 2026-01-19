@@ -1836,7 +1836,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
     ;; omit extra output
     "--quiet"))
 (defconst jj-logging-default-args
-  '())
+  '("--color=always"))
 (defconst jj-global-debug-args
   '("--debug")
   "List of flags (if any) to debug jj commands.")
@@ -3156,8 +3156,8 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
              ;; handle the promise state
              (add-function :after (process-sentinel proc)
                            (make-jj-callback-sentinel
-                            (lambda (code event)
-                              (if (eq code 0)
+                            (lambda (exit-status event)
+                              (if (eq exit-status 0)
                                   (funcall resolve proc)
                                 (funcall reject (cons proc event))))))
              ;; this always runs before the subsequent promise callbacks,
@@ -3288,7 +3288,7 @@ Sometimes this does not actually succeed at killing the process. Maybe I should 
        :no-revert :silent-ok :no-kill-output main-buf)
      (lambda (proc)
        (with-current-buffer main-buf
-         (diff-mode)
+         (font-lock-mode)
          (view-mode-enter nil #'kill-buffer)
          (setq-local default-directory repo-dir))
 
@@ -3325,7 +3325,7 @@ Sometimes this does not actually succeed at killing the process. Maybe I should 
      (lambda (proc)
        (with-current-buffer main-buf
          ;; TODO get a better mode for full commit view
-         (diff-mode)
+         (font-lock-mode)
          (view-mode-enter nil #'kill-buffer)
          (setq-local default-directory repo-dir))
 
