@@ -3010,8 +3010,9 @@ When it is additionally on a FIELD of the OBJECT, also print that FIELD's name a
 When NO-ERROR, return the error code instead of raising an error. See `call-cmd' for details."
   (let ((cmd `("jj"
                ,@jj-global-default-args
-               ,@(and jj-do-debug jj-global-debug-args)
-               ,@jj-logging-default-args
+               ;; never debug, because it has combined output and error streams
+               ;; ,@(and jj-do-debug jj-global-debug-args)
+               ,@jj-parsing-default-args
                ,@cmd)))
     (prog1
         (call-cmd cmd nil :string nil no-error)
