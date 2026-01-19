@@ -285,8 +285,10 @@ When returning both a string result and an exit code, they are returned as a con
 
 (cl-defstruct jj--process-log-entry
   "The buffers representing the various sections of a jj process' output"
+  (process nil :type process
+           :documentation "The process object itself.")
   (name nil :type string
-        :documentation "Description of the process, e.g. the command line used to invoke it")
+        :documentation "Description of the process, e.g. the command line used to invoke it.")
   (buf-code nil :type buffer
             :documentation "Buffer containing only the area where exit code of the process will be written.")
   (buf-stdout nil :type buffer
@@ -3078,6 +3080,7 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
 
 (defun jj--make-async-failure-callback (name)
   (-lambda ((proc . event))
+    (dbg event)
     (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))
     (error "process failure: %s: %s" proc event)))
 
