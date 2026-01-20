@@ -2144,45 +2144,53 @@ so far, the only significant differences in parity that I'm aware of, are:
   When FULL-SEARCH, list all untracked files. Otherwise, return directory name instead of contents whenever all of a directory's contents are untracked.
   When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths relative to ROOT."
     (let* ((root (file-name-as-directory (expand-file-name root)))
-           (untracked-paths (cl-loop with stack = ()
-                                     with untracked = ()
-                                     with tracked = (mapcar (lambda (trk)
-                                                              (expand-file-name trk root))
-                                                            tracked-paths)
-                                     for dir = root then (pop stack)
-                                     for list = (directory-files dir :full
-                                                                 (rx  (|
-                                                                       ;; non-dot covers any normal path that might include a .
-                                                                       (not ".")
-                                                                       ;; 3 (or more, implicitly) covers any case where a path is only ., but it's still not a relative path
-                                                                       (= 3 ".")
-                                                                       )))
-                                     do (cl-loop for file in list
-                                                 do (pcase file
-                                                      ((and (pred file-directory-p)
-                                                            (let dir (file-name-as-directory file)))
-                                                       (if (or full-search
-                                                               (-any (lambda (trk)
-                                                                       (string-prefix-p dir trk))
-                                                                     tracked))
-                                                           ;; partly-tracked subdir or searching all dirs, revisit
-                                                           (push dir stack)
-                                                         ;; fully untracked subdir and we're cutting search there
-                                                         (push dir untracked)))
-                                                      (_ (if (-any (lambda (trk)
-                                                                     (string= file trk))
-                                                                   tracked)
-                                                             ;; tracked file, ignore
-                                                             ()
-                                                           ;; untracked file, collect
-                                                           (push file untracked)))))
-                                     while stack
-                                     finally return untracked)))
+           (untracked))
+      ;; populate the untracked file list
+      (let* ((pending)
+             (tracked (mapcar (lambda (trk)
+                                (expand-file-name trk root))
+                              tracked-paths))
+             (check (lambda (file)
+                      ;; Check if FILE is tracked or not, and if it is a directory or not,
+                      ;; and handle it appropriately according to FULL-SEARCH.
+                      (pcase file
+                        ((and (pred file-directory-p)
+                              ;; ensure there's a trailing slash
+                              ;; so that we can be sure a string prefix is a path prefix
+                              (let dir (file-name-as-directory file)))
+                         (if (or full-search
+                                 (-any (lambda (trk)
+                                         (string-prefix-p dir trk))
+                                       tracked))
+                             ;; partly-tracked subdir or searching all dirs, revisit
+                             (push dir pending)
+                           ;; fully untracked subdir and we're cutting search there
+                           (push dir untracked)))
+                        (_ (if (-any (lambda (trk)
+                                       (string= file trk))
+                                     tracked)
+                               ;; tracked file, ignore
+                               ()
+                             ;; untracked file, collect
+                             (push file untracked)))))))
+        (cl-loop with no-rel-rx = (rx  (|
+                                        ;; non-dot covers any normal path
+                                        ;; that might include a ".", or not
+                                        (not ".")
+                                        ;; 3 (or more, implicitly) covers any case
+                                        ;; where a path is only "."s,
+                                        ;; but it's still not a relative component
+                                        (= 3 ".")))
+                 for dir = root then (pop pending)
+                 for contents = (directory-files dir :full no-rel-rx)
+                 do (mapc check contents)
+                 while pending))
+      ;; process the filenames if we want relative paths
       (if absolute-paths
-          untracked-paths
+          untracked
         (mapcar (lambda (path)
                   (string-trim-left path (rx (literal root))))
-                untracked-paths))))
+                untracked))))
 
   (ert-deftest jj-test-tree-untracked ()
     (let* ((default-directory (make-temp-file "test-track-" :dir))
