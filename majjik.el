@@ -3056,6 +3056,38 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 ;; [[file:majjik.org::*async command utils][async command utils:1]]
 (defalias 'jj-cmd-async 'jj-cmd-promise)
 
+(defvar jj-cmd-hist nil
+  "History for `jj-cmd' command.")
+
+(defun jj-cmd (cmd)
+  "Run an arbitrary command line. If there is any output, view it in its own buffer.
+Will likely fail for any interactive command."
+  (interactive (-let* ((str (read-from-minibuffer "command line: jj " nil nil nil 'jj-cmd-hist))
+                       (str-list (concat "( " str " )"))
+                       ((cmd . ix) (read-from-string str-list)))
+                 (unless (= ix (length str-list))
+                   (error "unbalanced expression in command line: %s" str))
+                 (list cmd)))
+  (cl-labels ((flat (list)
+                (mapcar #'str-flat list))
+              (str-flat (val)
+                (pcase val
+                  ((pred symbolp) (symbol-name val))
+                  ((pred stringp) val)
+                  (_ (user-error "unquoted parens in command line: %s" val)))))
+    (let* ((cmd-strings (flat cmd))
+           (name (s-join " " cmd-strings))
+           (buf (generate-new-buffer name)))
+      (promise-then (jj-cmd-async name cmd-strings nil nil t buf)
+                    (lambda (_)
+                        (if (jj--empty-buffer-p buf)
+                            (kill-buffer buf)
+                          (with-current-buffer buf
+                            (font-lock-mode)
+                            (view-mode-enter nil #'kill-buffer))
+                          (pop-to-buffer buf)))))))
+
+
 (defun jj-cmd-promise (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
   "Run CMD asynchronously, returning a promise of its completion.
 
@@ -3168,18 +3200,34 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
              ;; which means `resolve' and `reject' are not themselves callbacks
              (add-function :after (process-sentinel proc)
                            (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
+;; async command utils:1 ends here
 
+;; command log mode
+
+;; [[file:majjik.org::*command log mode][command log mode:1]]
 (defvar-keymap jj-process-mode-map
   :parent jj-inspect-mode-map
   "TAB" #'jj--toggle-collapse-process-at-point
   "k" #'jj--kill-process-at-point)
 
-(defun jj--empty-output-p (string)
+(defun jj--empty-string-p (string)
   "Returns non-nil when STRING is only unicode whitespace."
-  (string-match-p (rx string-start
-                      (* (any space))
-                      string-end)
-                  string))
+  ;; negate match. no non-space = all space
+  (not (string-match-p
+        ;; match any non-space anywhere
+        (rx (not (any space)))
+        string)))
+
+(defun jj--empty-buffer-p (buffer)
+  "Returns non-nil when BUFFER contains only unicode whitespace."
+  (with-current-buffer buffer
+    (save-excursion
+      (goto-char (point-min))
+      ;; negate match. no non-space = all space
+      (not (re-search-forward
+            ;; match any non-space anywhere
+            (rx (not (any space)))
+            nil :noerrror)))))
 
 (defun jj--overlay-text (ovl)
   (with-current-buffer (overlay-buffer ovl)
@@ -3216,9 +3264,9 @@ Sometimes this does not actually succeed at killing the process."
                     (child (message "proc has child process %s" child)
                            (when (yes-or-no-p "signal child?")
                              (signal-process child signal))))
-                  (progn
-                    (message "sending %s to %s" signal proc)
-                    (signal-process proc signal))
+                (progn
+                  (message "sending %s to %s" signal proc)
+                  (signal-process proc signal))
                 (user-error "process %s is stopped" proc))
             (user-error "process %s has not started" (jj--process-log-entry-name proc-entry)))
         (user-error "not a process: %s" proc-entry))
@@ -3240,7 +3288,7 @@ Sometimes this does not actually succeed at killing the process."
        ;; update value
        (setq collapsed (or
                         ;; if output is empty, always collapse
-                        (jj--empty-output-p (jj--overlay-text ovl-collapse))
+                        (jj--empty-string-p (jj--overlay-text ovl-collapse))
                         ;; otherwise, toggle. by default, initially collapsed
                         (not collapsed)))
        ;; set properties to action the new `collapsed' value
@@ -3267,7 +3315,7 @@ Sometimes this does not actually succeed at killing the process."
                    ;; then the colour disappears from the exit code.
                    (propertize " " 'display
                                ;; hide fringe when content empty
-                               `(when (not (jj--empty-output-p (jj--overlay-text ,ovl-collapse)))
+                               `(when (not (jj--empty-string-p (jj--overlay-text ,ovl-collapse)))
                                   left-fringe
                                   ;; update fringe to match expand-collapse state.
                                   ,(if collapsed 'jj-fringe-bitmap> 'jj-fringe-bitmapv)
@@ -3285,7 +3333,7 @@ Sometimes this does not actually succeed at killing the process."
 
 (defvar jj--process-ellipsis "\n"
   "String to show instead of process output when collapsing.")
-;; async command utils:1 ends here
+;; command log mode:1 ends here
 
 ;; jj diff
 
