@@ -460,6 +460,40 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
             (delete-region (point-min) (point))))))))
 ;; sentinels and filters:1 ends here
 
+;; promise utils
+
+;; [[file:majjik.org::*promise utils][promise utils:1]]
+(defun jj--promise-wait-sync (promise)
+  "Sit until PROMISE completes, and return:
+- (:ok . VAL) if it succeeded
+- (:err . REASON) if it failed"
+  (let ((state :run)
+        (result))
+    (promise-chain promise
+      (then (lambda (val)
+              (setq state :ok)
+              (setq result val)))
+      (catch (lambda (err)
+               (setq state :err)
+               (setq result err))))
+    (with-local-quit
+      (while (eq :run state)
+        (sit-for 0.1)))
+    `(,state . ,result)))
+
+(ert-deftest jj-test-promise-wait-sync ()
+  (should (equal '(:ok . foo)
+                 (promise-wait-sync
+                  (promise-new (lambda (res rej)
+                                 (sit-for 0.5)
+                                 (funcall res 'foo))))))
+  (should (equal '(:err . bar)
+                 (promise-wait-sync
+                  (promise-new (lambda (res rej)
+                                 (sit-for 0.5)
+                                 (funcall rej 'bar)))))))
+;; promise utils:1 ends here
+
 ;; log utils
 
 ;; [[file:majjik.org::*log utils][log utils:1]]
@@ -1957,6 +1991,8 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 
 (defvar-local jj--indirect-buffers nil
   "Indirect buffers into the current buffer. Ought to be killed if we're reverting.")
+
+;; TODO make this use promises
 (defun jj-dash--revert-async (&optional and-then)
   "Asynchronously get the new status, and reverts the buffer contents when those processes complete.
 Reverted buffer is the one that was active when this function was called."
