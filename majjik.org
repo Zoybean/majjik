@@ -3239,14 +3239,32 @@ might actually not use these as I need a lexical variable anyway in most cases w
 
   (defun jj--kill-process-at-point (pos)
     "Try to kill the process at point.
-  Sometimes this does not actually succeed at killing the process. Maybe I should try using `signal-process'?"
+  Sometimes this does not actually succeed at killing the process."
+    (interactive "d")
+    (jj--signal-process-at-point pos 'SIGKILL))
+
+  (defun jj--interrupt-process-at-point (pos)
+    "Try to interrupt the process at point."
+    (interactive "d")
+    (jj--signal-process-at-point pos 'SIGINT))
+
+  (defun jj--signal-process-at-point (pos signal)
+    "Send SIGNAL to the process at POS."
     (interactive "d")
     (if-let ((proc-entry (get-pos-property pos 'jj-object)))
         (if (jj--process-log-entry-p proc-entry)
             (if-let ((proc (jj--process-log-entry-process proc-entry)))
-                (progn
-                  (message "sending kill signal to %s" proc)
-                  (kill-process proc))
+                (if (process-live-p proc)
+                    (pcase (process-running-child-p proc)
+                      ('nil (message "proc has no child"))
+                      ('t (message "proc has anonymous child process"))
+                      (child (message "proc has child process %s" child)
+                             (when (yes-or-no-p "signal child?")
+                               (signal-process child signal))))
+                    (progn
+                      (message "sending %s to %s" signal proc)
+                      (signal-process proc signal))
+                  (user-error "process %s is stopped" proc))
               (user-error "process %s has not started" (jj--process-log-entry-name proc-entry)))
           (user-error "not a process: %s" proc-entry))
       (user-error "not at a process object")))
