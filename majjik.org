@@ -1610,13 +1610,11 @@ this might not actually work. I'm big sus actually.
       ((pred jj-log-graph-p)
        (insert-jj-log-elided entry))
       ((pred jj-log-entry-p)
-       (let ((dest (current-buffer)))
-         (with-temp-buffer
-           (save-excursion (insert-jj-log-header (jj-log-entry-header entry)))
+       (let ((header (jj-log-entry-header entry)))
+         (with-insert-temp-buffer
+           (save-excursion (insert-jj-log-header header))
            (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
-           (let ((source (current-buffer)))
-             (with-current-buffer dest
-               (insert-buffer-substring source))))))))
+           (add-text-properties (point-min) (point-max) `(jj-object ,header)))))))
 #+end_src
 *** formats
 #+begin_src elisp
