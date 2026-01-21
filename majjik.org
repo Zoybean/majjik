@@ -2748,9 +2748,8 @@ but, they should also be able to rely on the same underlying machinery, if possi
                                                             (buffer-substring (line-beginning-position) (line-end-position))
                                                             (make-string (- (point) (line-beginning-position)) ?\s)))
                                 (cl-labels ((more ()
-                                              (unless (or (eobp) (bolp))
-                                                (with-error-label "not at line bounds"
-                                                  (jj--re-step-over "\n")))
+                                              (with-error-label "not at line bounds"
+                                                (jj--re-step-over (rx (or line-start string-end "\n"))))
                                               (not (or (eobp)
                                                        (looking-at (rx (opt "\n")
                                                                        "--\n")))))
@@ -2758,29 +2757,29 @@ but, they should also be able to rely on the same underlying machinery, if possi
                                               (more)
                                               (with-error-label "section separator"
                                                 (jj--re-step-over (rx (opt "\n")
-                                                                    "--\n")))))
+                                                                      "--\n")))))
                                   `(:files-changed
                                     ,(with-error-label "files-changed"
-                                         (cl-loop initially (goto-char (point-min))
-                                                               while (more)
-                                                               for entry = (read-jj-status-wc-change)
-                                                               collect entry))
+                                       (cl-loop initially (goto-char (point-min))
+                                                while (more)
+                                                for entry = (read-jj-status-wc-change)
+                                                collect entry))
                                     :commit-working-copy
                                     ,(with-error-label "commit-working-copy"
-                                         (progn (step-section)
-                                                             (read-jj-status-lineage-entry)))
+                                       (progn (step-section)
+                                              (read-jj-status-lineage-entry)))
                                     :commits-parent
                                     ,(with-error-label "commits-parent"
-                                         (cl-loop initially (step-section)
-                                                               while (more)
-                                                               for entry = (read-jj-status-lineage-entry)
-                                                               collect entry))
+                                       (cl-loop initially (step-section)
+                                                while (more)
+                                                for entry = (read-jj-status-lineage-entry)
+                                                collect entry))
                                     :files-conflict
                                     ,(with-error-label "files-conflict"
-                                         (cl-loop initially (step-section)
-                                                               while (more)
-                                                               for entry = (read-jj-status-file-conflict)
-                                                               collect entry))))))
+                                       (cl-loop initially (step-section)
+                                                while (more)
+                                                for entry = (read-jj-status-file-conflict)
+                                                collect entry))))))
                           (should (eobp))
                           (kill-buffer)))))))
 
