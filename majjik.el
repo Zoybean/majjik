@@ -63,7 +63,8 @@
 (defmacro with-error-label (name &rest body)
   "If BODY signals an error condition, reformat the original message by prepending a NAME to the original message."
   (declare (indent 1))
-  `(with-error-format ,(concat (prc name) ": %s")
+  `(with-error-format ,(cond ((stringp name) (concat name ": %s"))
+                             (t `(concat ,name ": %s")))
      ,@body))
 ;; error-context:1 ends here
 
@@ -626,7 +627,7 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
       (prog1 ok
         (goto-char end))
     (unless no-error
-      (error "anchored search failed: %s" regexp))))
+      (error "anchored search failed: %s" (jj--quote-argument regexp)))))
 
 (defun jj--forgiving-read (reader)
   "Call READER, and ignore errors. If it fails, reset point."
@@ -1457,28 +1458,28 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
 
 (defun jj-read-graph-and-maybe-elided ()
   (let ((errors))
-    (or (push-errors errors (with-error-format
-                                "error reading log node: %s"
+    (or (push-errors errors (with-error-label
+                                "read log node"
                               (jj-read-graph-and-entry)))
-        (push-errors errors (with-error-format
-                                "error reading elided revisions: %s"
+        (push-errors errors (with-error-label
+                                "read elided revisions"
                               (jj-read-graph-and-elided)))
         (error "Line is not a recognised part of a jj log. %s: %s"
                (nreverse errors)
                (buffer-substring-no-properties (line-beginning-position) (line-end-position))))))
 
 (defun jj-read-graph-and-elided ()
-  (prog1 (with-error-format
-             "error reading elided graph: %s"
+  (prog1 (with-error-label
+             "read elided graph"
            (save-excursion (jj-parse-erase-elided-prefix)))
     (jj-read-elided)))
 
 (defun jj-read-graph-and-entry ()
-  (make-jj-log-entry :graph (with-error-format
-                                "error reading log graph: %s"
+  (make-jj-log-entry :graph (with-error-label
+                                "read log graph"
                               (save-excursion (jj-parse-erase-graph-prefix)))
-                     :header (with-error-format
-                                 "error reading log entry: %s"
+                     :header (with-error-label
+                                 "read log entry"
                                (prog1
                                    (read-jj-log-header)
                                  (jj--re-step-over "\n")))))
@@ -1621,13 +1622,11 @@ If the line is an elided entry, returns a single string, which is the prefix bef
     ((pred jj-log-graph-p)
      (insert-jj-log-elided entry))
     ((pred jj-log-entry-p)
-     (let ((dest (current-buffer)))
-       (with-temp-buffer
-         (save-excursion (insert-jj-log-header (jj-log-entry-header entry)))
+     (let ((header (jj-log-entry-header entry)))
+       (with-insert-temp-buffer
+         (save-excursion (insert-jj-log-header header))
          (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
-         (let ((source (current-buffer)))
-           (with-current-buffer dest
-             (insert-buffer-substring source))))))))
+         (add-text-properties (point-min) (point-max) `(jj-object ,header)))))))
 ;; plumbing:1 ends here
 
 ;; formats
@@ -1683,8 +1682,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
      (defun ,(intern (format "read-jj-%s" type-name)) ()
        ,(format "With point at the beginning of a `jj-%1$s' entry, parse the entry into a `jj-%1$s' struct." type-name)
        ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-          `(cl-loop initially (with-error-context (lambda (msg)
-                                                    (format "failed to read struct label %s: %s" ',type-name msg))
+          `(cl-loop initially (with-error-label ,(format "read struct label %s" type-name)
                                 (jj--re-step-over (rx ,(format "%s" type-name) ,jj--major-delim)))
                     for (field-name key parser) in (list ,@(cl-loop for (field-name . props) in fields
                                                                     for key = (intern (format ":%s" field-name))
@@ -1693,8 +1691,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                     ;; no delimiter for first field
                     for first = t then nil
                     for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
-                    when (with-error-context (lambda (msg)
-                                               (format "failed to read field %s: %s" field-name msg))
+                    when (with-error-label (format "read field %s" field-name)
                            (jj--re-step-over field-rx))
                     for parsed = (if parser
                                      (save-match-data
@@ -1855,11 +1852,11 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 "))
     (should (equal (cl-loop while (not (eobp))
                             for n = (let ((errors))
-                                      (or (push-errors errors (list :entry (with-error-format
-                                                                               "error reading log node: %s"
+                                      (or (push-errors errors (list :entry (with-error-label
+                                                                               "read log node"
                                                                              (jj-read-graph-and-entry))))
-                                          (push-errors errors (list :elided (with-error-format
-                                                                                "error reading elided revisions: %s"
+                                          (push-errors errors (list :elided (with-error-label
+                                                                                "read elided revisions"
                                                                               (jj-read-graph-and-elided))))
                                           (error "Line is not a recognised part of a jj log. %s: %s"
                                                  (nreverse errors)
@@ -2053,11 +2050,11 @@ here
 "))
     (should (equal (cl-loop while (not (eobp))
                             for n = (let ((errors))
-                                      (or (push-errors errors (list :entry (with-error-format
-                                                                               "error reading log node graph: %s"
+                                      (or (push-errors errors (list :entry (with-error-label
+                                                                               "read log node graph"
                                                                              (jj-parse-erase-graph-prefix))))
-                                          (push-errors errors (list :elided (with-error-format
-                                                                                "error reading elided graph: %s"
+                                          (push-errors errors (list :elided (with-error-label
+                                                                                "read elided graph"
                                                                               (jj-parse-erase-elided-prefix))))
                                           (error "Line is not recognised as having a jj log graph prefix. %s: %s"
                                                  (nreverse errors)
@@ -2711,36 +2708,46 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                   (lambda (proc)
                     (with-current-buffer (process-buffer proc)
                       (prog1
-                          (with-error-context (lambda (e)
-                                                (format "err: %s:\n%s" e (buffer-substring (point) (point-max))))
-                            (cl-labels ((more ()
-                                          (unless (bolp)
-                                            (jj--re-step-over "\n"))
-                                          (not (or (eobp)
-                                                   (looking-at (rx (opt "\n")
-                                                                   "--\n")))))
-                                        (step-section ()
-                                          (more)
-                                          (jj--re-step-over (rx (opt "\n")
-                                                                "--\n"))))
-                              `(:files-changed
-                                ,(cl-loop initially (goto-char (point-min))
-                                          while (more)
-                                          for entry = (read-jj-status-wc-change)
-                                          collect entry)
-                                :commit-working-copy
-                                ,(progn (step-section)
-                                        (read-jj-status-lineage-entry))
-                                :commits-parent
-                                ,(cl-loop initially (step-section)
-                                          while (more)
-                                          for entry = (read-jj-status-lineage-entry)
-                                          collect entry)
-                                :files-conflict
-                                ,(cl-loop initially (step-section)
-                                          while (more)
-                                          for entry = (read-jj-status-file-conflict)
-                                          collect entry))))
+                          (with-error-label "read main status"
+                            (with-error-context (lambda (e)
+                                                  (format "err: %s:\n%s\n%s><"
+                                                          e
+                                                          (buffer-substring (line-beginning-position) (line-end-position))
+                                                          (make-string (- (point) (line-beginning-position)) ?\s)))
+                              (cl-labels ((more ()
+                                            (unless (or (eobp) (bolp))
+                                              (with-error-label "not at line bounds"
+                                                (jj--re-step-over "\n")))
+                                            (not (or (eobp)
+                                                     (looking-at (rx (opt "\n")
+                                                                     "--\n")))))
+                                          (step-section ()
+                                            (more)
+                                            (with-error-label "section separator"
+                                              (jj--re-step-over (rx (opt "\n")
+                                                                  "--\n")))))
+                                `(:files-changed
+                                  ,(with-error-label "files-changed"
+                                       (cl-loop initially (goto-char (point-min))
+                                                             while (more)
+                                                             for entry = (read-jj-status-wc-change)
+                                                             collect entry))
+                                  :commit-working-copy
+                                  ,(with-error-label "commit-working-copy"
+                                       (progn (step-section)
+                                                           (read-jj-status-lineage-entry)))
+                                  :commits-parent
+                                  ,(with-error-label "commits-parent"
+                                       (cl-loop initially (step-section)
+                                                             while (more)
+                                                             for entry = (read-jj-status-lineage-entry)
+                                                             collect entry))
+                                  :files-conflict
+                                  ,(with-error-label "files-conflict"
+                                       (cl-loop initially (step-section)
+                                                             while (more)
+                                                             for entry = (read-jj-status-file-conflict)
+                                                             collect entry))))))
                         (should (eobp))
                         (kill-buffer)))))))
 
