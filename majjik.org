@@ -2069,19 +2069,17 @@ this might not actually work. I'm big sus actually.
   log-plainzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
   "))))
 #+end_src
-*** scratch
+*** COMMENT scratch
 #+begin_src elisp
   (let* ((buf (current-buffer))
          (temp (generate-new-buffer "*jj-log-temp*"))
          (err (generate-new-buffer "*jj-log-stderr*"))
          (filter (cl-labels ((read-next ()
-                               (unless (condition-case e
-                                           (dbg (jj-read-graph-and-maybe-elided))
-                                         (error (dbg e)
-                                                (dbg (point))
-                                                nil))
-                                 ;; (dbg (buffer-substring (line-beginning-position) (line-end-position)))
-                                 ))
+                               (condition-case e
+                                   (dbg (jj-read-graph-and-maybe-elided))
+                                 (error (dbg e)
+                                        (dbg (point))
+                                        nil)))
                              (print-entries (news)
                                (with-current-buffer buf
                                  (let ((inhibit-read-only t))
