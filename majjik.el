@@ -1577,14 +1577,17 @@ If the line is an elided entry, returns a single string, which is the prefix bef
                      (forward-line 1))))
 
 (defun insert-jj-graph-log-maybe-elided (entry)
-  (pcase (dbg entry)
+  (pcase entry
     ((pred jj-log-graph-p)
      (insert-jj-log-elided entry))
     ((pred jj-log-entry-p)
      (let ((dest (current-buffer)))
        (with-temp-buffer
          (save-excursion (insert-jj-log-plain (jj-log-entry-header entry)))
-         (insert-jj-log-graph-prefix (jj-log-entry-graph entry)))))))
+         (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
+         (let ((source (current-buffer)))
+           (with-current-buffer dest
+             (insert-buffer-substring source))))))))
 ;; plumbing:1 ends here
 
 ;; formats
@@ -2985,16 +2988,13 @@ Also sets `jj--current-status' in the initial buffer when the status process com
             (err (generate-new-buffer "*jj-log-stderr*"))
             (sentinel (make-jj-simple-sentinel err temp))
             (filter (cl-labels ((read-next ()
-                                  (unless (ignore-errors (jj-read-graph-and-maybe-elided)
-                                                         )
-                                    ;; (dbg (buffer-substring (line-beginning-position) (line-end-position)))
-                                    ))
+                                  (ignore-errors (jj-read-graph-and-maybe-elided)))
                                 (print-entries (news)
                                   (with-current-buffer buf
                                     (let ((inhibit-read-only t))
-                                      ;; (mapc #'insert-jj-log-maybe-elided news)
+                                      ;; (mapc #'insert-jj-graph-log-maybe-elided news)
                                       (cl-loop for new in news
-                                               do (insert-jj-log-maybe-elided (dbg new)))))))
+                                               do (insert-jj-graph-log-maybe-elided new))))))
                       (make-jj-generic-buffered-filter temp #'read-next #'print-entries))))
        (let ((proc (make-process
                     :name "jj-log"
