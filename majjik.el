@@ -469,6 +469,8 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
 - (:ok . VAL) if it succeeded
 - (:err . REASON) if it failed
 - (:fault . DATA) if it had some esoteric failure."
+  (unless (promise-class-p promise)
+    (error "not a promise: %s" promise))
   (let ((state :run)
         (result))
     (promise-chain promise
