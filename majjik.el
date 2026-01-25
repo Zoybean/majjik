@@ -2070,7 +2070,7 @@ If accepted, return the dir for the new repo, and the promise for the initialisa
 If repo already existed, just return its path (as a singleton list)."
   (cl-block jj--workspace-root-or-create
     (handler-bind 
-        ((jj-repo-missing (lambda (e)
+        ((jj-repo-missing-above (lambda (e)
                             (when (yes-or-no-p (format "No repo at `%s'. Create one?" repo-dir))
                               (let ((root-dir (expand-file-name (read-directory-name "repository root: ")))
                                     (colocate (yes-or-no-p "colocated repository?")))
@@ -2088,6 +2088,7 @@ If repo already existed, just return its path (as a singleton list)."
                     (jj-dashboard-mode)
                     (setq-local default-directory repo-dir
                                 revert-buffer-function #'jj-dash--revert)
+                    (message "getting jj status")
                     (jj-dash--revert-async))))
       (promise-then
        (if init-promise
@@ -2095,32 +2096,31 @@ If repo already existed, just return its path (as a singleton list)."
                          #'setup-buf-promise)
          (setup-buf-promise))
        (lambda (_ok)
+         (message "jj dash ok")
          (pop-to-buffer main-buf))
        (lambda (err)
          (message "error: %s" err))))))
 
-(defun jj-ensure-repo (dir)
-  (let ((repo-root ((condition-case e (jj-workspace-root dir)
-                      (jj-repo-missing (when (yes-or-no-p "Not within a jj repo: initialize here?")
-                                         (jj-git--init-sync dir :colocate)
-                                         dir)))))
-        (unless (string= (expand-file-name dir)
-                         (expand-file-name repo-root))
-          (pcase (read-answer (format "%s is not the root of a jj repo. Continue anyway? " dir)
-                              '(("yes" ?y "continue")
-                                ("no" ?n "cancel")
-                                ("init" ?i "initialise a repo here")))
-            ("yes" t)
-            ("no" (user-error "Cancelled"))
-            ("init" (jj-git--init-sync dir :colocate))
-            )))))
+(defun jj--ensure-repo-async (repo-dir)
+  "To supply the arguments for `jj-dash--async'. If REPO-DIR is not a jj repo, then offer to create it.
+If rejected, signal `jj-repo-missing-at'.
+If accepted, return the dir for the new repo, and the promise for the initialisation.
+If repo already existed, just return its path (as a singleton list)."
+  (cond ((file-exists-p (file-name-concat repo-dir ".jj"))
+         (list repo-dir))
+        ((yes-or-no-p (format "No repo at `%s'. Create one?" repo-dir))
+         (let ((root-dir (expand-file-name (read-directory-name "repository root: ")))
+               (colocate (yes-or-no-p "colocated repository?")))
+           (cl-return-from jj--workspace-root-or-create
+             (list root-dir (jj-git-init root-dir colocate)))))
+        (t (signal 'jj-repo-missing-at repo-dir))))
 
 ;;;###autoload
 (defun jj-project-dash ()
   "Run `jj-dash' in the current project's root."
   (interactive)
   (if (fboundp 'project-root)
-      (jj-dash--async (project-root (project-current t)))
+      (apply #'jj-dash--async (jj--ensure-repo-async (project-root (project-current t))))
     (user-error "`jj-project-dash' requires `project' 0.3.0 or greater")))
 
 (defun jj-make-section-buffer (section-name header trailer)
@@ -2766,13 +2766,13 @@ Also sets `jj--current-status' in the initial buffer when the status process com
       (pcase code
         (0 (s-chomp message))
         ;; this command uses code 1 to signal a missing repo. maybe all commands?
-        (1 (signal 'jj-repo-missing (list default-directory)))
+        (1 (signal 'jj-repo-missing-above (list default-directory)))
         (_ (error "process exited with nonzero exit code %d" code))))))
 
 (defun jj--workspace-root-lisp (dir)
   "Return the root of the jj repository containing DIR. Performs the traversal in lisp, rather than calling on jj."
   (or (locate-dominating-file dir ".jj")
-      (signal 'jj-repo-missing (list default-directory))))
+      (signal 'jj-repo-missing-above (list default-directory))))
 
 (defalias 'jj-workspace-root 'jj--workspace-root-lisp
   "Return the root of the jj repository containing DIR, or `default-directory' if not provided.")
@@ -2780,7 +2780,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defalias 'assert-jj 'jj-workspace-root
   "Throw an error unless we're in a jj repo.")
 
-(define-error 'jj-repo-missing "No jj repo at or above")
+(define-error 'jj-repo-missing-above "Not within a jj repo")
+(define-error 'jj-repo-missing-at "Not at a jj repo root")
 ;; repo query commands:1 ends here
 
 ;; revset
