@@ -1976,7 +1976,7 @@ this might not actually work. I'm big sus actually.
     "f k" #'jj-file-delete-dwim
     "$" #'jj-pop-to-command-log)
 
-  (keymap-global-set "C-x j" #'jj-dash)
+  (keymap-global-set "C-x j" #'jj-dash--async)
 #+end_src
 *** General buffer-locals
 #+begin_src elisp  
@@ -2022,11 +2022,11 @@ this might not actually work. I'm big sus actually.
                       (cleanup)))
                   (cleanup ()
                     (kill-buffer temp-buf)))
-        (with-current-buffer temp-buf
-          (promise-then
-           (start-jj-dash-async)
-           #'end-ok
-           #'end-err)))))
+        (promise-then
+         (with-current-buffer temp-buf
+           (start-jj-dash-async))
+         #'end-ok
+         #'end-err))))
 
   (defun jj-dash--revert (&rest _)
     ;; todo: wait on this somehow?
@@ -2043,32 +2043,40 @@ this might not actually work. I'm big sus actually.
       (jj-jump-find-object (lambda (obj) (funcall test thing obj)))))
 
   (defun jj-dash-buffer (dir)
-    "Return the dashboard buffer for the jj workspace root of DIR."
-    (format "*jj-dash %s*" (jj-workspace-root dir)))
+    "Return the dashboard buffer for DIR, which is assumed to be a workspace root, but is not assumed to be normalised."
+    (format "*jj-dash %s*" (abbreviate-file-name (expand-file-name dir))))
+
+  (defun jj--workspace-root-or-create (repo-dir)
+    "To supply the arguments for `jj-dash--async'. If there's no repo above REPO-DIR, then offer to create it.
+  If rejected, propagate the original error signal.
+  If accepted, return the dir for the new repo, and the promise for the initialisation.
+  If repo already existed, just return its path (as a singleton list)."
+    (cl-block jj--workspace-root-or-create
+      (handler-bind 
+          ((jj-repo-missing (lambda (e)
+                              (when (yes-or-no-p (format "No repo at `%s'. Create one?" repo-dir))
+                                (let ((root-dir (expand-file-name (read-directory-name "repository root: ")))
+                                      (colocate (yes-or-no-p "colocated repository?")))
+                                  (cl-return-from jj--workspace-root-or-create
+                                    (list root-dir (jj-git-init root-dir colocate))))))))
+        (list (jj-workspace-root repo-dir)))))
 
   ;;;###autoload
-  (defun jj-dash (repo-dir)
-    "Show the status of the current jj repository in a buffer."
-    (interactive (list (jj-workspace-root default-directory)))
-    (let ((main-buf (get-buffer-create (jj-dash-buffer repo-dir))))
-      (with-current-buffer main-buf
-        (jj-dashboard-mode)
-        (setq-local default-directory repo-dir
-                    revert-buffer-function #'jj-dash--revert)
-        (start-jj-dash-blocking))
-      (pop-to-buffer main-buf)))
-
-  ;;;###autoload
-  (defun jj-dash--async (repo-dir)
+  (defun jj-dash--async (repo-dir &optional init-promise)
     "Show the status of the current jj repository in a buffer. Async - pops to the new buffer once the status is ready."
-    (interactive (list (jj-workspace-root default-directory)))
+    (interactive (jj--workspace-root-or-create default-directory))
     (let ((main-buf (get-buffer-create (jj-dash-buffer repo-dir))))
-      (with-current-buffer main-buf
-        (jj-dashboard-mode)
-        (setq-local default-directory repo-dir
-                    revert-buffer-function #'jj-dash--revert)
+      (cl-labels ((setup-buf-promise (&optional _)
+                    (with-current-buffer main-buf
+                      (jj-dashboard-mode)
+                      (setq-local default-directory repo-dir
+                                  revert-buffer-function #'jj-dash--revert)
+                      (jj-dash--revert-async))))
         (promise-then
-         (jj-dash--revert-async)
+         (if init-promise
+             (promise-then init-promise
+                           #'setup-buf-promise)
+           (setup-buf-promise))
          (lambda (_ok)
            (pop-to-buffer main-buf))
          (lambda (err)
@@ -2129,48 +2137,6 @@ so far, the only significant differences in parity that I'm aware of, are:
 - I can only show ref conflicts for the current commit, not the whole repo. but I can probably just call jj bookmark list -c for that.
 
 #+begin_src elisp
-  (defun start-jj-show-status (&optional revset fileset)
-    (let ((inhibit-read-only t))
-      (erase-accessible-buffer))
-    (let* ((err (generate-new-buffer "*jj-show-status-stderr*"))
-           (sentinel (make-jj-simple-sentinel err))
-           (filter (make-sticky-process-filter :sticky)))
-      (make-process
-       :name "jj-show-status"
-       :buffer (current-buffer)
-       :stderr err
-       :filter filter
-       :sentinel sentinel
-       :noquery t
-       :command `("jj" "show"
-                  "--no-patch"
-                  "-T" ,(jj-show-status-template 'self)
-                  ,@jj-global-default-args
-                  ,@(and jj-do-debug jj-global-debug-args)
-                  ,@jj-parsing-default-args))))
-#+end_src
-**** COMMENT jj-show for diff section
-
-#+begin_src elisp
-  (defun start-jj-show-diff (&optional revset fileset)
-    (let ((inhibit-read-only t))
-      (erase-accessible-buffer))
-    (let* ((err (generate-new-buffer "*jj-show-diff-stderr*"))
-           (sentinel (make-jj-simple-sentinel err))
-           (filter (make-sticky-process-filter :sticky)))
-      (make-process
-       :name "jj-status-diff"
-       :buffer (current-buffer)
-       :stderr err
-       :filter filter
-       :sentinel sentinel
-       :noquery t
-       :command `("jj" "show"
-                  "--no-patch"
-                  "-T" ,(jj-status-diff-template 'self)
-                  ,@jj-global-default-args
-                  ,@(and jj-do-debug jj-global-debug-args)
-                  ,@jj-parsing-default-args))))
 #+end_src
 **** jj-file for untracked files
 
@@ -2391,33 +2357,6 @@ these section commands should be named to be sure that theydont collide with use
 but, they should also be able to rely on the same underlying machinery, if possible. Which would need to be flexible in templating and parsing, given the strict template used by the dash buffer.
 *** Combined struct and output formatter
 #+begin_src elisp
-  (defun start-jj-status ()
-    "Start the component processes for jj dashboard's status section. Returns the list of processes."
-    (save-excursion
-      (let ((procs))
-        (cl-labels ((proc (proc)
-                      (push proc procs)
-                      proc))
-          (with-current-buffer
-              (jj-make-section-buffer "status" "\n" "\n")
-            (proc (start-jj-show-status)))
-          (with-current-buffer
-              (jj-make-section-buffer "bookmark-conflicts" "\n" "\n")
-            (proc (start-jj-bookmark-list
-                   nil
-                   "--conflicted"
-                   "-T" (jj-status-bookmark-conflict-template 'self))))
-          (with-current-buffer
-              (jj-make-section-buffer "untracked" "\n" "\n")
-            (proc (start-jj-file-untracked)))
-
-          ;; (with-current-buffer
-          ;;     (jj-make-section-buffer "diff" "Diff:\n" "\n")
-          ;;   (insert "diff-content\n")
-          ;;   )
-          )
-        procs)))
-
   (cl-defstruct jj-status
     "Aggregate of all of the jj status information from various command sources."
     files-untracked
@@ -2427,33 +2366,78 @@ but, they should also be able to rely on the same underlying machinery, if possi
     files-conflict
     bookmarks-conflict)
 
-  (defun read-jj-status ()
-    (cl-macrolet ((try (fn) `(jj--forgiving-read #',fn))
-                  (line (&rest body) `(prog1 (progn ,@body)
-                                        (unless (bolp)
-                                          (forward-char 1)))))
-      (make-jj-status
-       :files-changed (cl-loop for entry = (line (try read-jj-status-wc-change))
-                               while entry
-                               collect entry)
-       :commit-working-copy (line (read-jj-status-lineage-entry))
-       :commits-parent (cl-loop for entry = (line (try read-jj-status-lineage-entry))
-                                while entry
-                                collect entry)
-       :files-conflict (cl-loop for entry = (line (try read-jj-status-file-conflict))
-                                while entry
-                                collect entry)
-       :bookmarks-conflict (cl-loop for entry = (line (try read-jj-status-bookmark-conflict))
-                                    while entry
-                                    collect entry)
-       :files-untracked (cl-loop for entry = (line (try read-jj-status-file-untracked))
-                                 while entry
-                                 collect entry))))
-
   (defmacro slot-values (object slots)
     (declare (indent 1))
     `(with-slots ,slots ,object
        (list ,@slots)))
+
+  (defun jj--status-main-status ()
+    "Return part of the alist required to make a jj-status object."
+    (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
+      ;; let-binding works because the buffer is set up synchronously,
+      ;; before the async dispatch
+      (promise-then (jj-cmd-async "show-status"
+                        `("show"
+                          "--no-patch"
+                          "-T" ,(jj-show-status-delim-template 'self))
+                      :no-revert :silent-ok :no-kill)
+                    (lambda (proc)
+                      (with-current-buffer (process-buffer proc)
+                        (prog1
+                            (with-error-context (lambda (e)
+                                                  (format "err: %s:\n%s" e (buffer-substring (point) (point-max))))
+                              (cl-labels ((more ()
+                                            (unless (bolp)
+                                              (jj--re-step-over "\n"))
+                                            (not (or (eobp)
+                                                     (looking-at (rx (opt "\n")
+                                                                     "--\n")))))
+                                          (step-section ()
+                                            (more)
+                                            (jj--re-step-over (rx (opt "\n")
+                                                                  "--\n"))))
+                                `(:files-changed
+                                  ,(cl-loop initially (goto-char (point-min))
+                                            while (more)
+                                            for entry = (read-jj-status-wc-change)
+                                            collect entry)
+                                  :commit-working-copy
+                                  ,(progn (step-section)
+                                          (read-jj-status-lineage-entry))
+                                  :commits-parent
+                                  ,(cl-loop initially (step-section)
+                                            while (more)
+                                            for entry = (read-jj-status-lineage-entry)
+                                            collect entry)
+                                  :files-conflict
+                                  ,(cl-loop initially (step-section)
+                                            while (more)
+                                            for entry = (read-jj-status-file-conflict)
+                                            collect entry))))
+                          (should (eobp))
+                          (kill-buffer)))))))
+
+  (defun jj-show-status-delim-template (self)
+    (jj-template
+     (cl-subst self 'self
+               `(join "\n--\n"
+                      (:chain self
+                              (.diff)
+                              (.files)
+                              (.map (lambda (f)
+                                      (:lit ,(jj-status-wc-change-template 'f))))
+                              (.join "\n"))
+                      (:lit ,(jj-status-lineage-entry-template 'self))
+                      (:chain self (.parents)
+                              (.map (lambda (p)
+                                      (:lit ,(jj-status-lineage-entry-template 'p))))
+                              (.join "\n"))
+                      (:chain self
+                              (.files)
+                              (.filter (lambda (f) (:chain f (.conflict))))
+                              (.map (lambda (f)
+                                      (:lit ,(jj-status-file-conflict-template 'f))))
+                              (.join "\n"))))))
 
   (defun insert-jj-status (status)
     (with-slots (files-untracked
@@ -2501,95 +2485,6 @@ but, they should also be able to rely on the same underlying machinery, if possi
           (cl-loop for file in files-untracked
                    do (insert list-prefix)
                    (insert-jj-status-file-untracked file))))))
-
-  (defun jj-show-status-template (self)
-    (jj-template
-     (cl-subst self 'self
-               `(separate "\n"
-                          (:chain self
-                                  (.diff)
-                                  (.files)
-                                  (.map (lambda (f)
-                                          (:lit ,(jj-status-wc-change-template 'f))))
-                                  (.join "\n"))
-                          (:lit ,(jj-status-lineage-entry-template 'self))
-                          (:chain self (.parents)
-                                  (.map (lambda (p)
-                                          (:lit ,(jj-status-lineage-entry-template 'p))))
-                                  (.join "\n"))
-                          (:chain self
-                                  (.files)
-                                  (.filter (lambda (f) (:chain f (.conflict))))
-                                  (.map (lambda (f)
-                                          (:lit ,(jj-status-file-conflict-template 'f))))
-                                  (.join "\n"))))))
-
-  (ert-deftest jj-test-read-status ()
-    (with-temp-buffer
-      (save-excursion
-        (insert "status-wc-changedeleted\"hello\"\"hello\"
-  status-wc-changeadded\"world\"\"world\"
-  status-wc-changerenamed\"hello\"\"world\"
-  status-lineage-entryzsrpuxsq/0fb53c784conflict\"diverge 1\"
-  status-lineage-entryznpwrsztf55e1a64conflict\"\"
-  status-file-conflict\"foo\"
-  status-file-conflict\"bar\"
-  status-bookmark-conflictfooorigin
-  status-bookmark-conflictbar
-  status-file-untracked\"file-untracked\"
-  status-file-untracked\"dir-untracked/\"
-  "))
-      (should (equal (read-jj-status)
-                     #s(jj-status
-                        (#s(jj-status-file-untracked "file-untracked")
-                         #s(jj-status-file-untracked "dir-untracked/"))
-                        (#s(jj-status-wc-change "deleted" "hello" "hello")
-                         #s(jj-status-wc-change "added" "world" "world")
-                         #s(jj-status-wc-change "renamed" "hello" "world"))
-                        #s(jj-status-lineage-entry "zsrpuxsq/0" "fb53c784" "" "" "conflict" "diverge 1")
-                        (#s(jj-status-lineage-entry "znpwrszt" "f55e1a64" "" "" "conflict" ""))
-                        (#s(jj-status-file-conflict "foo")
-                         #s(jj-status-file-conflict "bar"))
-                        (#s(jj-status-bookmark-conflict "foo" "origin")
-                         #s(jj-status-bookmark-conflict "bar" "")))))))
-
-  (ert-deftest jj-test-read-status-2 ()
-    (with-temp-buffer
-      (save-excursion
-        (insert "status-wc-changemodified\"README.md\"\"README.md\"
-  status-wc-changeremoved\"foo\"\"foo\"
-  status-wc-changerenamed\"signal-resumable.el\"\"signal-rework-2.el\"
-  status-wc-changeadded\"signal-rework.el\"\"signal-rework.el\"
-  status-wc-changeadded\"world\"\"world\"
-  status-lineage-entryzsrpuxsq/04f46f09c\"diverge 1\"
-  status-lineage-entryznpwrsztf55e1a64conflict\"\"
-  status-bookmark-conflictmain
-  status-bookmark-conflictmaingit
-  status-bookmark-conflictmainorigin
-  status-file-untracked\"\\u001b30mesc-in-name\\u001b0m\"
-  status-file-untracked\"\\u001b[30mesc-in-name\\u001b[0m\"
-  status-file-untracked\"baz\"
-  status-file-untracked\"newline\\nin\\nname\"
-  status-file-untracked\"untracked newline\\nin\\nname\"
-  "))
-      (should (equal (read-jj-status)
-                     #s(jj-status
-                        (#s(jj-status-file-untracked "30mesc-in-name0m")
-                         #s(jj-status-file-untracked "[30mesc-in-name[0m")
-                         #s(jj-status-file-untracked "baz")
-                         #s(jj-status-file-untracked "newline\nin\nname")
-                         #s(jj-status-file-untracked "untracked newline\nin\nname"))
-                        (#s(jj-status-wc-change "modified" "README.md" "README.md")
-                         #s(jj-status-wc-change "removed" "foo" "foo")
-                         #s(jj-status-wc-change "renamed" "signal-resumable.el" "signal-rework-2.el")
-                         #s(jj-status-wc-change "added" "signal-rework.el" "signal-rework.el")
-                         #s(jj-status-wc-change "added" "world" "world"))
-                        #s(jj-status-lineage-entry "zsrpuxsq/0" "4f46f09c" "" "" "" "diverge 1")
-                        (#s(jj-status-lineage-entry "znpwrszt" "f55e1a64" "" "" "conflict" ""))
-                        ()
-                        (#s(jj-status-bookmark-conflict "main" "")
-                         #s(jj-status-bookmark-conflict "main" "git")
-                         #s(jj-status-bookmark-conflict "main" "origin")))))))
 
   (ert-deftest jj-test-insert-status ()
     (with-temp-buffer
@@ -2645,88 +2540,6 @@ but, they should also be able to rely on the same underlying machinery, if possi
               :bookmarks-conflict b-cnfl
               main))))
 
-  (defun jj--status-main-status ()
-    (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-      ;; let-binding works because the buffer is set up synchronously,
-      ;; before the async dispatch
-      (promise-then (jj-cmd-async "show-status"
-                        `("show"
-                          "--no-patch"
-                          "-T" ,(jj-show-status-delim-template 'self))
-          :no-revert :silent-ok :no-kill)
-                    (lambda (proc)
-                      (with-current-buffer (process-buffer proc)
-                        (prog1
-                            (with-error-context (lambda (e)
-                                                  (format "err: %s:\n%s" e (buffer-substring (point) (point-max))))
-                              (cl-labels ((more ()
-                                            (unless (bolp)
-                                              (jj--re-step-over "\n"))
-                                            (not (or (eobp)
-                                                     (looking-at (rx (opt "\n")
-                                                                     "--\n")))))
-                                          (step-section ()
-                                            (more)
-                                            (jj--re-step-over (rx (opt "\n")
-                                                                  "--\n"))))
-                                `(:files-changed
-                                  ,(cl-loop initially (goto-char (point-min))
-                                            while (more)
-                                            for entry = (read-jj-status-wc-change)
-                                            collect entry)
-                                  :commit-working-copy
-                                  ,(progn (step-section)
-                                          (read-jj-status-lineage-entry))
-                                  :commits-parent
-                                  ,(cl-loop initially (step-section)
-                                            while (more)
-                                            for entry = (read-jj-status-lineage-entry)
-                                            collect entry)
-                                  :files-conflict
-                                  ,(cl-loop initially (step-section)
-                                            while (more)
-                                            for entry = (read-jj-status-file-conflict)
-                                            collect entry))))
-                          (should (eobp))
-                          (kill-buffer)))))))
-
-  (defun jj-show-status-delim-template (self)
-    (jj-template
-     (cl-subst self 'self
-               `(join "\n--\n"
-                          (:chain self
-                                  (.diff)
-                                  (.files)
-                                  (.map (lambda (f)
-                                          (:lit ,(jj-status-wc-change-template 'f))))
-                                  (.join "\n"))
-                          (:lit ,(jj-status-lineage-entry-template 'self))
-                          (:chain self (.parents)
-                                  (.map (lambda (p)
-                                          (:lit ,(jj-status-lineage-entry-template 'p))))
-                                  (.join "\n"))
-                          (:chain self
-                                  (.files)
-                                  (.filter (lambda (f) (:chain f (.conflict))))
-                                  (.map (lambda (f)
-                                          (:lit ,(jj-status-file-conflict-template 'f))))
-                                  (.join "\n"))))))
-
-  (defun get-jj-status-blocking ()
-    "blocks to get jj status synchronously, calling `accept-process-output'. Cannot be called within a sentinel callback. this is a problem if I want to update status buffer in a sentinel."
-    (let ((repo default-directory))
-      (with-temp-buffer
-        (setq default-directory repo)
-        (save-excursion
-          (let ((procs (start-jj-status)))
-            (while (-any #'process-live-p procs)
-              (mapc (lambda (proc)
-                      (accept-process-output proc 0.0 nil :only))
-                    procs))
-            (mapc #'kill-buffer (mapcar #'process-buffer procs))
-            (delete-matching-lines (rx line-start line-end) (point-min) (point-max))))
-        (read-jj-status))))
-
   (defun start-jj-dash-async ()
     "Start the jj dashboard in the current buffer
   Also sets `jj--current-status' in the initial buffer when the status process completes."
@@ -2749,6 +2562,10 @@ but, they should also be able to rely on the same underlying machinery, if possi
                        (insert-jj-status stat)))
                  (error (format "dash output buffer %s deleted" buf)))))]))))
 
+#+end_src
+*** jj-log
+**** section
+#+begin_src elisp
   (defun start-jj-log-async (&optional revset fileset)
     "Make a jj log in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer. Ignores `jj--last-revs' and `jj--last-files'."
     (let ((inhibit-read-only t))
@@ -2795,99 +2612,6 @@ but, they should also be able to rely on the same underlying machinery, if possi
                                 (funcall resolve proc)
                               (funcall reject (cons proc event))))))
            )))))
-
-  (defun start-jj-dash-blocking ()
-    "Start the jj dashboard, and block until the status section and the first part of the log are completed"
-    (let ((inhibit-read-only t))
-      (erase-accessible-buffer))
-    (mapc #'kill-buffer jj--indirect-buffers)
-    (setq jj--indirect-buffers nil)
-    (cl-labels ((ind-buf (buffer)
-                  (push buffer jj--indirect-buffers)
-                  buffer))
-      (save-excursion
-        (let ((inhibit-read-only t)
-              (log))
-          (save-excursion
-            ;; start async procs before waiting on main status
-            
-            ;; (with-current-buffer
-            ;;     (indirect (jj-make-section-buffer "diff" "Diff:\n" "\n"))
-            ;;   (insert "diff-content\n")
-            ;;   )
-
-            (with-current-buffer
-                (ind-buf (jj-make-section-buffer "log" "Log:\n" "\n"))
-              (setq log (start-jj-log))))
-          
-          ;; wait on main status
-          (let ((stat (get-jj-status-blocking)))
-            (setq-local jj--current-status stat)
-            (insert-jj-status stat))
-          ;; wait for first part of log output
-          (accept-process-output log nil nil :only)))))
-#+end_src
-*** jj-log
-**** COMMENT top-level
-#+begin_src elisp
-  (defun jj-log--revert (&rest _)
-    (start-jj-log jj--last-revs jj--last-files))
-
-  (defun jj-log (repo-dir &optional revset fileset)
-    "Run jj log asynchronously in REPO-DIR, with the given REVSET, FILESET, and TEMPLATE string arguments. Returns the process and opens the corresponding buffer."
-    (interactive (list (read-directory-name "jj repo: ")
-                       (jj-read-revset)
-                       (jj-read-fileset)))
-    (let* ((repo-dir (expand-file-name repo-dir))
-           (buf (get-buffer-create (format "*jj-log: %s*" repo-dir))))
-      (prog1
-          (with-current-buffer buf
-            (jj-inspect-mode)
-            (setq-local default-directory repo-dir
-                        jj--last-revs revset
-                        jj--last-files fileset
-                        revert-buffer-function #'jj-log--revert)
-            (start-jj-log revset fileset))
-        (pop-to-buffer buf))))
-#+end_src
-**** section
-#+begin_src elisp
-  (defun start-jj-log (&optional revset fileset)
-    "Make a jj log in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer. Ignores `jj--last-revs' and `jj--last-files'."
-    (let ((inhibit-read-only t))
-      (erase-accessible-buffer))
-    (let* ((buf (current-buffer))
-           (temp (generate-new-buffer "*jj-log-temp*"))
-           (err (generate-new-buffer "*jj-log-stderr*"))
-           (sentinel (make-jj-simple-sentinel err temp))
-           (filter (cl-labels ((read-next ()
-                                 (jj--try-read-each #'read-jj-log-entry #'read-jj-log-elided))
-                               (print-entries (news)
-                                 (with-current-buffer buf
-                                   (let ((inhibit-read-only t))
-                                     (cl-loop for new in news
-                                              do (pcase new
-                                                   ((pred jj-log-graph-p)
-                                                    (insert-jj-log-elided new))
-                                                   ((pred jj-log-entry-p)
-                                                    (insert-jj-log-entry new))))))))
-                     (make-jj-generic-buffered-filter temp #'read-next #'print-entries))))
-      (make-process
-       :name "jj-log"
-       :buffer buf
-       :stderr err
-       :filter filter
-       :sentinel sentinel
-       :noquery t
-       :command `("jj" "log"
-                  "-T" ,jj-parseable-template
-                  ,@(jj--if-arg revset #'identity "-r")
-                  ,@(jj--if-arg fileset #'identity "--")
-                  ,@jj-global-default-args
-                  ,@(and jj-do-debug jj-global-debug-args)
-                  ,@jj-parsing-default-args
-                  "--config" ,(format "templates.log_node='%s'"
-                                      (jj--toml-quote-string jj-log-node-template))))))
 #+end_src
 **** TODO delete log indirect buffer after done
 tired of all these lingering jj-log-section buffers.
@@ -2935,15 +2659,14 @@ need error handling in these. but I do like them being synchronous i think.
 #+begin_src elisp
   (defun jj-revert-dash-buffer (dir)
     "Revert the jj dash buffer (if it exists) for DIR."
-    (when-let ((buf (get-buffer (jj-dash-buffer
-                                 dir))))
+    (when-let ((buf (get-buffer (jj-dash-buffer (jj-workspace-root dir)))))
       (with-current-buffer buf
         (jj-dash--revert))))
 
   (defun jj-revert-dash-buffer-async (dir)
     "Asynchronously revert the jj dash buffer (if it exists) for DIR. Suitable for use as an async callback for process filters and sentinels."
     (when-let ((buf (get-buffer (jj-dash-buffer
-                                 dir))))
+                                 (jj-workspace-root dir)))))
       (with-current-buffer buf
         (jj-dash--revert-async))))
 #+end_src
@@ -3062,7 +2785,7 @@ need error handling in these. but I do like them being synchronous i think.
   (defun jj--workspace-root-lisp (dir)
     "Return the root of the jj repository containing DIR. Performs the traversal in lisp, rather than calling on jj."
     (or (locate-dominating-file dir ".jj")
-        (error "No jj repo at or above %s" dir)))
+        (signal 'jj-repo-missing (list default-directory))))
 
   (defalias 'jj-workspace-root 'jj--workspace-root-lisp
     "Return the root of the jj repository containing DIR, or `default-directory' if not provided.")
@@ -3070,7 +2793,7 @@ need error handling in these. but I do like them being synchronous i think.
   (defalias 'assert-jj 'jj-workspace-root
     "Throw an error unless we're in a jj repo.")
 
-  (define-error 'jj-repo-missing "Directory is not within a jj repository")
+  (define-error 'jj-repo-missing "No jj repo at or above")
 #+end_src
 **** status query utils
 ***** revset
