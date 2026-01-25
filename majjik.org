@@ -470,6 +470,8 @@ this might not actually work. I'm big sus actually.
   - (:ok . VAL) if it succeeded
   - (:err . REASON) if it failed
   - (:fault . DATA) if it had some esoteric failure."
+    (unless (promise-class-p promise)
+      (error "not a promise: %s" promise))
     (let ((state :run)
           (result))
       (promise-chain promise
