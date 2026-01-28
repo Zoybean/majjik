@@ -4079,14 +4079,73 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
       nil :silent-ok)))
 ;; jj squash/amend:1 ends here
 
-;; jj git push
+;; simple
 
-;; [[file:majjik.org::*jj git push][jj git push:1]]
+;; [[file:majjik.org::*simple][simple:1]]
 (defun jj-git-push (&rest args)
   "Push to git in the background."
   (interactive)
   (jj-cmd-async "git-push" `("git" "push" ,@args)))
-;; jj git push:1 ends here
+;; simple:1 ends here
+
+;; transient
+
+;; [[file:majjik.org::*transient][transient:1]]
+(transient-define-suffix jj--git-push-suffix (args)
+    "do a jj git push."
+    (interactive (list (transient-args (oref transient-current-prefix command))))
+    (apply #'jj-git-push args))
+
+(transient-define-prefix jj-git-push-prefix ()
+  ;; these flags unset one-another
+  :incompatible `(("--remote=" "--all-remotes")
+                  ("--all" "--deleted" "--tracked" "--bookmark=" "--change=" "--revisions=" "--named"))
+  ["args"
+   ["revisions"
+    ;; just a layout option
+    :pad-keys t
+    ("-b" "bookmarks" "--bookmark="
+     :prompt "bookmarks: "
+     :multi-value repeat
+     ;; really, this should read a limited revset
+     ;; By default, the specified pattern matches branch names with glob syntax, but only `*` is expanded. Other wildcard characters such as `?` are *not* supported. Patterns can be
+     ;; repeated or combined with [logical operators] to specify multiple branches, but only union and negative intersection are supported.
+     :reader (lambda (prompt initial-input history)
+               (let ((crm-separator (rx (* blank)
+                                        (any ",| ")
+                                        (* blank))))
+                 (completing-read-multiple
+                  prompt (jj-list-bookmarks)
+                  nil nil initial-input history))))
+    ("-d" "deleted" "--deleted")
+    ("-a" "all" "--all")
+    ("-t" "tracked" "--tracked")
+    ;; requires reader
+    ("-r" "revisions" "--revisions=")
+    ;; requires reader
+    ("-c" "change" "--change=")
+    ;; this one needs a weird format
+    ;; ("-n" "named" "--named=<NAME=REVISION>")
+    ]
+   ["remote" :pad-keys t
+    ("-m" "remote" "--remote="
+     :prompt "remote: "
+     :reader (lambda (prompt initial-input history)
+               (completing-read
+                prompt (jj-list-git-remotes)
+                nil
+                ;; only named remotes are supported
+                :req-match
+                initial-input history))
+     )]
+   ["misc"
+    ("-D" "dry-run" "--dry-run")
+    ("-E" "allow undescribed" "--allow-empty-description")
+    ("-P" "allow private" "--allow-private")]
+   ]
+  ["push"
+   ("P" "push" jj--git-push-suffix :transient nil)])
+;; transient:1 ends here
 
 ;; simple
 
