@@ -12,7 +12,7 @@
   ;; Version: 0.1.0
   ;; Keywords: vc
   ;; URL: https://github.com/Zoybean/majjik
-  ;; Package-Requires: (dash s eieio with-editor promise)
+  ;; Package-Requires: (dash s eieio with-editor promise transient)
 
   ;;; Commentary:
   
@@ -26,6 +26,7 @@
   (require 'eieio)
   (require 'with-editor)
   (require 'promise)
+  (require 'transient)
 #+end_src
 * Utils
 
@@ -2339,7 +2340,7 @@ this might not actually work. I'm big sus actually.
     "c w" #'jj-desc-dwim
     "c a" #'jj-amend-into-dwim
     "c s" #'jj-squash-down-dwim
-    "F" #'jj-git-fetch
+    "F" #'jj-git-fetch-prefix
     "P" #'jj-git-push
     "b n" #'jj-bookmark-new-dwim
     "b m" #'jj-bookmark-move-dwim
@@ -4115,18 +4116,68 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
 Full-interactive split will require an interactive hunk selector. Maybe just use magit for this?
 ***** jj git push
 #+begin_src elisp
-  (defun jj-git-push ()
+  (defun jj-git-push (&rest args)
     "Push to git in the background."
     (interactive)
-    (jj-cmd-async "git-push" `("git" "push")))
+    (jj-cmd-async "git-push" `("git" "push" ,@args)))
 #+end_src
-
 ***** jj git fetch
+****** simple
 #+begin_src elisp
-  (defun jj-git-fetch ()
+  (defun jj-git-fetch (&rest args)
     "Fetch from git in the background."
     (interactive)
-    (jj-cmd-async "git-fetch" `("git" "fetch")))
+    (jj-cmd-async "git-fetch" `("git" "fetch" ,@args)))
+#+end_src
+
+****** transient
+#+begin_src elisp
+  (transient-define-suffix jj--git-fetch-suffix (args)
+    "do a jj git fetch."
+    (interactive (list (transient-args (oref transient-current-prefix command))))
+    (apply #'jj-git-fetch args))
+
+  (transient-define-prefix jj-git-fetch-prefix ()
+    ;; these flags unset one-another
+    :incompatible `(("--remote=" "--all-remotes")
+                    ("--bookmark=" "--tracked"))
+    ["args"
+     ["bookmarks"
+      ;; just a layout option
+      :pad-keys t
+      
+      ("-t" "tracked" "--tracked")
+      ("-b" "bookmarks" "--bookmark="
+       :prompt "bookmarks: "
+       :multi-value repeat
+       ;; really, this should read a limited revset
+       ;; By default, the specified pattern matches branch names with glob syntax, but only `*` is expanded. Other wildcard characters such as `?` are *not* supported. Patterns can be
+       ;; repeated or combined with [logical operators] to specify multiple branches, but only union and negative intersection are supported.
+       :reader (lambda (prompt initial-input history)
+                 (let ((crm-separator (rx (* blank)
+                                          (any ",| ")
+                                          (* blank))))
+                   (completing-read-multiple
+                    prompt (jj-list-bookmarks)
+                    nil nil initial-input history))))]
+     ["remotes" :pad-keys t
+      ("-a" "all remotes" "--all-remotes") ;; list
+      ("-r" "remotes" "--remote="
+       :prompt "remotes: "
+       :multi-value repeat
+       :reader (lambda (prompt initial-input history)
+                 (let ((crm-separator (rx (* blank)
+                                          (any ",| ")
+                                          (* blank))))
+                   (completing-read-multiple
+                    prompt (jj-list-git-remotes)
+                    nil
+                    ;; only named remotes are supported
+                    :req-match
+                    initial-input history)))
+       )]]
+    ["fetch"
+     ("F" "fetch" jj--git-fetch-suffix :transient nil)])
 #+end_src
 
 * Provide

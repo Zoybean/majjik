@@ -7,7 +7,7 @@
 ;; Version: 0.1.0
 ;; Keywords: vc
 ;; URL: https://github.com/Zoybean/majjik
-;; Package-Requires: (dash s eieio with-editor promise)
+;; Package-Requires: (dash s eieio with-editor promise transient)
 
 ;;; Commentary:
 
@@ -21,6 +21,7 @@
 (require 'eieio)
 (require 'with-editor)
 (require 'promise)
+(require 'transient)
 ;; Require:1 ends here
 
 ;; collect-repeat
@@ -2317,8 +2318,8 @@ This is concatenated with an identifier for the repository to define the buffer 
   "c w" #'jj-desc-dwim
   "c a" #'jj-amend-into-dwim
   "c s" #'jj-squash-down-dwim
-  "F" #'jj-git-fetch
-  "P" #'jj-git-push
+  "F" #'jj-git-fetch-prefix
+  "P" #'jj-git-push-prefix
   "b n" #'jj-bookmark-new-dwim
   "b m" #'jj-bookmark-move-dwim
   "b !" #'jj-bookmark-set-dwim
@@ -3340,6 +3341,15 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
    (jj--make-async-success-callback name no-revert silent-ok no-kill-output)
    (jj--make-async-failure-callback name)))
 
+(defun jj-cmd-futur (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
+  "Run CMD asynchronously, returning a futur of its completion.
+
+On success, reverts the repo's dash buffer unless NO-REVERT, prints a message unless SILENT-OK, kills the output buffer unless NO-KILL-OUTPUT, and returns the process. On error, prints a message indicating the command log buffer, and returns a cons (PROCESS . EVENT). If OUTPUT-BUFFER, use that buffer for stdout instead of a temp indirect buffer."
+  (declare (indent 2))
+  (futur-let* ((proc <- (jj-cmd--futur name cmd output-buffer)))
+    :error-fun (jj--make-async-failure-callback name)
+    (funcall (jj--make-async-success-callback name no-revert silent-ok no-kill-output) proc)))
+
 (defun jj--make-async-success-callback (name &optional no-revert silent-ok no-kill-output)
   (lambda (proc)
     (unless no-revert
@@ -3437,6 +3447,62 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                                 (funcall reject (cons proc event))))))
              ;; this always runs before the subsequent promise callbacks,
              ;; which means `resolve' and `reject' are not themselves callbacks
+             (add-function :after (process-sentinel proc)
+                           (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
+
+(defun jj-cmd--futur (name cmd &optional output-buffer)
+  "Run CMD asynchronously, returning a futur that is resolved (returning the process) on completion."
+  (declare (indent 2))
+  (let ((repo-dir default-directory))
+    (let ((full-cmd `("jj"
+                      ,@jj-global-default-args
+                      ,@(and jj-do-debug jj-global-debug-args)
+                      ,@jj-logging-default-args
+                      ,@cmd)))
+      (pcase-let (((and proc-entry
+                        (cl-struct jj--process-log-entry
+                                   buf-code
+                                   buf-stdout
+                                   buf-stderr
+                                   ovl-control
+                                   ovl-collapse
+                                   ovl-err))
+                   (jj--make-process-log-entry name full-cmd)))
+        (futur-new
+         (lambda (f)
+           (let ((proc (make-process
+                        :name (format "jj-%s" name)
+                        :buffer (or output-buffer buf-stdout)
+                        :stderr buf-stderr
+                        :sentinel (jj--make-update-exit-code-sentinel buf-code)
+                        :filter #'jj--ansi-color-filter
+                        :noquery t
+                        :command full-cmd)))
+             (setf (jj--process-log-entry-process proc-entry) proc)
+             (overlay-put ovl-control 'jj-object proc-entry)
+             (jj--set-collapse-process proc-entry t)
+             ;; (overlay-put ovl-err 'face '(:foreground "grey"))
+             (jj--set-initial-run-status buf-code)
+
+             (when output-buffer
+               (kill-buffer buf-stdout))
+             (let ((stderr (get-buffer-process buf-stderr)))
+               (set-process-sentinel stderr
+                                     #'jj--default-stderr-sentinel)
+               (set-process-filter stderr
+                                   #'jj--ansi-color-filter))
+             ;; print any abnormal process termination
+             (add-function :after (process-sentinel proc)
+                           (jj--make-print-status-sentinel buf-stderr))
+             ;; handle the promise state
+             (add-function :after (process-sentinel proc)
+                           (make-jj-callback-sentinel
+                            (lambda (exit-status event)
+                              (if (eq exit-status 0)
+                                  (futur-deliver-value f proc)
+                                (futur-blocker-abort f (cons proc event))))))
+             ;; this always runs before the subsequent futurs,
+             ;; which means they are not themselves callbacks
              (add-function :after (process-sentinel proc)
                            (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
 ;; async command utils:1 ends here
@@ -4016,20 +4082,71 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 ;; jj git push
 
 ;; [[file:majjik.org::*jj git push][jj git push:1]]
-(defun jj-git-push ()
+(defun jj-git-push (&rest args)
   "Push to git in the background."
   (interactive)
-  (jj-cmd-async "git-push" `("git" "push")))
+  (jj-cmd-async "git-push" `("git" "push" ,@args)))
 ;; jj git push:1 ends here
 
-;; jj git fetch
+;; simple
 
-;; [[file:majjik.org::*jj git fetch][jj git fetch:1]]
-(defun jj-git-fetch ()
+;; [[file:majjik.org::*simple][simple:1]]
+(defun jj-git-fetch (&rest args)
   "Fetch from git in the background."
   (interactive)
-  (jj-cmd-async "git-fetch" `("git" "fetch")))
-;; jj git fetch:1 ends here
+  (jj-cmd-async "git-fetch" `("git" "fetch" ,@args)))
+;; simple:1 ends here
+
+;; transient
+
+;; [[file:majjik.org::*transient][transient:1]]
+(transient-define-suffix jj--git-fetch-suffix (args)
+  "do a jj git fetch."
+  (interactive (list (transient-args (oref transient-current-prefix command))))
+  (apply #'jj-git-fetch args))
+
+(transient-define-prefix jj-git-fetch-prefix ()
+  ;; these flags unset one-another
+  :incompatible `(("--remote=" "--all-remotes")
+                  ("--bookmark=" "--tracked"))
+  ["args"
+   ["bookmarks"
+    ;; just a layout option
+    :pad-keys t
+    
+    ("-t" "tracked" "--tracked")
+    ("-b" "bookmarks" "--bookmark="
+     :prompt "bookmarks: "
+     :multi-value repeat
+     ;; really, this should read a limited revset
+     ;; By default, the specified pattern matches branch names with glob syntax, but only `*` is expanded. Other wildcard characters such as `?` are *not* supported. Patterns can be
+     ;; repeated or combined with [logical operators] to specify multiple branches, but only union and negative intersection are supported.
+     :reader (lambda (prompt initial-input history)
+               (let ((crm-separator (rx (* blank)
+                                        (any ",| ")
+                                        (* blank))))
+                 (completing-read-multiple
+                  prompt (jj-list-bookmarks)
+                  nil nil initial-input history))))]
+   ["remotes" :pad-keys t
+    ("-a" "all remotes" "--all-remotes") ;; list
+    ("-r" "remotes" "--remote="
+     :prompt "remotes: "
+     :multi-value repeat
+     :reader (lambda (prompt initial-input history)
+               (let ((crm-separator (rx (* blank)
+                                        (any ",| ")
+                                        (* blank))))
+                 (completing-read-multiple
+                  prompt (jj-list-git-remotes)
+                  nil
+                  ;; only named remotes are supported
+                  :req-match
+                  initial-input history)))
+     )]]
+  ["fetch"
+   ("F" "fetch" jj--git-fetch-suffix :transient nil)])
+;; transient:1 ends here
 
 ;; Provide
 
