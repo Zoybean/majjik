@@ -2294,13 +2294,15 @@ so far, the only significant differences in parity that I'm aware of, are:
                                 (jj--check-files-ignored untracked))
                               (lambda (proc)
                                 (with-current-buffer (process-buffer proc)
-                                  (goto-char (point-min))
-                                  (let ((ignored (cl-loop while (not (eobp))
-                                                          do (jj--re-step-over
-                                                              (rx (group (+ (not (any ?\0))))
-                                                                  ?\0))
-                                                          collect (match-string 1))))
-                                    (cons ignored untracked)))))))
+                                  (prog1
+                                      (let ((ignored (cl-loop initially (goto-char (point-min))
+                                                              while (not (eobp))
+                                                              do (jj--re-step-over
+                                                                  (rx (group (+ (not (any ?\0))))
+                                                                      ?\0))
+                                                              collect (match-string 1))))
+                                        (cons ignored untracked))
+                                    (kill-buffer (process-buffer proc))))))))
         (then (-lambda ((ignored . untracked))
                 (cl-set-difference untracked `(".git" ".jj" ,@ignored)
                                    :test (lambda (u i)
@@ -2344,13 +2346,15 @@ so far, the only significant differences in parity that I'm aware of, are:
                       :no-revert :silent-ok :no-kill)
                     (lambda (proc)
                       (with-current-buffer (process-buffer proc)
-                        (goto-char (point-min))
-                        (cl-loop while (progn
-                                         (unless (bolp)
-                                           (forward-char 1))
-                                         (not (eobp)))
-                                 for entry = (read-jj-status-bookmark-conflict)
-                                 collect entry))))))
+                        (prog1
+                            (cl-loop initially (goto-char (point-min))
+                                     while (progn
+                                             (unless (bolp)
+                                               (forward-char 1))
+                                             (not (eobp)))
+                                     for entry = (read-jj-status-bookmark-conflict)
+                                     collect entry)
+                          (kill-buffer (process-buffer proc))))))))
 #+end_src
 **** TODO ensure these are distinct from similar-name commands
 these section commands should be named to be sure that theydont collide with user-facing commands like jj-show for viewing a commit in its own buffer

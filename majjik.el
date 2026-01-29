@@ -2317,13 +2317,15 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                               (jj--check-files-ignored untracked))
                             (lambda (proc)
                               (with-current-buffer (process-buffer proc)
-                                (goto-char (point-min))
-                                (let ((ignored (cl-loop while (not (eobp))
-                                                        do (jj--re-step-over
-                                                            (rx (group (+ (not (any ?\0))))
-                                                                ?\0))
-                                                        collect (match-string 1))))
-                                  (cons ignored untracked)))))))
+                                (prog1
+                                    (let ((ignored (cl-loop initially (goto-char (point-min))
+                                                            while (not (eobp))
+                                                            do (jj--re-step-over
+                                                                (rx (group (+ (not (any ?\0))))
+                                                                    ?\0))
+                                                            collect (match-string 1))))
+                                      (cons ignored untracked))
+                                  (kill-buffer (process-buffer proc))))))))
       (then (-lambda ((ignored . untracked))
               (cl-set-difference untracked `(".git" ".jj" ,@ignored)
                                  :test (lambda (u i)
@@ -2369,13 +2371,15 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                     :no-revert :silent-ok :no-kill)
                   (lambda (proc)
                     (with-current-buffer (process-buffer proc)
-                      (goto-char (point-min))
-                      (cl-loop while (progn
-                                       (unless (bolp)
-                                         (forward-char 1))
-                                       (not (eobp)))
-                               for entry = (read-jj-status-bookmark-conflict)
-                               collect entry))))))
+                      (prog1
+                          (cl-loop initially (goto-char (point-min))
+                                   while (progn
+                                           (unless (bolp)
+                                             (forward-char 1))
+                                           (not (eobp)))
+                                   for entry = (read-jj-status-bookmark-conflict)
+                                   collect entry)
+                        (kill-buffer (process-buffer proc))))))))
 ;; jj-bookmark-list for bookmark conflicts:1 ends here
 
 ;; Combined struct and output formatter
