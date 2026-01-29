@@ -2051,14 +2051,15 @@ this might not actually work. I'm big sus actually.
   If rejected, propagate the original error signal.
   If accepted, return the dir for the new repo, and the promise for the initialisation.
   If repo already existed, just return its path (as a singleton list)."
-    (cl-block jj--workspace-root-or-create
+    (cl-block nil
       (handler-bind 
-          ((jj-repo-missing-above (lambda (e)
-                              (when (yes-or-no-p (format "No repo at `%s'. Create one?" repo-dir))
-                                (let ((root-dir (expand-file-name (read-directory-name "repository root: ")))
-                                      (colocate (yes-or-no-p "colocated repository?")))
-                                  (cl-return-from jj--workspace-root-or-create
-                                    (list root-dir (jj-git-init root-dir colocate))))))))
+          ((jj-repo-missing-above
+            (lambda (e)
+              (when (yes-or-no-p (format "No repo at or around `%s'. Create one?" repo-dir))
+                (let ((root-dir (expand-file-name (read-directory-name "repository root: " repo-dir)))
+                      (colocate (yes-or-no-p "colocated repository?")))
+                  (cl-return
+                   (list root-dir (jj-git-init root-dir colocate))))))))
         (list (jj-workspace-root repo-dir)))))
 
   ;;;###autoload
@@ -2092,10 +2093,9 @@ this might not actually work. I'm big sus actually.
     (cond ((file-exists-p (file-name-concat repo-dir ".jj"))
            (list repo-dir))
           ((yes-or-no-p (format "No repo at `%s'. Create one?" repo-dir))
-           (let ((root-dir (expand-file-name (read-directory-name "repository root: ")))
+           (let ((root-dir (expand-file-name (read-directory-name "repository root: " repo-dir)))
                  (colocate (yes-or-no-p "colocated repository?")))
-             (cl-return-from jj--workspace-root-or-create
-               (list root-dir (jj-git-init root-dir colocate)))))
+             (list root-dir (jj-git-init root-dir colocate))))
           (t (signal 'jj-repo-missing-at repo-dir))))
 
   ;;;###autoload
