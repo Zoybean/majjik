@@ -1881,6 +1881,37 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
    :form (++ (:chain self (.remote)) "\n")))
 ;; Status format:1 ends here
 
+;; Command log
+
+;; [[file:majjik.org::*Command log][Command log:1]]
+(defvar jj--cmd-log-buf-name-prefix "jj-command-log"
+  "Tag to use to identify jj command-log buffers.
+This is concatenated with an identifier for the repository to define the buffer name for the command log. Let-bind this in order to temporarily use a different buffer for a particular log entry.")
+
+(defvar jj--cmd-log-secret-buf-name-prefix "jj-command-secret-log"
+  "Tag to use to identify jj's secret command-log buffers.
+This is concatenated with an identifier for the repository to define the buffer name for the secret command log.")
+
+(defun jj-pop-to-command-log (repo-dir)
+  "Open the command-log buffer for the current repo."
+  (interactive (list default-directory))
+  (pop-to-buffer (jj--get-command-log-buf repo-dir)))
+
+(defun jj-pop-to-secret-command-log (repo-dir)
+  (interactive (list default-directory))
+  (dlet ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
+    (jj-pop-to-command-log repo-dir)))
+
+(defun jj--get-command-log-buf (repo-dir)
+  "Get or create the command-log buffer for the given REPO-DIR, and ensure it is in the correct mode."
+  (let ((buf (get-buffer-create (format "*%s:%s*" jj--cmd-log-buf-name-prefix (expand-file-name repo-dir)))))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'jj-process-mode)
+        (jj-process-mode)
+        (cursor-intangible-mode t)))
+    buf))
+;; Command log:1 ends here
+
 ;; Default args
 
 ;; [[file:majjik.org::*Default args][Default args:1]]
@@ -3005,37 +3036,6 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
             (jj-cmd-sync `("bookmark" "list")
                          :no-revert))))
 ;; jj bookmark list:1 ends here
-
-;; command log
-
-;; [[file:majjik.org::*command log][command log:1]]
-(defvar jj--cmd-log-buf-name-prefix "jj-command-log"
-  "Tag to use to identify jj command-log buffers.
-This is concatenated with an identifier for the repository to define the buffer name for the command log. Let-bind this in order to temporarily use a different buffer for a particular log entry.")
-
-(defvar jj--cmd-log-secret-buf-name-prefix "jj-command-secret-log"
-  "Tag to use to identify jj's secret command-log buffers.
-This is concatenated with an identifier for the repository to define the buffer name for the secret command log.")
-
-(defun jj-pop-to-command-log (repo-dir)
-  "Open the command-log buffer for the current repo."
-  (interactive (list default-directory))
-  (pop-to-buffer (jj--get-command-log-buf repo-dir)))
-
-(defun jj-pop-to-secret-command-log (repo-dir)
-  (interactive (list default-directory))
-  (dlet ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-    (jj-pop-to-command-log repo-dir)))
-
-(defun jj--get-command-log-buf (repo-dir)
-  "Get or create the command-log buffer for the given REPO-DIR, and ensure it is in the correct mode."
-  (let ((buf (get-buffer-create (format "*%s:%s*" jj--cmd-log-buf-name-prefix (expand-file-name repo-dir)))))
-    (with-current-buffer buf
-      (unless (derived-mode-p 'jj-process-mode)
-        (jj-process-mode)
-        (cursor-intangible-mode t)))
-    buf))
-;; command log:1 ends here
 
 ;; async command utils
 
