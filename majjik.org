@@ -2173,7 +2173,7 @@ this might not actually work. I'm big sus actually.
         (goto-char marker))))
 #+end_src
 *** Sections
-**** jj-show for status section
+**** COMMENT jj-show for status section
 the ~jj status~ command itself is not very machine-readable, but turns out i can show most of what I want from ~jj status~ via ~jj show~.
 so far, the only significant differences in parity that I'm aware of, are:
 - I cannot count the sides of a file conflict
@@ -2181,7 +2181,7 @@ so far, the only significant differences in parity that I'm aware of, are:
 
 #+begin_src elisp
 #+end_src
-**** jj-file for untracked files
+**** COMMENT jj-file for untracked files
 
 #+begin_src elisp
   (defun start-jj-file-untracked ()
