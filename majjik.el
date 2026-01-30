@@ -713,6 +713,19 @@ this defaults to the current buffer."
   (jj-fileset `(or ,@(cl-loop for file in files
                               collect `(:cwd-file ,file)))))
 
+(defun jj--escape-glob (path)
+  "Wrap all glob patterns in PATH with square brackets, to prevent their special interpretation in glob-enabled fileset patterns."
+  (replace-regexp-in-string (rx (any "*[]?{}"))
+                            (lambda (c)
+                              (format "[%s]" c))
+                            path))
+
+(defun jj-paths-as-fileset (&rest paths)
+  "Returns a fileset that matches all the given PATHS, which may be directories (in which case their contents are also matched). No globbing is applied to filenames, and all are considered relative to cwd."
+  (jj-fileset `(or ,@(cl-loop for path in paths
+                              for escaped = (jj--escape-glob path)
+                              collect `(:cwd-prefix-glob ,escaped)))))
+
 (defmacro jj-compile-fileset (sexp)
   "Compile a fileset SEXP into a string suitable for use as a jj fileset argument. See `jj-fileset'"
   (jj-fileset sexp))
@@ -3664,7 +3677,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   "Track FILE."
   (interactive (list (jj-get-untracked-file-dwim "File to track")))
   (jj-cmd-async "file-track"
-      `("file" "track" ,(jj-files-as-fileset file))
+      `("file" "track" ,(jj-paths-as-fileset file))
     nil :silent-ok))
 ;; track:1 ends here
 
@@ -3675,7 +3688,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   "Untrack FILE."
   (interactive (list (jj-get-tracked-file-dwim "File to untrack")))
   (jj-cmd-async "file-untrack"
-      `("file" "untrack" ,(jj-files-as-fileset file))
+      `("file" "untrack" ,(jj-paths-as-fileset file))
     nil :silent-ok))
 ;; untrack:1 ends here
 
