@@ -2071,7 +2071,7 @@ Reverted buffer is the one that was active when this function was called."
                         (with-current-buffer dash-buf
                           (let ((inhibit-read-only t)
                                 (bob (bobp)))
-                            (replace-buffer-contents-and-properties temp-buf)
+                            (replace-buffer-contents-and-properties temp-buf 10)
                             (when bob
                               (goto-char (point-min))))
                           (setq jj--current-status
