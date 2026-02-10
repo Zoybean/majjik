@@ -4,16 +4,15 @@
 ***
 
 Majjik.el is a [jujutsu][jj] interface within [Emacs].
-It is a fork of [Magit] (but this branch shares none of the history).
-
-Eventually, I hope Majjik will be a complete jj interface, but for now
-it's just my public elisp project. Please be patient.
+It is heavily inspired by [Magit]'s rich buffer-oriented interface.
+Eventually, I hope Majjik will be a complete jj interface, but for now it's just my first public elisp project. Please be patient.
 
 ## Project Status
 
 - [x] Fork Magit
 - [x] Realise you've dramatically underestimated Magit's scope
 - [x] start from scratch after a year hiatus
+- [x] un-fork
 - [ ] Add jj's main commands
   - [x] `jj git init`
   - [x] `jj git fetch/push`
@@ -32,7 +31,7 @@ it's just my public elisp project. Please be patient.
     - [x] `forget`
     - [x] `track`
     - [x] `untrack`
-  - [x] `jj file *`
+  - [ ] `jj file *`
     - [x] `track`
     - [x] `untrack`
     - [ ] `chmod`
@@ -59,7 +58,8 @@ it's just my public elisp project. Please be patient.
   - [ ] `jj tag`
   - [ ] `jj util *`
   - [ ] `jj workspace`
-- [ ] Add a snazzy dashboard buffer
+- [x] Add a basic dashboard buffer
+- [ ] polish dashboard buffer
   - [ ] Add proper collapsible sections for summary, log
   - [ ] Allow expanding elided log segments
   - [ ] RET to inspect from dashboard
@@ -67,19 +67,26 @@ it's just my public elisp project. Please be patient.
     - [ ] files
       - [x] tracked - show file diff
       - [x] untracked - view file
-      - [ ] conflicted - ??
+      - [ ] conflicted - open preferred merge tool? (e.g. ediff, smerge)
     - [ ] bookmarks?
 - [ ] Make commands transient where it makes sense
 - [x] Dogfood it
 
 ## Getting Started
-Currently, this requires a minor fork of jj to run: https://github.com/Zoybean/jj/tree/list-untracked. I intend to merge a PR for this.
+install jj
+install majjik
+run `M-x majjik-dash` (`C-x j` by default)
 
-## Acknowledgments
+### Installing
 
-Majjik was started by [Zoey Hewll][zoey], initially as a fork of Magit (but I've ended up starting entirely from scratch).
+if you use [elpaca], you can install with:
+```
+(use-package majjik
+  :ensure (:repo "https://github.com/Zoybean/majjik"))
+```
 
 [zoey]:  https://github.com/Zoybean
 [jj]:    https://docs.jj-vcs.dev/
 [emacs]: https://www.gnu.org/software/emacs
 [magit]: https://magit.vc
+[elpaca]: https://github.com/progfolio/elpaca
