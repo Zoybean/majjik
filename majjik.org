@@ -4006,45 +4006,42 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
   (defun string-edit-history--current ()
     (buffer-substring (string-edit-history--editable-region-start) (point-max)))
 
-  (defun string-edit-history--maybe-save-current (mode)
-    "If the position in the history is 0, save the editable region as the initial element and return the new value for MODE.
+  (defun string-edit-history--save-current (mode)
+    "Save the editable region as current element and return the new value for MODE.
   Assumes the current buffer is a string-edit input buffer."
-    (-let (((list pos initial) mode))
-      (if (= pos 0)
-          `(,list ,pos ,(string-edit-history--current))
-        mode)))
+    (-let (((list pos) mode))
+      (setf (nth pos list) (string-edit-history--current))
+      `(,list ,pos)))
 
   (defun string-edit-history--offset (mode offset)
     "Replace the editable region with the previous history item and return the new value for MODE.
   Assumes the current buffer is a string-edit input buffer."
-    (-if-let* (((list pos initial) mode)
+    (-if-let* (((list pos) mode)
                (npos (+ pos offset))
                (_ (<= 0 npos))
-               (current (if (= npos 0)
-                            initial
-                          (or (nth (1- npos) list)
-                              (progn (setq npos pos)
-                                     nil)))))
+               (current (or (nth npos list)
+                            (progn (setq npos pos)
+                                   nil))))
         (progn
           (replace-region-contents
            (string-edit-history--editable-region-start)
            (point-max)
            (cl-constantly current))
-          `(,list ,npos ,initial))
+          `(,list ,npos))
       (beep)
       (message "No more history")
       mode))
 
   (defun string-edit-history-previous ()
     (interactive nil string-edit-history-mode)
-    (cl-callf string-edit-history--maybe-save-current
+    (cl-callf string-edit-history--save-current
         string-edit-history-mode)
     (cl-callf string-edit-history--offset
         string-edit-history-mode 1))
 
   (defun string-edit-history-next ()
     (interactive nil string-edit-history-mode)
-    (cl-callf string-edit-history--maybe-save-current
+    (cl-callf string-edit-history--save-current
         string-edit-history-mode)
     (cl-callf string-edit-history--offset
         string-edit-history-mode -1))
@@ -4055,9 +4052,9 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
     (string-edit-history-mode)
     (setq string-edit-history-mode
      (and hist-var
-          (list (symbol-value hist-var)
-                0
-                (or initial "")))))
+          (list (cons (or initial "")
+                      (seq-copy (symbol-value hist-var)))
+                0))))
 
   (defun read-string-from-buffer-with-history (prompt string hist-var)
     "Switch to a new buffer to edit STRING in a recursive edit.
