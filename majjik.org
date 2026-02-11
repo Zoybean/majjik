@@ -4051,10 +4051,10 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
     (interactive)
     (string-edit-history-mode)
     (setq string-edit-history-mode
-     (and hist-var
-          (list (cons (or initial "")
-                      (seq-copy (symbol-value hist-var)))
-                0))))
+          (and hist-var
+               (list (cons (or initial "")
+                           (seq-copy (symbol-value hist-var)))
+                     0))))
 
   (defun read-string-from-buffer-with-history (prompt string hist-var)
     "Switch to a new buffer to edit STRING in a recursive edit.
@@ -4064,9 +4064,8 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
   included in the resulting string.  If nil, no prompt will be
   inserted in the buffer.
 
-  \\<string-edit-history-mode-map>\
   If HIST-VAR is non-nil, it should be a symbol whose value cell
-  is a list. \\[string-edit-history-next] and \\[string-edit-history-previous] can be used to traverse the
+  is a list. \\<string-edit-history-mode-map>\\[string-edit-history-next] and \\<string-edit-history-mode-map>\\[string-edit-history-previous] can be used to traverse the
   history list in the buffer.
 
   When the user exits recursive edit, this function returns the
@@ -4081,10 +4080,11 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
            (setq string edited)
            (exit-recursive-edit))
          :abort-callback (lambda ()
-                           (exit-recursive-edit)
-                           (error "Aborted edit")))
+                           (throw 'exit t)))
       (string-edit-history--start hist-var string))
     (recursive-edit)
+    (when hist-var
+      (add-to-history hist-var string))
     string)
 
   (cl-defun jj--string-edit (prompt string success-callback
@@ -4145,8 +4145,9 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
     ["meta"
      ("-m" "message" "--message="
       :always-read t
-      :reader (lambda (prompt init _hist)
-                (read-string-from-buffer prompt (or init ""))))
+      :history-key jj-description-history
+      :reader (lambda (prompt init hist)
+                (read-string-from-buffer-with-history prompt (or init "") hist)))
      ("-D" "dry run" "--dry-run")]
     ["go"
      ("c" "commit" (lambda (args)
