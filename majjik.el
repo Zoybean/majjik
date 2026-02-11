@@ -5045,38 +5045,64 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                     ,@(cdr delegate)))
         (_ delegate)))))
 
-(defun make--jj-named-infix-table ()
-  "For use as a completion table for the `jj-git-push--named-infix'"
-  (let* ((options `("@"
-                    ,@(jj-list-bookmarks)
-                    ,@(jj-match-revisions))))
-    (completion-table-dynamic
-     (lambda (str)
-       (when (string-match
-              (rx string-start
-                  (group (* (not (any "=")))
-                         "=")
-                  (group (* (not (any "="))))
-                  string-end)
-              str)
-         (let-match-string
-             ((pref)
-              (suf))
-             str
-           (->> options
-                (-filter (## string-prefix-p suf %))
-                (mapcar (## concat pref %)))))))))
+(defun make--jj-named-infix-table (options)
+  "For use as a completion table for the `jj-git-push--named-infix'.
+This table is annotated assuming the options are valid for `jj--annotate-refs'."
+  (let* ((annotator
+          (let ((anno-raw (jj--annotate-refs options)))
+            (lambda (opt)
+              ;; the completion option passed to the annotator
+              ;; is the string which will include an = sign
+              ;; so we trim that prefix to allow us to find
+              ;; the corresponding candidate from the original options list
+              (funcall anno-raw (s-replace-regexp (rx string-start (* anychar) "=") "" opt)))))
+         (completer (lambda (str)
+                      (when (string-match
+                             (rx string-start
+                                 (group (* (not (any "=")))
+                                        "=")
+                                 (group (* (not (any "="))))
+                                 string-end)
+                             str)
+                        (let-match-string
+                            ((pref)
+                             (suf))
+                            str
+                          (cl-labels ((lens-cand (op)
+                                        ;; return a lensed version of OP, which applies OP to
+                                        ;; either a string or the first element of a list of strings.
+                                        (lambda (x)
+                                          (pcase x
+                                            (`(,(and str (pred stringp)) . ,rest)
+                                             (funcall op str))
+                                            ((and str (pred stringp))
+                                             (funcall op str))))))
+                            (->> options
+                                 (-filter (lens-cand (## string-prefix-p suf %)))
+                                 (mapcar (lens-cand (## concat pref %)))))))))
+         (table (completion-table-dynamic completer)))
+    (completion-table-with-annotation table annotator)))
 
 (transient-define-argument jj-git-push--named-infix ()
   "Push a new bookmark NAME at REVISION."
   :class 'transient-option
   :multi-value 'repeat
   :reader (lambda (prompt initial-input history)
-            (let* ((crm-separator (rx (* blank)
+            (let* ((thing (jj-thing-at-point))
+                   (rev-pt (jj--get-change thing))
+                   (pt-ann (jj--rev-at-point-option thing))
+                   (crm-separator (rx (* blank)
                                       (any ",| ")
-                                      (* blank))))
-              (completing-read-multiple prompt (make--jj-named-infix-table)
-                                        nil nil initial-input history))))
+                                      (* blank)))
+                   (answers (completing-read-multiple
+                             prompt
+                             (make--jj-named-infix-table (jj--list-relevant-revisions pt-ann))
+                             nil nil initial-input history)))
+              (mapcar (lambda (ans)
+                        (pcase ans
+                          ("^" rev-pt)
+                          (_ ans)))
+                      answers))))
 
 (transient-define-prefix jj-git-push-prefix ()
   ;; these flags unset one-another
@@ -5086,8 +5112,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                   ;; but they are mostly compatible with each other.
                   `(("--all" "--tracked")
                     ,@(prod-cartes coarse-flags fine-flags)))
-  ["args"
-   ["coarse"
+  [["coarse"
     ;; just a layout option
     :pad-keys t
     ("-d" "deleted" "--deleted")
@@ -5197,8 +5222,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   ;; these flags unset one-another
   :incompatible `(("--remote=" "--all-remotes")
                   ("--bookmark=" "--tracked"))
-  ["args"
-   ["bookmarks"
+  [["bookmarks"
     ;; just a layout option
     :pad-keys t
     
@@ -5218,7 +5242,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                   nil nil initial-input history))))]
    ["remotes" :pad-keys t
     ("-a" "all remotes" "--all-remotes") ;; list
-    ("-r" "remotes" "--remote="
+    ("-m" "remotes" "--remote="
      :prompt "remotes: "
      :multi-value repeat
      :reader (lambda (prompt initial-input history)
