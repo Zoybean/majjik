@@ -864,7 +864,7 @@ Also see `string-edit'."
          (setq string edited)
          (exit-recursive-edit))
        :abort-callback (lambda ()
-                         (throw 'exit t)))
+                         (throw 'exit "Aborted edit")))
     (string-edit-history--start hist-var string))
   (recursive-edit)
   (when hist-var
@@ -919,6 +919,30 @@ Also see `read-string-from-buffer'."
     (message "%s" (substitute-command-keys
                    "Type \\<string-edit-mode-map>\\[string-edit-done] when you've finished editing"))
     (current-buffer)))
+
+(define-advice transient--recursive-edit (:override (fn) jj--transient-recursive-edit-advice)
+  "Vendor the upstream fix from Transient."
+  (transient--debug 'recursive-edit)
+  (if (not transient--prefix)
+      (funcall fn)
+    (transient--suspend-override (bound-and-true-p edebug-active))
+    (condition-case err
+        (unwind-protect
+            (funcall fn)
+          (cond
+           ((memq this-command '(top-level abort-recursive-edit))
+            (setq transient--exitp t)
+            (transient--post-exit this-command)
+            (transient--delete-window)
+            (transient--debug "     abort recursive-edit and menu "))
+           (transient--prefix
+            (transient--resume-override)
+            (transient--debug "     exit recursive-edit and resumed menu"))))
+      (error (if (and (eq (car err) 'error)
+                      (stringp (cadr err))
+                      (string-prefix-p "Abort" (cadr err)))
+                 (message "%s" (cadr err))
+               (message "transient--recursive-edit: %S" err))))))
 ;; string-edit:1 ends here
 
 ;; Fileset
