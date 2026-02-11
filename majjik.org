@@ -3979,6 +3979,7 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
 ******* TODO COMMENT transient
 #+begin_src elisp
   ;; TODOs:
+  ;; - last value as init
   ;; - history in the editing buffer. needs:
   ;;   - new function like `read-string-from-buffer' which has:
   ;;     - history
@@ -3988,16 +3989,181 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
   ;;   - new method on that class for `transient-format-value'
   ;; - multiple ways to set one arg
 
+  (defvar-keymap string-edit-history-mode-map
+    "C-c C-p" #'string-edit-history-previous
+    "C-c C-n" #'string-edit-history-next)
+
+  (define-minor-mode string-edit-history-mode
+    "Minor mode for navigating input history within a string-edit prompt.")
+
+  (defun string-edit-history--editable-region-start ()
+    (save-excursion
+      (goto-char (point-min))
+      ;; Skip past the help text.
+      (text-property-search-forward 'string-edit--prompt)
+      (point)))
+
+  (defun string-edit-history--current ()
+    (buffer-substring (string-edit-history--editable-region-start) (point-max)))
+
+  (defun string-edit-history--maybe-save-current (mode)
+    "If the position in the history is 0, save the editable region as the initial element and return the new value for MODE.
+  Assumes the current buffer is a string-edit input buffer."
+    (-let (((list pos initial) mode))
+      (if (= pos 0)
+          `(,list ,pos ,(string-edit-history--current))
+        mode)))
+
+  (defun string-edit-history--offset (mode offset)
+    "Replace the editable region with the previous history item and return the new value for MODE.
+  Assumes the current buffer is a string-edit input buffer."
+    (-if-let* (((list pos initial) mode)
+               (npos (+ pos offset))
+               (_ (<= 0 npos))
+               (current (if (= npos 0)
+                            initial
+                          (or (nth (1- npos) list)
+                              (progn (setq npos pos)
+                                     nil)))))
+        (progn
+          (replace-region-contents
+           (string-edit-history--editable-region-start)
+           (point-max)
+           (cl-constantly current))
+          `(,list ,npos ,initial))
+      (beep)
+      (message "No more history")
+      mode))
+
+  (defun string-edit-history-previous ()
+    (interactive nil string-edit-history-mode)
+    (cl-callf string-edit-history--maybe-save-current
+        string-edit-history-mode)
+    (cl-callf string-edit-history--offset
+        string-edit-history-mode 1))
+
+  (defun string-edit-history-next ()
+    (interactive nil string-edit-history-mode)
+    (cl-callf string-edit-history--maybe-save-current
+        string-edit-history-mode)
+    (cl-callf string-edit-history--offset
+        string-edit-history-mode -1))
+
+  (defun string-edit-history--start (hist-var &optional initial)
+    "If HIST-VAR is non-nil, enter `string-edit-history-mode' using VAR for the history."
+    (interactive)
+    (string-edit-history-mode)
+    (setq string-edit-history-mode
+     (and hist-var
+          (list (symbol-value hist-var)
+                0
+                (or initial "")))))
+
+  (defun read-string-from-buffer-with-history (prompt string hist-var)
+    "Switch to a new buffer to edit STRING in a recursive edit.
+  The user finishes editing with \\<string-edit-mode-map>\\[string-edit-done], or aborts with \\<string-edit-mode-map>\\[string-edit-abort]).
+
+  PROMPT will be inserted at the start of the buffer, but won't be
+  included in the resulting string.  If nil, no prompt will be
+  inserted in the buffer.
+
+  \\<string-edit-history-mode-map>\
+  If HIST-VAR is non-nil, it should be a symbol whose value cell
+  is a list. \\[string-edit-history-next] and \\[string-edit-history-previous] can be used to traverse the
+  history list in the buffer.
+
+  When the user exits recursive edit, this function returns the
+  edited STRING.
+
+  Also see `string-edit'."
+    (with-current-buffer
+        (jj--string-edit
+         prompt
+         string
+         (lambda (edited)
+           (setq string edited)
+           (exit-recursive-edit))
+         :abort-callback (lambda ()
+                           (exit-recursive-edit)
+                           (error "Aborted edit")))
+      (string-edit-history--start hist-var string))
+    (recursive-edit)
+    string)
+
+  (cl-defun jj--string-edit (prompt string success-callback
+                                    &key abort-callback)
+    "Switch to a new buffer to edit STRING.
+  When the user finishes editing (with \\<string-edit-mode-map>\\[string-edit-done]), SUCCESS-CALLBACK
+  is called with the resulting string.
+
+  If the user aborts (with \\<string-edit-mode-map>\\[string-edit-abort]), ABORT-CALLBACK (if any) is
+  called with no parameters.
+
+  PROMPT will be inserted at the start of the buffer, but won't be
+  included in the resulting string.  If PROMPT is nil, no help text
+  will be inserted.
+
+  Also see `read-string-from-buffer'."
+    (with-current-buffer (generate-new-buffer "*edit string*")
+      (when prompt
+        (let ((inhibit-read-only t))
+          (insert prompt)
+          (ensure-empty-lines 0)
+          (add-text-properties (point-min) (point)
+                               (list 'intangible t
+                                     'face 'string-edit-prompt
+                                     'read-only t))
+          (insert (propertize (make-separator-line)
+                              'read-only t 'rear-nonsticky t))
+          (add-text-properties (point-min) (point)
+                               (list 'string-edit--prompt t))))
+      (let ((start (point)))
+        (insert string)
+        (goto-char start))
+
+      ;; Use `fit-window-to-buffer' after the buffer is filled with text.
+      (pop-to-buffer (current-buffer)
+                     '(display-buffer-below-selected
+                       (window-height . (lambda (window)
+                                          (fit-window-to-buffer window nil 10)))))
+
+      (set-buffer-modified-p nil)
+      (setq buffer-undo-list nil)
+      (string-edit-mode)
+      (setq-local string-edit--success-callback success-callback)
+      (setq-local string-edit--abort-callback abort-callback)
+      (setq-local header-line-format
+                  (substitute-command-keys
+                   "Type \\<string-edit-mode-map>\\[string-edit-done] when you've finished editing or \\[string-edit-abort] to abort"))
+      (message "%s" (substitute-command-keys
+                     "Type \\<string-edit-mode-map>\\[string-edit-done] when you've finished editing"))
+      (current-buffer)))
+
+
   (transient-define-prefix jj-commit-prefix ()
-    ["args"
+    ["targets"
+     ("-r" "revision" "-r"
+      :class transient-option
+      :multi-value repeat)]
+    ["meta"
      ("-m" "message" "--message="
+      :always-read t
       :reader (lambda (prompt init _hist)
                 (read-string-from-buffer prompt (or init ""))))
      ("-D" "dry run" "--dry-run")]
     ["go"
      ("c" "commit" (lambda (args)
                      (interactive (list (transient-args (oref transient-current-prefix command))))
-                     (message "commit %s" args)))])
+                     (message "jj commit %s" (s-join " " args))))
+     ("n" "new" (lambda (args)
+                  (interactive (list (transient-args (oref transient-current-prefix command))))
+                  (message "jj new %s" (s-join " " args))))
+     ("e" "edit" (lambda (args)
+                   (interactive (list (transient-args (oref transient-current-prefix command))))
+                   (message "jj edit %s" (s-join " " args))))
+     ("d" "describe" (lambda (args)
+                       (interactive (list (transient-args (oref transient-current-prefix command))))
+                       (message "jj describe %s" (s-join " " args))))])
 #+end_src
 ****** move
 #+begin_src elisp
