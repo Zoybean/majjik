@@ -5371,7 +5371,40 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
     ["fetch"
      ("F" "fetch" jj--git-fetch-suffix :transient nil)])
 #+end_src
+*** TODO COMMENT Interactive commands
+#+begin_src elisp
+  (defun jj--editor-path ()
+    (if (string-prefix-p "~" with-editor-emacsclient-executable)
+        (concat (expand-file-name "~")
+                (substring with-editor-emacsclient-executable 1))
+      with-editor-emacsclient-executable))
 
+  (defun jj--editor-server-path ()
+    (if server-use-tcp
+        (concat "--server-file="
+                (expand-file-name server-name
+                                  server-auth-dir))
+      (concat "--socket-name="
+              (expand-file-name server-name
+                                server-socket-dir))))
+
+  (let* ((program (jj--editor-path))
+         (server (jj--editor-server-path))
+         (edit (concat "merge-tools._emacs.program=" program))
+         (args `(,server "$left" "$right"))
+         (edit-args ;; Tell the process where the server file is.
+          (format "merge-tools._emacs.edit-args=[%s]"
+                  (s-join ","
+                          (mapcar #'prin1-to-string
+                                  args)))))
+    (with-editor "JJ_EDITOR"
+      (jj-cmd-async "split" `("split" "-r" "@" "-i"
+                              "--config" ,edit
+                              "--config" ,edit-args
+                              "--debug"
+                              "--tool" "_emacs"
+                              "-m" ""))))
+#+end_src
 * Provide
 #+begin_src elisp
   (provide 'majjik)
