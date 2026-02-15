@@ -2672,11 +2672,16 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; repo query commands
 
 ;; [[file:majjik.org::*repo query commands][repo query commands:1]]
+(defun jj-rev-list-template (self)
+  (jj-template
+   (cl-subst self 'self
+             `(++ (:chain self (.change_id))
+                  "\n"))))
+
 (defun jj-name-list-template (self)
   (jj-template
    (cl-subst self 'self
-             `(++ (:chain self
-                          (.name))
+             `(++ (:chain self (.name))
                   "\n"))))
 
 (defun jj-bookmark-list-template (self)
@@ -2684,10 +2689,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
    (cl-subst self 'self
              `(++ (separate
                    "@"
-                   (:chain self
-                           (.name))
-                   (:chain self
-                           (.remote)))
+                   (:chain self (.name))
+                   (:chain self (.remote)))
                   "\n"))))
 
 (defun jj-list-bookmarks ()
@@ -2767,7 +2770,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   "List all revisions matching REVSET, or all visible by default."
   (string-lines (jj-cmd-sync `("log" "--no-graph"
                                "-r" ,(or revset "all()")
-                               "-T" ,(jj-name-list-template 'self))
+                               "-T" ,(jj-rev-list-template 'self))
                              :no-revert)
                 :omit))
 

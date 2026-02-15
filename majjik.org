@@ -2720,11 +2720,16 @@ need error handling in these. but I do like them being synchronous i think.
 
 **** repo query commands
 #+begin_src elisp
+  (defun jj-rev-list-template (self)
+    (jj-template
+     (cl-subst self 'self
+               `(++ (:chain self (.change_id))
+                    "\n"))))
+
   (defun jj-name-list-template (self)
     (jj-template
      (cl-subst self 'self
-               `(++ (:chain self
-                            (.name))
+               `(++ (:chain self (.name))
                     "\n"))))
 
   (defun jj-bookmark-list-template (self)
@@ -2732,10 +2737,8 @@ need error handling in these. but I do like them being synchronous i think.
      (cl-subst self 'self
                `(++ (separate
                      "@"
-                     (:chain self
-                             (.name))
-                     (:chain self
-                             (.remote)))
+                     (:chain self (.name))
+                     (:chain self (.remote)))
                     "\n"))))
 
   (defun jj-list-bookmarks ()
@@ -2815,7 +2818,7 @@ need error handling in these. but I do like them being synchronous i think.
     "List all revisions matching REVSET, or all visible by default."
     (string-lines (jj-cmd-sync `("log" "--no-graph"
                                  "-r" ,(or revset "all()")
-                                 "-T" ,(jj-name-list-template 'self))
+                                 "-T" ,(jj-rev-list-template 'self))
                                :no-revert)
                   :omit))
 
