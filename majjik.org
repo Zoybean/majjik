@@ -5379,7 +5379,7 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
                 (substring with-editor-emacsclient-executable 1))
       with-editor-emacsclient-executable))
 
-  (defun jj--editor-server-path ()
+  (defun jj--editor-server-path-arg ()
     (if server-use-tcp
         (concat "--server-file="
                 (expand-file-name server-name
@@ -5388,23 +5388,231 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
               (expand-file-name server-name
                                 server-socket-dir))))
 
-  (let* ((program (jj--editor-path))
-         (server (jj--editor-server-path))
-         (edit (concat "merge-tools._emacs.program=" program))
-         (args `(,server "$left" "$right"))
-         (edit-args ;; Tell the process where the server file is.
-          (format "merge-tools._emacs.edit-args=[%s]"
-                  (s-join ","
-                          (mapcar #'prin1-to-string
-                                  args)))))
-    (with-editor "JJ_EDITOR"
-      (jj-cmd-async "split" `("split" "-r" "@" "-i"
-                              "--config" ,edit
-                              "--config" ,edit-args
-                              "--debug"
-                              "--tool" "_emacs"
-                              "-m" ""))))
+  (defvar jj--do-diff-function 'jj--do-diff-file-buffers)
+
+  (defun jj--do-diff-file-buffers (b-left b-right)
+    (require 'vdiff)
+    ;; left and right must be both files
+    (vdiff-buffers b-left b-right))
+
+  (defun jj--do-diff-dir-buffers (b-left b-right)
+    (jj--begin-dired-merge b-left b-right))
+
+  ;; vdiff3 crashed my emacs last time I tried using it 
+  ;; (defun jj--do-diff3 (b-left b-right merged)
+  ;;   (vdiff-buffers3 b-left b-right))
+  ;;
+
+  (defun jj--client-edit-for-diff (proc frame left right)
+    "In a newly created emacsclient PROC having a new frame FRAME, diff files LEFT and RIGHT."
+    (-let* ((b-left)
+            (b-right))
+      ;; open the right buffer specially - this one is the one we're editing
+      (setq b-right
+            (car (server-visit-files `((,right)) proc)))
+      ;; open the other file to look at
+      (setq b-left
+            (with-current-buffer
+                (find-file-noselect left)
+              (read-only-mode 1)
+              (current-buffer)))
+      ;; diff the buffers
+      (funcall jj--do-diff-function b-left b-right)
+      ;; make sure the right buffer's window is shown
+      (select-window (get-buffer-window b-right frame))))
+
+  (defun jj--client-edit-for-diff-dirs (proc frame left right)
+    "In a newly created emacsclient PROC having a new frame FRAME, diff directories LEFT and RIGHT."
+    (let ((jj--do-diff-function #'jj--do-diff-dir-buffers))
+      (jj--client-edit-for-diff proc frame left right)))
+
+  (defun jj--call-from-cli (fun)
+    "For use as the first parameter to an --eval invocation of emacsclient which has also supplied the -c argument. Calls FUN with the new PROC and FRAME, and the other string ARGS to --eval that were provided later on the command line.
+  FUN must be a function of at least 2 fixed args, PROC and FRAME, plus some number of string ARGS to accept whatever positional arguments are supplied.
+  PROC is the newly created client process.
+  FRAME is the newly created frame."
+    (let* (;; get the process handle for the new frame's client
+           ;; (which is the new client)
+           (frame (selected-frame))
+           (proc (frame-parameter frame 'client))
+           (args
+            (mapcar (lambda (s)
+                      ;; make sure it's a string
+                      ;; unquoted args are symbols
+                      (format "%s" s))
+                    server-eval-args-left)))
+      (apply fun
+             proc frame
+             (prog1 args
+               ;; treat other args exclusively as filenames.
+               ;; otherwise they are evalled after this
+               (setq server-eval-args-left nil)))))
+
+  (defun jj--merge-tool-args (server-edit-function)
+    "Returns the arguments needed to register emacs as the merge tool for a JJ command.
+  SERVER-EDIT-FUNCTION must be a quoted sexpression that would be a valid argument to `function' (i.e. a lambda or a symbol). The resulting function must be a valid argument to `jj--call-from-cli'.
+  Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool to select it."
+    ;; this is almost right.
+    ;; left and right are actually directories most of the time, not files.
+    (let* ((program (jj--editor-path))
+           (edit-args
+            `(,(jj--editor-server-path-arg)
+              ;; need a new frame, or `jj--call-from-cli' won't work
+              "-c"
+              "-e" ,(prin1-to-string
+                     `(jj--call-from-cli
+                       #',server-edit-function))
+              ;; always pass the files as the last arguments
+              "--" "$left" "$right")))
+      `("--config" ,(concat "merge-tools.emacs.program=" program)
+        "--config" ,(concat "merge-tools.emacs.edit-args="
+                            (jj--toml-list
+                             (mapcar #'prin1-to-string
+                                     edit-args)))
+        "--tool" "emacs")))
+
+  (defun jj--editor-args ()
+    "Returns the arguments needed to register emacs as the editor for a JJ command."
+    ;; this is almost right.
+    ;; left and right are actually directories most of the time, not files.
+    (let* ((program (jj--editor-path))
+           (server (jj--editor-server-path-arg))
+           (editor `(,program ,server)))
+      `("--config" ,(concat "ui.editor="
+                            (jj--toml-list
+                             (mapcar #'prin1-to-string
+                                     editor))))))
+
+  (defun jj--toml-list (list)
+    (format "[%s]"
+            (s-join "," list)))
+
+  (defun jj-split (rev)
+    (jj-cmd-async "split"
+        `("split" "-r" ,rev "-i"
+          "--debug"
+          ,@(jj--merge-tool-args
+             'jj--client-edit-for-diff-dirs)
+          ,@(jj--editor-args))))
+
+  (jj-split "rsvvutqn")
 #+end_src
+**** diff dir buffers
+#+begin_src elisp
+  (defun jj--begin-dired-merge (old new)
+    (let ((b-old (if (bufferp old)
+                     old
+                   (dired old)))
+          (b-new (if (bufferp new)
+                     new
+                   (dired-other-window new))))
+      (with-current-buffer b-old
+        (jj--dired-merge-mode 1)
+        (setq-local
+         jj--dired-merge-which :old
+         jj--dired-merge-other b-new)
+        )
+      (with-current-buffer b-new
+        (jj--dired-merge-mode 1)
+        (setq-local
+         jj--dired-merge-which :new
+         jj--dired-merge-other b-old))))
+
+  (defvar jj--dired-merge-which nil
+    "In `jj--dired-merge-mode', whether this buffer is the `:old' or `:new' contents")
+  (defvar jj--dired-merge-other nil
+    "In `jj--dired-merge-mode', the other buffer.")
+  (defvar jj--dired-merge-diff-function #'vdiff-files
+    "Function to call from `jj--dired-merge-mode' to open 2 files for diff editing.")
+
+  (defvar-keymap jj--dired-merge-mode-map
+    "RET" 'jj--dired-merge-open
+    "q" 'jj--dired-merge-bury-dired)
+
+  (define-minor-mode jj--dired-merge-mode
+    "Minor mode for merging directories in dired.")
+
+  (defun jj--dired-merge-open (file)
+    "Diff FILE with its twin, if it exists. If the twin doesn't exist, or one is a file and the other is a directoy, then just open FILE."
+    (interactive (list (dired-get-file-for-visit)))
+    (let ((base (file-name-base file)))
+      (unless (and jj--dired-merge-other
+                   jj--dired-merge-which)
+        (user-error "not in a properly set-up dired merge mode"))
+      (pcase (with-current-buffer jj--dired-merge-other
+               (expand-file-name base))
+        ;; two files both exist and agree on being file or directory.
+        ((and other-file
+              ;; just for the binding
+              (app file-directory-p dir-p)
+              ;; check they agree on type
+              (guard (eq dir-p (file-directory-p file))))
+         (let ((func (if dir-p
+                         #'jj--dired-open-diff-dirs
+                       #'jj--dired-open-diff-files))
+               (args (pcase-exhaustive jj--dired-merge-which
+                       ;; determine which file is old and which new
+                       ;; to determine the argument order
+                       (:old (list file other-file))
+                       (:new (list other-file file)))))
+           (apply func args)))
+        (_
+         ;; this will open in dired if it's a dir
+         (find-file file)))))
+
+  (defun jj--dired-merge-get-buffer-pair ()
+    "Return the diffing buffers, old then new."
+    (pcase-exhaustive jj--dired-merge-which
+      ;; determine which buffer is old and which new
+      (:old (list (current-buffer) jj--dired-merge-other))
+      (:new (list jj--dired-merge-other (current-buffer)))))
+
+  (defun jj--dired-open-diff-dirs (old new)
+    ;; move both windows in tandem
+    ;; assumes we're starting from an existing `jj--dired-merge-mode' buffer
+    (-let (((w-old w-new) (mapcar #'get-buffer-window
+                                  (jj--dired-merge-get-buffer-pair)))
+           (b-old (find-file-noselect old))
+           (b-new (find-file-noselect new)))
+      (with-selected-window w-old
+        (switch-to-buffer b-old))
+      (with-selected-window w-new
+        (switch-to-buffer b-new))
+      (jj--begin-dired-merge b-old b-new)))
+
+  (defun jj--dired-open-diff-files (old new)
+    ;; move both windows in tandem
+    ;; assumes we're starting from an existing `jj--dired-merge-mode' buffer
+    (-let (((w-old w-new) (mapcar #'get-buffer-window
+                                  (jj--dired-merge-get-buffer-pair)))
+           (b-old (find-file-noselect old))
+           (b-new (find-file-noselect new)))
+      (with-selected-window w-old
+        (switch-to-buffer b-old))
+      (with-selected-window w-new
+        (switch-to-buffer b-new))
+      (let ((c (current-window-configuration)))
+        (vdiff-buffers b-old b-new nil
+                       (lambda (&rest _bufs)
+                         (set-window-configuration c)
+                         (with-selected-window w-old
+                           (bury-buffer))
+                         (with-selected-window w-new
+                           (bury-buffer)))))))
+
+  (defun jj--dired-merge-bury-dired ()
+    "Bury the current dired buffer. If it has a twin, bury that too."
+    (interactive)
+    (if jj--dired-merge-mode
+        (-let (((w-old w-new) (mapcar #'get-buffer-window
+                                      (jj--dired-merge-get-buffer-pair))))
+          (with-selected-window w-old
+            (bury-buffer))
+          (with-selected-window w-new
+            (bury-buffer)))
+      (bury-buffer)))
+#+end_src
+    
 * Provide
 #+begin_src elisp
   (provide 'majjik)
