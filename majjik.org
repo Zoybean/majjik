@@ -1440,7 +1440,8 @@ this might not actually work. I'm big sus actually.
   (defun jj-parse-erase-graph-prefix ()
     "Strip the graph prefix of the node starting at point. Return the graph as a vector of the form [[PRE NODE POST] . TAIL] where PRE, NODE, and POST are strings representing the 3 parts of the first line, and TAIL is a sequence of `jj--count-graph-lines' strings for the subsequent lines.
   If the line is an elided entry, returns a single string, which is the prefix before the "
-    (let ((graph))
+    (let ((1st)
+          (rest))
       (jj--re-step-over (rx
                          (group (* (not control)))
                          (literal jj--delim)
@@ -1449,7 +1450,7 @@ this might not actually work. I'm big sus actually.
                          (group (* (not control)))
                          (literal jj--major-delim)))
       (let-match (pre node post)
-        (setq graph `(,pre ,node ,post)))
+        (setq 1st `(,pre ,node ,post)))
       (delete-region (match-beginning 0) (match-end 0))
       ;; skip over arbitrary content here.
       (forward-line 1)
@@ -1459,9 +1460,9 @@ this might not actually work. I'm big sus actually.
                     (jj--re-step-over (rx (group (* (not control)))
                                           (literal jj--major-delim)
                                           "\n"))
-                    (push (match-string 1) graph)
+                    (push (match-string 1) rest)
                     (delete-region (match-beginning 0) (match-end 0))))
-      (apply #'make-jj-log-graph (nreverse graph))))
+      (apply #'make-jj-log-graph `(,@1st ,@(nreverse rest)))))
 
   (defun jj-parse-erase-elided-prefix ()
     (let ((graph-pre)
@@ -1476,7 +1477,7 @@ this might not actually work. I'm big sus actually.
                             (group (* (not control)))
                             "(elided revisions)"
                             "\n"))
-      (let-match (pre node post)
+      (let-match (pre node suf)
         (setq graph-pre pre
               graph-node node
               graph-suf suf))
@@ -1518,20 +1519,20 @@ this might not actually work. I'm big sus actually.
          (,(intern (format "make-jj-%s" type-name))
           :args (&key ,@(mapcar #'car fields))
           :no-manual t))
-       (defvar ,(intern (format "jj-%s-regex" type-name))
-         ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-            `(rx line-start
-                 (seq
-                  ,(format "%s" type-name)
-                  ;; struct delimiter
-                  ,jj--major-delim
-                  ;; struct elements
-                  (* ,content)
-                  (= ,(1- (length fields))
-                     ,jj--delim
-                     (* ,content))
-                  "\n")))
-         ,(format "Regex to match a full `jj-%1$s' entry. This *should* match exactly the same content that `read-jj-%1$s' will parse." type-name))
+       ;; (defvar ,(intern (format "jj-%s-regex" type-name))
+       ;;   ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
+       ;;      `(rx line-start
+       ;;           (seq
+       ;;            ,(format "%s" type-name)
+       ;;            ;; struct delimiter
+       ;;            ,jj--major-delim
+       ;;            ;; struct elements
+       ;;            (* ,content)
+       ;;            (= ,(1- (length fields))
+       ;;               ,jj--delim
+       ;;               (* ,content))
+       ;;            "\n")))
+       ;;   ,(format "Regex to match a full `jj-%1$s' entry. This *should* match exactly the same content that `read-jj-%1$s' will parse." type-name))
        (defun ,(intern (format "jj-%s-template" type-name)) (self)
          ,(format "Get a commit template to produce entries parseable by `read-jj-%s'. SELF is the symbol to use for the self-type; usually this will just be `self', but if using the template in a lambda you may want a different type-name." type-name)
          (jj-template (cl-subst self 'self
@@ -1737,8 +1738,8 @@ this might not actually work. I'm big sus actually.
                               collect n)
                      '(#s(jj-log-entry
                         #s(jj-log-plain "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil)
-                        [["" "@" "    "]
-                         "├─╮  " "│ │  " "│ │  "])
+                        #s(jj-log-graph "" "@" "    "
+                         ("├─╮  ") "│ │  "))
                        #s(jj-log-entry
                         #s(jj-log-plain "tqqxztyu" "zoeyhewll@gmail.com" "2025-12-24 18:48:22"
                                         ("main??")
@@ -1749,57 +1750,57 @@ this might not actually work. I'm big sus actually.
   and
   here
   ")
-                        [["│ " "o" "  "]
-                         "│ │  " "│ │  " "│ │  "])
+                        #s(jj-log-graph "│ " "o" "  "
+                         () "│ │  "))
                        #s(jj-log-entry
                         #s(jj-log-plain "zsrpuxsq/0" "zoeyhewll@gmail.com" "2026-01-11 18:58:04" nil nil nil "d4b4e2fc" "conflict" nil "diverge 2
   ")
-                        [["" "×" " │  "]
-                         "│ │  " "│ │  " "│ │  "])
+                        #s(jj-log-graph "" "×" " │  "
+                         () "│ │  "))
                        #s(jj-log-entry
                         #s(jj-log-plain "zsrpuxsq/9" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "c33a9601" nil nil "diverge 1
   ")
-                        [["│ │ " "o" "  "]
-                         "├───╯  " "│ │    " "│ │    "])
+                        #s(jj-log-graph "│ │ " "o" "  "
+                         ("├───╯  ") "│ │    "))
                        #s(jj-log-entry
                         #s(jj-log-plain "znpwrszt" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "a2fd03ad" "conflict" "empty" nil)
-                        [["" "×" " │    "]
-                         "├───╮  " "│ │ │  " "│ │ │  "])
+                        #s(jj-log-graph "" "×" " │    "
+                         ("├───╮  ") "│ │ │  "))
                        #s(jj-log-entry
                         #s(jj-log-plain "uwoorszk" "zoeyhewll@gmail.com" "2025-12-29 22:14:35" nil nil nil "3c9908cd" nil nil "foo
   ")
-                        [["│ │ " "o" "  "]
-                         "│ │ │  " "│ │ │  " "│ │ │  "])
+                        #s(jj-log-graph "│ │ " "o" "  "
+                         () "│ │ │  "))
                        #s(jj-log-entry
                         #s(jj-log-plain "nqzyvomm" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "0c0b58a0" nil nil "foo
   ")
-                        [["" "o" " │ │  "]
-                         "│ │ │  " "│ │ │  " "│ │ │  "])
+                        #s(jj-log-graph "" "o" " │ │  "
+                         () "│ │ │  "))
                        #s(jj-log-entry
                         #s(jj-log-plain "oqnyxnnn" "zoeyhewll@gmail.com" "2025-12-26 23:28:34" nil nil nil "52c23b7f" nil "empty" "foo sample commit to edit
   ")
-                        [["" "o" " │ │  "]
-                         "├───╯  " "│ │    " "│ │    "])
+                        #s(jj-log-graph "" "o" " │ │  "
+                         ("├───╯  ") "│ │    "))
                        #s(jj-log-entry
                         #s(jj-log-plain "wuvynqqs" "zoeyhewll@gmail.com" "2025-03-26 14:08:11"
                                         ("main??" "main@origin")
                                         nil nil "ba86ecc3" nil nil "add basic restart-case and handler-case
   ")
-                        [["" "+" " │  "]
-                         "│ │  " "│ │  " "│ │  "])
-                       [["" "!" " │  "]
-                         "├─╯
-  "]
+                        #s(jj-log-graph "" "+" " │  "
+                         () "│ │  "))
+                       #s(jj-log-graph "" "!" " │  "
+                         ("├─╯
+  ") nil)
                        #s(jj-log-entry
                         #s(jj-log-plain "zwxrqwwv" "zoeyhewll@gmail.com" "2025-12-21 22:36:01"
                                         ("foo")
                                         nil nil "087ec1fb" nil "empty" nil)
-                        [["│ " "o" "  "]
-                         "├─╯  " "│    " "│    "])
+                        #s(jj-log-graph "│ " "o" "  "
+                         ("├─╯  ") "│    "))
                        #s(jj-log-entry
                         #s(jj-log-plain "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)
-                        [["" "+" "  "]
-                         "   " "   " "   "]))))))
+                        #s(jj-log-graph "" "+" "  "
+                         () "   ")))))))
 
   (ert-deftest jj-test-plain-log-parsing ()
     (with-temp-buffer
@@ -1935,42 +1936,42 @@ this might not actually work. I'm big sus actually.
                               while n
                               collect n)
                      '((:entry
-                        [["" "@" "    "]
-                         "├─╮  " "│ │  " "│ │  "])
+                        #s(jj-log-graph "" "@" "    "
+                         ("├─╮  ") "│ │  "))
                        (:entry
-                        [["│ " "o" "  "]
-                         "│ │  " "│ │  " "│ │  "])
+                        #s(jj-log-graph "│ " "o" "  "
+                         () "│ │  "))
                        (:entry
-                        [["" "×" " │  "]
-                         "│ │  " "│ │  " "│ │  "])
+                        #s(jj-log-graph "" "×" " │  "
+                         () "│ │  "))
                        (:entry
-                        [["│ │ " "o" "  "]
-                         "├───╯  " "│ │    " "│ │    "])
+                        #s(jj-log-graph "│ │ " "o" "  "
+                         ("├───╯  ") "│ │    "))
                        (:entry
-                        [["" "×" " │    "]
-                         "├───╮  " "│ │ │  " "│ │ │  "])
+                        #s(jj-log-graph "" "×" " │    "
+                         ("├───╮  ") "│ │ │  "))
                        (:entry
-                        [["│ │ " "o" "  "]
-                         "│ │ │  " "│ │ │  " "│ │ │  "])
+                        #s(jj-log-graph "│ │ " "o" "  "
+                         () "│ │ │  "))
                        (:entry
-                        [["" "o" " │ │  "]
-                         "│ │ │  " "│ │ │  " "│ │ │  "])
+                        #s(jj-log-graph "" "o" " │ │  "
+                         () "│ │ │  "))
                        (:entry
-                        [["" "o" " │ │  "]
-                         "├───╯  " "│ │    " "│ │    "])
+                        #s(jj-log-graph "" "o" " │ │  "
+                         ("├───╯  ") "│ │    "))
                        (:entry
-                        [["" "+" " │  "]
-                         "│ │  " "│ │  " "│ │  "])
+                        #s(jj-log-graph "" "+" " │  "
+                         () "│ │  "))
                        (:elided
-                        [["" "!" " │  "]
-                         "├─╯
-  "])
+                        #s(jj-log-graph "" "!" " │  "
+                         ("├─╯
+  ") nil))
                        (:entry
-                        [["│ " "o" "  "]
-                         "├─╯  " "│    " "│    "])
+                        #s(jj-log-graph "│ " "o" "  "
+                         ("├─╯  ") "│    "))
                        (:entry
-                        [["" "+" "  "]
-                         "   " "   " "   "]))))
+                        #s(jj-log-graph "" "+" "  "
+                         () "   ")))))
       (should (string=
                (buffer-string)
                "log-plainuorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
@@ -1985,8 +1986,7 @@ this might not actually work. I'm big sus actually.
   (elided revisions)
   log-plainzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
   log-plainzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
-  "))
-      ))
+  "))))
 #+end_src
 ** Generic format macro
 #+begin_src elisp
@@ -2013,20 +2013,20 @@ this might not actually work. I'm big sus actually.
          (,(intern (format "make-jj-%s" type-name))
           :args (&key ,@(mapcar #'car fields))
           :no-manual t))
-       (defvar ,(intern (format "jj-%s-regex" type-name))
-         ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-            `(rx line-start
-                 (seq
-                  ,(format "%s" type-name)
-                  ;; struct delimiter
-                  ,jj--major-delim
-                  ;; struct elements
-                  (* ,content)
-                  (= ,(1- (length fields))
-                     ,jj--delim
-                     (* ,content))
-                  "\n")))
-         ,(format "Regex to match a full `jj-%1$s' entry. This *should* match exactly the same content that `read-jj-%1$s' will parse." type-name))
+       ;; (defvar ,(intern (format "jj-%s-regex" type-name))
+       ;;   ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
+       ;;      `(rx line-start
+       ;;           (seq
+       ;;            ,(format "%s" type-name)
+       ;;            ;; struct delimiter
+       ;;            ,jj--major-delim
+       ;;            ;; struct elements
+       ;;            (* ,content)
+       ;;            (= ,(1- (length fields))
+       ;;               ,jj--delim
+       ;;               (* ,content))
+       ;;            "\n")))
+       ;;   ,(format "Regex to match a full `jj-%1$s' entry. This *should* match exactly the same content that `read-jj-%1$s' will parse." type-name))
        (defun ,(intern (format "jj-%s-template" type-name)) (self)
          ,(format "Get a commit template to produce entries parseable by `read-jj-%s'. SELF is the symbol to use for the self-type; usually this will just be `self', but if using the template in a lambda you may want a different type-name." type-name)
          (jj-template (cl-subst self 'self
