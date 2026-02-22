@@ -1227,280 +1227,6 @@ this might not actually work. I'm big sus actually.
     "Delimiter for separating fields in the jj-log template.
     By default, this is the ascii unit separator character."))
 
-  (defmacro define-jj-log-format (&rest fields)
-    "Define the format to be used for jj log parsing and formatting.
-  Accepts a list of FIELDS in the form (NAME . PLIST), where PLIST accepts the following keys:
-  - `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
-  - `:parser' specifies how to read the data in to lisp.
-  - `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
-  - `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
-  - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
-    `(progn
-       (require 'json)
-       (define-short-documentation-group jj-log
-         (define-jj-log-format
-          :no-manual t)
-         (read-jj-log-entry
-          :no-manual t)
-         (insert-jj-log-entry
-          :no-manual t)
-         (read-jj-log-elided
-          :no-manual t)
-         (insert-jj-log-elided
-          :no-manual t)
-         (make-jj-log-entry
-          :args (&key header graph)
-          :no-manual t)
-         (make-jj-log-graph
-          :no-manual t)
-         (make-jj-log-header
-          :args (&key ,@(mapcar #'car fields))
-          :no-manual t))
-       (defvar jj-log-entry-regex
-         ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-            `(rx line-start
-                 ;; graph pre
-                 (* ,content)
-                 ;; graph node and suf
-                 (= 2 
-                    ,jj--delim
-                    (* ,content))
-                 (seq
-                  ;; header delimiter
-                  ,jj--major-delim
-                  ;; header elements
-                  (* ,content)
-                  (= ,(1- (length fields))
-                     ,jj--delim
-                     (* ,content))
-                  "\n"
-                  ;; remaining graph
-                  (= ,(1- jj--count-graph-lines)
-                     (* ,content)
-                     ,jj--major-delim
-                     "\n"))))
-         "Regex to match a full `jj-log' entry. This *should* match exactly the same content that `read-jj-log-entry' will parse.")
-       (defvar jj-log-elided-regex
-         ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-            `(rx line-start
-                 ;; graph pre
-                 (* ,content)
-                 ;; graph node and suf
-                 (= 2 
-                    ,jj--delim
-                    (* ,content))
-                 "(elided revisions)\n"
-                 ;; remaining graph
-                 (* (* ,content)
-                    "\n")))
-         "Regex to match an elided section of `jj-log'. This *should* match exactly the same content that `read-jj-log-elided' will parse.")
-       (defvar jj-parseable-template
-         (jj-template '(++ ,jj--major-delim
-                           (join ,jj--delim
-                                 ,@(cl-loop for (name . props) in fields
-                                            for form = (plist-get props :form)
-                                            collect form))
-                           ;; these lines only exist to get the shape of the graph
-                           ;; there's already one with the header line, so count 1 fewer
-                           ,@(cl-loop for n upfrom 1 below jj--count-graph-lines
-                                      append `("\n" ,jj--major-delim))))
-         "Commit template to produce log entries parseable by `read-jj-log-entry'.")
-       (defun read-jj-log-entry ()
-         "With point at the beginning of the first line of a `jj-log-parseable' entry, parse the entire entry into a `jj-log-entry' struct."
-         ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-            `(cl-loop with (graph-pre graph-node graph-suf) = (progn
-                                                                (should (bolp))
-                                                                (should (jj--re-step-over (rx (group (* ,content))
-                                                                                              ,jj--delim
-                                                                                              (group (* ,content))
-                                                                                              ,jj--delim
-                                                                                              (group (* ,content))
-                                                                                              ,jj--major-delim)))
-                                                                (list (match-string 1)
-                                                                      (match-string 2)
-                                                                      (match-string 3)))
-                      ;; entry line
-                      for (key . parser) in (list ,@(cl-loop for (name . props) in fields
-                                                             for key = (intern (format ":%s" name))
-                                                             for parser = (plist-get props :parser)
-                                                             collect `(cons ,key ,parser)))
-                      ;; no delimiter for first field
-                      for first = t then nil
-                      for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
-                      when (jj--re-step-over field-rx)
-                      nconc `(,key ,(if parser
-                                        (save-match-data
-                                          (funcall parser (match-string 1)))
-                                      (match-string 1)))
-                      into struct-props
-                      finally return
-                      (cl-loop initially (jj--re-step-over "\n")
-                               for ix upfrom 1 below jj--count-graph-lines
-                               ;; at this point, we ought to be at the start or end of a line,
-                               ;; having just read either a commit or a graph-line
-                               do (should (or (eolp)
-                                              (bolp)))
-                               if (jj--re-step-over (rx line-start
-                                                        ;; since we started at eol
-                                                        ;; since this starts with line-start,
-                                                        ;; and matches everything up to a delimiter
-                                                        ;; it's guaranteed to skip over only one character
-                                                        ;; (the newline we started at)
-                                                        (group (* ,content))
-                                                        ,jj--major-delim
-                                                        "\n"))
-                               collect (match-string 1) into graph-tail
-                               else return (error "failed to parse graph shape on line %d of commit %s" ix struct-props)
-                               finally return (make-jj-log-entry :header (apply #'make-jj-log-header struct-props)
-                                                             :graph (apply #'make-jj-log-graph graph-pre graph-node graph-suf graph-tail))))))
-       (defun read-jj-log-elided ()
-         "Read the graph portion of an elided section. This is just a `jj-log-graph' struct, but it's not read in the same."
-         ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-            `(cl-loop with (graph-pre graph-node graph-suf) = (progn
-                                                                (should (bolp))
-                                                                (should (jj--re-step-over (rx (group (* ,content))
-                                                                                              ,jj--delim
-                                                                                              (group (* ,content))
-                                                                                              ,jj--delim
-                                                                                              (group (* ,content))
-                                                                                              "(elided revisions)\n")))
-                                                                (list (match-string 1)
-                                                                      (match-string 2)
-                                                                      (match-string 3)))
-                      while (jj--re-step-over (rx line-start
-                                                  ;; since we started at eol
-                                                  ;; since this starts with line-start,
-                                                  ;; and matches everything up to a delimiter
-                                                  ;; it's guaranteed to skip over only one character
-                                                  ;; (the newline we started at)
-                                                  (group (* ,content))
-                                                  "\n")
-                                              nil :noerr)
-                      collect (match-string 1) into graph-tail
-                      finally return (make--jj-log-graph :first-line-prefix graph-pre
-                                                     :first-line-node graph-node
-                                                     :first-line-suffix graph-suf
-                                                     :mandatory-segments graph-tail))))
-       (defun jj--insert-log-header (header)
-         "Insert the HEADER object formatted for a jj log."
-         ,(cl-labels ((field (name-sym)
-                        `(,(intern (format "%s-%s" 'jj-log-header name-sym))
-                          header)))
-            `(progn
-               (cl-loop for (name val printer face sep) in (list ,@(cl-loop  
-                                                                    for (name . props) in fields
-                                                                    for first = t then nil
-                                                                    for sep = (if-let ((sep (plist-get props :separator)))
-                                                                                  sep
-                                                                                (cond
-                                                                                 (first "")
-                                                                                 (t " ")))
-                                                                    for face = (plist-get props :face)
-                                                                    for printer = (plist-get props :printer)
-                                                                    collect `(list ',name ,(field name) ,printer ,face ,sep)))
-                        do (when-let ((printed (s-presence
-                                                (if printer
-                                                    (funcall printer val header)
-                                                  val))))
-                             ;; combine the field property
-                             ;; (push-text-property 0 (length printed)
-                             ;;                     jj-field-path (,name) printed)
-                             (insert sep (apply #'propertize
-                                                `(,printed ;; value to propertize
-                                                  ;; properties
-                                                  jj-field ,name 
-                                                  help-echo ,(symbol-name name)
-                                                  ,@(jj--if-arg face #'identity 'face))))))
-               ;; ensure commit text ends on a newline
-               (unless (bolp)
-                 (insert "\n")))))
-       (defun jj--prefix-insert-log-graph (graph)
-         "Insert the GRAPH object as a prefix to all lines of the current buffer."
-         ;; insert the mandatory graph prefix segments
-         ;; these will add new lines if there arent enough already
-         (cl-loop initially (progn
-                              (goto-char (point-min))
-                              (insert (jj-log-graph-first-line-prefix graph)
-                                      (propertize (jj-log-graph-first-line-node graph)
-                                                  'face '(:foreground "cyan"))
-                                      (jj-log-graph-first-line-suffix graph))
-                              (forward-line 1))
-                  for (prefix . rest) on (jj-log-graph-mandatory-segments graph)
-                  do (progn
-                       (cond ((and
-                               ;; last nonempty mandatory segment
-                               (not (cdr rest))
-                               (not (string= "" (string-trim prefix)))
-                               ;; no repeatable segments
-                               (not (jj-log-graph-repeatable-segment graph)))
-                              (insert (propertize prefix 'face '(:foreground "grey"))))
-                             (t
-                              (insert prefix)))
-                       (forward-line 1)
-                       ;; while there's more mandatory graph segments, put them on new lines if you have to
-                       (unless (bolp)
-                         (insert "\n"))))
-         ;; insert the repeatable graph prefix segments
-         ;; these are added to all remaining lines, but no new lines are added
-         (cl-loop with tail = (or (jj-log-graph-repeatable-segment graph)
-                                  (car (last (jj-log-graph-mandatory-segments graph))))
-                  while (and (bolp)
-                             (not (eobp)))
-                  do (progn (insert tail)
-                            (forward-line 1))))
-       (defun insert-jj-log-entry (entry)
-         "Insert the ENTRY, formatted as a jj log entry."
-         (let ((target-buffer (current-buffer)))
-           ;; open a buffer to make a mess in
-           ;; we'll insert its contents later
-           (with-temp-buffer
-             (let ((header (jj-log-entry-header entry))
-                   (graph (jj-log-entry-graph entry)))
-               (jj--insert-log-header header)
-               (jj--prefix-insert-log-graph graph)
-               ;; add field to all the commit text (including newlines)
-               ;; pointing to the header struct
-               (add-text-properties (point-min) (point-max) `(jj-object ,header))
-               ;; insert the content of this temp buffer into the target buffer
-               ;; we can't just return it from the with-temp-buffer block,
-               ;; as by that point it's been disposed
-               (let ((content-buffer (current-buffer)))
-                 (with-current-buffer target-buffer
-                   (insert-buffer-substring content-buffer)))))))
-       (defun insert-jj-log-elided (graph)
-         "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
-         (let ((target-buffer (current-buffer)))
-           ;; open a buffer to make a mess in
-           ;; we'll insert its contents later
-           (with-temp-buffer
-             (insert (propertize "(elided revisions)\n" 'face '(:foreground "grey")))
-             ;; insert the mandatory graph segments
-             ;; these will add new lines if there arent enough already
-             (cl-loop initially (progn
-                                  (goto-char (point-min))
-                                  (insert (jj-log-graph-first-line-prefix graph)
-                                          (propertize (jj-log-graph-first-line-node graph)
-                                                      'face '(:foreground "grey"))
-                                          (jj-log-graph-first-line-suffix graph))
-                                  (forward-line 1))
-                      for prefix in (jj-log-graph-mandatory-segments graph)
-                      do (progn
-                           (insert prefix)
-                           (forward-line 1)
-                           ;; while there's more mandatory graph segments, put them on new lines if you have to
-                           (unless (bolp)
-                             (insert "\n"))))
-             ;; insert the content of this temp buffer into the target buffer
-             ;; we can't just return it from the with-temp-buffer block,
-             ;; as by that point it's been disposed
-             (let ((content-buffer (current-buffer)))
-               (with-current-buffer target-buffer
-                 (insert-buffer-substring content-buffer))))))
-       (cl-defstruct jj-log-header
-         ;; semantic fields
-         ,@(cl-loop for (name . props) in fields
-                    collect name))))
-
   (cl-defstruct jj-log-entry
     "A jj log entry with commit info and graph prefixes."
     header
@@ -1548,10 +1274,13 @@ this might not actually work. I'm big sus actually.
   (defvar jj-log-node-template
     (jj-template `(++ ,jj--delim
                       (coalesce 
+                       ;; elided 
                        (if !self "~")
+                       ;; head
                        (if current_working_copy "@")
                        (if immutable "+")
                        (if conflict "×")
+                       ;; anything else
                        "o")
                       ,jj--delim))
     "Node format to ensure log nodes can be parsed.")
@@ -1576,55 +1305,6 @@ this might not actually work. I'm big sus actually.
       (if val
           (or present-override val)
         absent-override)))
-
-  (define-jj-log-format
-   (change-id
-    :face '(:foreground "magenta")
-    :form (:chain self (format_short_change_id_with_change_offset)))
-   (author
-    :face '(:foreground "yellow")
-    :parser #'json-parse-string
-    :form (:chain self (.author) (.email) (stringify) (.escape_json)))
-   (timestamp
-    :face '(:foreground "cyan")
-    :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
-   (bookmarks
-    :face '(:foreground "magenta")
-    :parser (jj--make-list-parser " ")
-    :printer (jj--make-list-printer " ")
-    :form (:chain self (.bookmarks)))
-   (tags
-    :face '(:foreground "yellow")
-    :parser (jj--make-list-parser " ")
-    :printer (jj--make-list-printer " ")
-    :form (:chain self (.tags)))
-   (working-copies
-    :face '(:foreground "green")
-    :parser (jj--make-list-parser " ")
-    :printer (jj--make-list-printer " ")
-    :form (:chain self (.working_copies)))
-   (commit-id
-    :face '(:foreground "light blue")
-    :form (:chain self (.commit_id) (format_short_commit_id)))
-   (conflict
-    :face '(:foreground "red")
-    :parser #'s-presence
-    ;; :printer (jj--make-opt-printer "conflict")
-    :form (if (:chain self (.conflict)) "conflict"))
-   (empty
-    :face '(:foreground "green")
-    :parser #'s-presence
-    :printer (jj--make-opt-printer "(empty)")
-    :separator "\n"
-    :form (if (:chain self (.empty)) "empty"))
-   (description
-    :parser (lambda (s)
-              (s-presence (json-parse-string s)))
-    :separator "\n"
-    :printer (jj--make-opt-printer
-              nil
-              (propertize "(no description)" 'face '(:foreground "orange")))
-    :form (:chain self (.description) (.escape_json))))
 
   (ert-deftest jj-round-trip-truncate-overflow ()
     (let ((entry (with-temp-buffer
@@ -1683,7 +1363,6 @@ this might not actually work. I'm big sus actually.
   (ert-deftest jj-round-trip-simple-underflow ()
     (let ((entry (with-temp-buffer
                    (insert "@  puvwmkxr\"zoeyhewll@gmail.com\"2025-12-18 18:07:32f610054a\"\"\n│  \n│  \n│  \n")
-                   (should (string-match-p jj-log-entry-regex (buffer-string)))
                    (goto-char (point-min))
                    (read-jj-log-entry))))
       (should (equal entry
@@ -1706,7 +1385,7 @@ this might not actually work. I'm big sus actually.
                          "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n")))))
 #+end_src
 *** TODO separate graph as a first step, so log format can use generic macro
-** TODO Log-graph separation
+** TODO COMMENT Log-graph separation
 *** utils
 #+begin_src elisp
   (cl-defmacro with-stream-to-string ((stream) &body body)
@@ -1737,28 +1416,28 @@ this might not actually work. I'm big sus actually.
 #+end_src
 *** plumbing
 #+begin_src elisp
-  (defun jj-read-graph-and-entry ()
-    (prog1
-        (list (with-error-format
-                  "error reading log graph: %s"
-                (save-excursion (jj-parse-erase-graph-prefix)))
-              (with-error-format
-                  "error reading log entry: %s"
-                (read-jj-log-plain)))
-      (jj--re-step-over "\n")))
-
   (defun jj-read-elided ()
     (jj--re-step-over (rx (group "(elided revisions)")
                           "\n"))
     (match-string 1))
 
   (defun jj-read-graph-and-elided ()
-    (list (with-error-format
-              "error reading elided graph: %s"
-            (save-excursion (jj-parse-erase-elided-prefix)))
-          (jj-read-elided)))
+    (prog1 (with-error-format
+               "error reading elided graph: %s"
+             (save-excursion (jj-parse-erase-elided-prefix)))
+      (jj-read-elided)))
 
-    (defun jj-parse-erase-graph-prefix ()
+  (defun jj-read-graph-and-entry ()
+    (make-jj-log-entry :graph (with-error-format
+                                  "error reading log graph: %s"
+                                (save-excursion (jj-parse-erase-graph-prefix)))
+                       :header (with-error-format
+                                   "error reading log entry: %s"
+                                 (prog1
+                                     (read-jj-log-plain)
+                                   (jj--re-step-over "\n")))))
+
+  (defun jj-parse-erase-graph-prefix ()
     "Strip the graph prefix of the node starting at point. Return the graph as a vector of the form [[PRE NODE POST] . TAIL] where PRE, NODE, and POST are strings representing the 3 parts of the first line, and TAIL is a sequence of `jj--count-graph-lines' strings for the subsequent lines.
   If the line is an elided entry, returns a single string, which is the prefix before the "
     (let ((graph))
@@ -1770,8 +1449,7 @@ this might not actually work. I'm big sus actually.
                          (group (* (not control)))
                          (literal jj--major-delim)))
       (let-match (pre node post)
-        (push `[,pre ,node ,post]
-              graph))
+        (setq graph `(,pre ,node ,post)))
       (delete-region (match-beginning 0) (match-end 0))
       ;; skip over arbitrary content here.
       (forward-line 1)
@@ -1783,10 +1461,13 @@ this might not actually work. I'm big sus actually.
                                           "\n"))
                     (push (match-string 1) graph)
                     (delete-region (match-beginning 0) (match-end 0))))
-      (apply #'vector (nreverse graph))))
+      (apply #'make-jj-log-graph (nreverse graph))))
 
   (defun jj-parse-erase-elided-prefix ()
-    (let ((graph))
+    (let ((graph-pre)
+          (graph-node)
+          (graph-suf)
+          (graph-tail))
       (jj--re-step-over (rx line-start
                             (group (* (not control)))
                             (literal jj--delim)
@@ -1794,19 +1475,23 @@ this might not actually work. I'm big sus actually.
                             (literal jj--delim)
                             (group (* (not control)))
                             "(elided revisions)"
-                            line-end
                             "\n"))
       (let-match (pre node post)
-        (push `[,pre ,node ,post] graph))
+        (setq graph-pre pre
+              graph-node node
+              graph-suf suf))
       (delete-region (match-beginning 0) (match-end 3))
       (cl-loop while (looking-at (rx line-start
                                      (* (not control))
                                      line-end
                                      "\n"))
                do (progn
-                    (push (match-string 0) graph)
+                    (push (match-string 0) graph-tail)
                     (delete-region (match-beginning 0) (match-end 0))))
-      (apply #'vector (nreverse graph))))
+      (make--jj-log-graph :first-line-prefix graph-pre
+                          :first-line-node graph-node
+                          :first-line-suffix graph-suf
+                          :mandatory-segments graph-tail)))
 #+end_src
 *** formats
 #+begin_src elisp
@@ -1982,6 +1667,8 @@ this might not actually work. I'm big sus actually.
                       ;; there's already one with the header line, so count 1 fewer
                       ,@(cl-loop for n upfrom 1 below tail-lines
                                  append `("\n" ,edge-delim)))))
+
+  (defvar jj-parseable-template (jj-augment-template-for-graph jj--major-delim jj--count-graph-lines (jj-log-plain-template 'self)))
 #+end_src
 *** tests
 #+begin_src elisp
@@ -2037,24 +1724,22 @@ this might not actually work. I'm big sus actually.
   "))
       (should (equal (cl-loop while (not (eobp))
                               for n = (let ((errors))
-                                        (or (push-errors errors (cons :entry (with-error-format
+                                        (or (push-errors errors (with-error-format
                                                                                  "error reading log node: %s"
-                                                                               (jj-read-graph-and-entry))))
-                                            (push-errors errors (cons :elided (with-error-format
+                                                                               (jj-read-graph-and-entry)))
+                                            (push-errors errors (with-error-format
                                                                                   "error reading elided revisions: %s"
-                                                                                (jj-read-graph-and-elided))))
+                                                                                (jj-read-graph-and-elided)))
                                             (error "Line is not a recognised part of a jj log. %s: %s"
                                                    (nreverse errors)
                                                    (buffer-substring-no-properties (line-beginning-position) (line-end-position)))))
                               while n
                               collect n)
-                     '((:entry
+                     '(#s(jj-log-entry
+                        #s(jj-log-plain "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil)
                         [["" "@" "    "]
-                         "├─╮  " "│ │  " "│ │  "]
-                        #s(jj-log-plain "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil))
-                       (:entry
-                        [["│ " "o" "  "]
-                         "│ │  " "│ │  " "│ │  "]
+                         "├─╮  " "│ │  " "│ │  "])
+                       #s(jj-log-entry
                         #s(jj-log-plain "tqqxztyu" "zoeyhewll@gmail.com" "2025-12-24 18:48:22"
                                         ("main??")
                                         nil nil "1ae95f23" nil nil "long
@@ -2063,58 +1748,58 @@ this might not actually work. I'm big sus actually.
   here
   and
   here
-  "))
-                       (:entry
-                        [["" "×" " │  "]
-                         "│ │  " "│ │  " "│ │  "]
+  ")
+                        [["│ " "o" "  "]
+                         "│ │  " "│ │  " "│ │  "])
+                       #s(jj-log-entry
                         #s(jj-log-plain "zsrpuxsq/0" "zoeyhewll@gmail.com" "2026-01-11 18:58:04" nil nil nil "d4b4e2fc" "conflict" nil "diverge 2
-  "))
-                       (:entry
-                        [["│ │ " "o" "  "]
-                         "├───╯  " "│ │    " "│ │    "]
+  ")
+                        [["" "×" " │  "]
+                         "│ │  " "│ │  " "│ │  "])
+                       #s(jj-log-entry
                         #s(jj-log-plain "zsrpuxsq/9" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "c33a9601" nil nil "diverge 1
-  "))
-                       (:entry
-                        [["" "×" " │    "]
-                         "├───╮  " "│ │ │  " "│ │ │  "]
-                        #s(jj-log-plain "znpwrszt" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "a2fd03ad" "conflict" "empty" nil))
-                       (:entry
+  ")
                         [["│ │ " "o" "  "]
-                         "│ │ │  " "│ │ │  " "│ │ │  "]
+                         "├───╯  " "│ │    " "│ │    "])
+                       #s(jj-log-entry
+                        #s(jj-log-plain "znpwrszt" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "a2fd03ad" "conflict" "empty" nil)
+                        [["" "×" " │    "]
+                         "├───╮  " "│ │ │  " "│ │ │  "])
+                       #s(jj-log-entry
                         #s(jj-log-plain "uwoorszk" "zoeyhewll@gmail.com" "2025-12-29 22:14:35" nil nil nil "3c9908cd" nil nil "foo
-  "))
-                       (:entry
-                        [["" "o" " │ │  "]
-                         "│ │ │  " "│ │ │  " "│ │ │  "]
+  ")
+                        [["│ │ " "o" "  "]
+                         "│ │ │  " "│ │ │  " "│ │ │  "])
+                       #s(jj-log-entry
                         #s(jj-log-plain "nqzyvomm" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "0c0b58a0" nil nil "foo
-  "))
-                       (:entry
+  ")
                         [["" "o" " │ │  "]
-                         "├───╯  " "│ │    " "│ │    "]
+                         "│ │ │  " "│ │ │  " "│ │ │  "])
+                       #s(jj-log-entry
                         #s(jj-log-plain "oqnyxnnn" "zoeyhewll@gmail.com" "2025-12-26 23:28:34" nil nil nil "52c23b7f" nil "empty" "foo sample commit to edit
-  "))
-                       (:entry
-                        [["" "+" " │  "]
-                         "│ │  " "│ │  " "│ │  "]
+  ")
+                        [["" "o" " │ │  "]
+                         "├───╯  " "│ │    " "│ │    "])
+                       #s(jj-log-entry
                         #s(jj-log-plain "wuvynqqs" "zoeyhewll@gmail.com" "2025-03-26 14:08:11"
                                         ("main??" "main@origin")
                                         nil nil "ba86ecc3" nil nil "add basic restart-case and handler-case
-  "))
-                       (:elided
-                        [["" "!" " │  "]
+  ")
+                        [["" "+" " │  "]
+                         "│ │  " "│ │  " "│ │  "])
+                       [["" "!" " │  "]
                          "├─╯
   "]
-                        "(elided revisions)")
-                       (:entry
-                        [["│ " "o" "  "]
-                         "├─╯  " "│    " "│    "]
+                       #s(jj-log-entry
                         #s(jj-log-plain "zwxrqwwv" "zoeyhewll@gmail.com" "2025-12-21 22:36:01"
                                         ("foo")
-                                        nil nil "087ec1fb" nil "empty" nil))
-                       (:entry
+                                        nil nil "087ec1fb" nil "empty" nil)
+                        [["│ " "o" "  "]
+                         "├─╯  " "│    " "│    "])
+                       #s(jj-log-entry
+                        #s(jj-log-plain "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)
                         [["" "+" "  "]
-                         "   " "   " "   "]
-                        #s(jj-log-plain "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)))))))
+                         "   " "   " "   "]))))))
 
   (ert-deftest jj-test-plain-log-parsing ()
     (with-temp-buffer
@@ -3254,8 +2939,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                           (lambda (exit-status event)
                             (if (eq exit-status 0)
                                 (funcall resolve proc)
-                              (funcall reject (cons proc event))))))
-           )))))
+                              (funcall reject (cons proc event)))))))))))
 #+end_src
 **** TODO delete log indirect buffer after done
 tired of all these lingering jj-log-section buffers.
