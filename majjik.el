@@ -1779,11 +1779,11 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                     when (with-error-context (lambda (msg)
                                                (format "failed to read field %s: %s" field-name msg))
                            (jj--re-step-over field-rx))
-                    nconc `(,key ,(string-trim
-                                   (if parser
+                    for parsed = (if parser
                                        (save-match-data
                                          (funcall parser (match-string 1)))
-                                     (match-string 1))))
+                                     (match-string 1))
+                    nconc `(,key ,parsed)
                     into struct-props
                     finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props))))
      (defun ,(intern (format "insert-jj-%s" type-name)) (entry)
