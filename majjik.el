@@ -2083,42 +2083,6 @@ log-plainzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
 "))))
 ;; tests:1 ends here
 
-;; scratch
-
-;; [[file:majjik.org::*scratch][scratch:1]]
-(let* ((buf (current-buffer))
-       (temp (generate-new-buffer "*jj-log-temp*"))
-       (err (generate-new-buffer "*jj-log-stderr*"))
-       (filter (cl-labels ((read-next ()
-                             (unless (condition-case e
-                                         (dbg (jj-read-graph-and-maybe-elided))
-                                       (error (dbg e)
-                                              (dbg (point))
-                                              nil))
-                               ;; (dbg (buffer-substring (line-beginning-position) (line-end-position)))
-                               ))
-                           (print-entries (news)
-                             (with-current-buffer buf
-                               (let ((inhibit-read-only t))
-                                 ;; (mapc #'insert-jj-log-maybe-elided news)
-                                 (cl-loop for new in news
-                                          do (insert-jj-log-maybe-elided (dbg new)))))))
-                 (make-jj-generic-buffered-filter temp #'read-next #'print-entries))))
-  (make-process
-   :name "jj-log"
-   :buffer buf
-   :stderr err
-   :filter filter
-   :noquery t
-   :command `("jj" "log"
-              "-T" ,jj-parseable-template
-              ,@jj-global-default-args
-              ,@(and jj-do-debug jj-global-debug-args)
-              ,@jj-parsing-default-args
-              "--config" ,(format "templates.log_node='%s'"
-                                  (jj--toml-quote-string jj-log-node-template)))))
-;; scratch:1 ends here
-
 ;; Generic format macro
 
 ;; [[file:majjik.org::*Generic format macro][Generic format macro:1]]
