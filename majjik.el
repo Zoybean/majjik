@@ -1461,7 +1461,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                      :header (with-error-format
                                  "error reading log entry: %s"
                                (prog1
-                                   (read-jj-log-plain)
+                                   (read-jj-log-header)
                                  (jj--re-step-over "\n")))))
 
 (defun jj-parse-erase-graph-prefix ()
@@ -1583,7 +1583,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
     ((pred jj-log-entry-p)
      (let ((dest (current-buffer)))
        (with-temp-buffer
-         (save-excursion (insert-jj-log-plain (jj-log-entry-header entry)))
+         (save-excursion (insert-jj-log-header (jj-log-entry-header entry)))
          (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
          (let ((source (current-buffer)))
            (with-current-buffer dest
@@ -1593,7 +1593,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
 ;; formats
 
 ;; [[file:majjik.org::*formats][formats:1]]
-(defmacro define-jj-plain-format (type-name &rest fields)
+(defmacro define-jj-format (type-name &rest fields)
   "Define the format to be used for parsing and formatting various jj output.
 Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
 - `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
@@ -1605,7 +1605,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   `(progn
      (require 'json)
      (define-short-documentation-group ,(intern (format "jj-%s" type-name))
-       (define-jj-plain-format
+       (define-jj-format
            :no-manual t)
        (,(intern (format "read-jj-%s" type-name))
         :no-manual t)
@@ -1708,7 +1708,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
        ,@(cl-loop for (field-name . props) in fields
                   collect field-name))))
 
-(define-jj-plain-format log-plain
+(define-jj-format log-header
   (change-id
    :face '(:foreground "magenta")
    :form (:chain self (format_short_change_id_with_change_offset)))
@@ -1766,58 +1766,58 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                     ,@(cl-loop for n upfrom 1 below tail-lines
                                append `("\n" ,edge-delim)))))
 
-(defvar jj-parseable-template (jj-augment-template-for-graph jj--major-delim jj--count-graph-lines (jj-log-plain-template 'self)))
+(defvar jj-parseable-template (jj-augment-template-for-graph jj--major-delim jj--count-graph-lines (jj-log-header-template 'self)))
 ;; formats:1 ends here
 
 ;; tests
 
 ;; [[file:majjik.org::*tests][tests:1]]
-(ert-deftest jj-test-plain-log-full-parsing ()
+(ert-deftest jj-test-header-log-full-parsing ()
   (with-temp-buffer
     (save-excursion
-      (insert "@    log-plainuorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
+      (insert "@    log-headeruorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
 ├─╮  
 │ │  
 │ │  
-│ o  log-plaintqqxztyu\"zoeyhewll@gmail.com\"2025-12-24 18:48:22main??1ae95f23\"long\\nmultiline\\nmessage\\nhere\\nand\\nhere\\n\"
+│ o  log-headertqqxztyu\"zoeyhewll@gmail.com\"2025-12-24 18:48:22main??1ae95f23\"long\\nmultiline\\nmessage\\nhere\\nand\\nhere\\n\"
 │ │  
 │ │  
 │ │  
-× │  log-plainzsrpuxsq/0\"zoeyhewll@gmail.com\"2026-01-11 18:58:04d4b4e2fcconflict\"diverge 2\\n\"
+× │  log-headerzsrpuxsq/0\"zoeyhewll@gmail.com\"2026-01-11 18:58:04d4b4e2fcconflict\"diverge 2\\n\"
 │ │  
 │ │  
 │ │  
-│ │ o  log-plainzsrpuxsq/9\"zoeyhewll@gmail.com\"2025-12-29 22:14:42c33a9601\"diverge 1\\n\"
+│ │ o  log-headerzsrpuxsq/9\"zoeyhewll@gmail.com\"2025-12-29 22:14:42c33a9601\"diverge 1\\n\"
 ├───╯  
 │ │    
 │ │    
-× │    log-plainznpwrszt\"zoeyhewll@gmail.com\"2025-12-29 22:14:42a2fd03adconflictempty\"\"
+× │    log-headerznpwrszt\"zoeyhewll@gmail.com\"2025-12-29 22:14:42a2fd03adconflictempty\"\"
 ├───╮  
 │ │ │  
 │ │ │  
-│ │ o  log-plainuwoorszk\"zoeyhewll@gmail.com\"2025-12-29 22:14:353c9908cd\"foo\\n\"
+│ │ o  log-headeruwoorszk\"zoeyhewll@gmail.com\"2025-12-29 22:14:353c9908cd\"foo\\n\"
 │ │ │  
 │ │ │  
 │ │ │  
-o │ │  log-plainnqzyvomm\"zoeyhewll@gmail.com\"2025-12-29 22:14:420c0b58a0\"foo\\n\"
+o │ │  log-headernqzyvomm\"zoeyhewll@gmail.com\"2025-12-29 22:14:420c0b58a0\"foo\\n\"
 │ │ │  
 │ │ │  
 │ │ │  
-o │ │  log-plainoqnyxnnn\"zoeyhewll@gmail.com\"2025-12-26 23:28:3452c23b7fempty\"foo sample commit to edit\\n\"
+o │ │  log-headeroqnyxnnn\"zoeyhewll@gmail.com\"2025-12-26 23:28:3452c23b7fempty\"foo sample commit to edit\\n\"
 ├───╯  
 │ │    
 │ │    
-+ │  log-plainwuvynqqs\"zoeyhewll@gmail.com\"2025-03-26 14:08:11main?? main@originba86ecc3\"add basic restart-case and handler-case\\n\"
++ │  log-headerwuvynqqs\"zoeyhewll@gmail.com\"2025-03-26 14:08:11main?? main@originba86ecc3\"add basic restart-case and handler-case\\n\"
 │ │  
 │ │  
 │ │  
 ! │  (elided revisions)
 ├─╯
-│ o  log-plainzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
+│ o  log-headerzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
 ├─╯  
 │    
 │    
-+  log-plainzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
++  log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    
    
    
@@ -1836,11 +1836,11 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                             while n
                             collect n)
                    '((:entry #s(jj-log-entry
-                      #s(jj-log-plain "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil)
+                      #s(jj-log-header "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil)
                       #s(jj-log-graph "" "@" "    "
                        ("├─╮  ") "│ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "tqqxztyu" "zoeyhewll@gmail.com" "2025-12-24 18:48:22"
+                      #s(jj-log-header "tqqxztyu" "zoeyhewll@gmail.com" "2025-12-24 18:48:22"
                                       ("main??")
                                       nil nil "1ae95f23" nil nil "long
 multiline
@@ -1852,36 +1852,36 @@ here
                       #s(jj-log-graph "│ " "o" "  "
                        () "│ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "zsrpuxsq/0" "zoeyhewll@gmail.com" "2026-01-11 18:58:04" nil nil nil "d4b4e2fc" "conflict" nil "diverge 2
+                      #s(jj-log-header "zsrpuxsq/0" "zoeyhewll@gmail.com" "2026-01-11 18:58:04" nil nil nil "d4b4e2fc" "conflict" nil "diverge 2
 ")
                       #s(jj-log-graph "" "×" " │  "
                        () "│ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "zsrpuxsq/9" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "c33a9601" nil nil "diverge 1
+                      #s(jj-log-header "zsrpuxsq/9" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "c33a9601" nil nil "diverge 1
 ")
                       #s(jj-log-graph "│ │ " "o" "  "
                        ("├───╯  ") "│ │    ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "znpwrszt" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "a2fd03ad" "conflict" "empty" nil)
+                      #s(jj-log-header "znpwrszt" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "a2fd03ad" "conflict" "empty" nil)
                       #s(jj-log-graph "" "×" " │    "
                        ("├───╮  ") "│ │ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "uwoorszk" "zoeyhewll@gmail.com" "2025-12-29 22:14:35" nil nil nil "3c9908cd" nil nil "foo
+                      #s(jj-log-header "uwoorszk" "zoeyhewll@gmail.com" "2025-12-29 22:14:35" nil nil nil "3c9908cd" nil nil "foo
 ")
                       #s(jj-log-graph "│ │ " "o" "  "
                        () "│ │ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "nqzyvomm" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "0c0b58a0" nil nil "foo
+                      #s(jj-log-header "nqzyvomm" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "0c0b58a0" nil nil "foo
 ")
                       #s(jj-log-graph "" "o" " │ │  "
                        () "│ │ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "oqnyxnnn" "zoeyhewll@gmail.com" "2025-12-26 23:28:34" nil nil nil "52c23b7f" nil "empty" "foo sample commit to edit
+                      #s(jj-log-header "oqnyxnnn" "zoeyhewll@gmail.com" "2025-12-26 23:28:34" nil nil nil "52c23b7f" nil "empty" "foo sample commit to edit
 ")
                       #s(jj-log-graph "" "o" " │ │  "
                        ("├───╯  ") "│ │    ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "wuvynqqs" "zoeyhewll@gmail.com" "2025-03-26 14:08:11"
+                      #s(jj-log-header "wuvynqqs" "zoeyhewll@gmail.com" "2025-03-26 14:08:11"
                                       ("main??" "main@origin")
                                       nil nil "ba86ecc3" nil nil "add basic restart-case and handler-case
 ")
@@ -1890,36 +1890,36 @@ here
                      (:elided #s(jj-log-graph "" "!" " │  "
                        ("├─╯") nil))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "zwxrqwwv" "zoeyhewll@gmail.com" "2025-12-21 22:36:01"
+                      #s(jj-log-header "zwxrqwwv" "zoeyhewll@gmail.com" "2025-12-21 22:36:01"
                                       ("foo")
                                       nil nil "087ec1fb" nil "empty" nil)
                       #s(jj-log-graph "│ " "o" "  "
                        ("├─╯  ") "│    ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-plain "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)
+                      #s(jj-log-header "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)
                       #s(jj-log-graph "" "+" "  "
                        () "   "))))))))
 
-(ert-deftest jj-test-plain-log-parsing ()
+(ert-deftest jj-test-header-log-parsing ()
   (with-temp-buffer
     (save-excursion
-      (insert "log-plainuorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
-log-plaintqqxztyu\"zoeyhewll@gmail.com\"2025-12-24 18:48:22main??1ae95f23\"long\\nmultiline\\nmessage\\nhere\\nand\\nhere\\n\"
-log-plainzsrpuxsq/0\"zoeyhewll@gmail.com\"2026-01-11 18:58:04d4b4e2fcconflict\"diverge 2\\n\"
-log-plainzsrpuxsq/9\"zoeyhewll@gmail.com\"2025-12-29 22:14:42c33a9601\"diverge 1\\n\"
-log-plainznpwrszt\"zoeyhewll@gmail.com\"2025-12-29 22:14:42a2fd03adconflictempty\"\"
-log-plainuwoorszk\"zoeyhewll@gmail.com\"2025-12-29 22:14:353c9908cd\"foo\\n\"
-log-plainnqzyvomm\"zoeyhewll@gmail.com\"2025-12-29 22:14:420c0b58a0\"foo\\n\"
-log-plainoqnyxnnn\"zoeyhewll@gmail.com\"2025-12-26 23:28:3452c23b7fempty\"foo sample commit to edit\\n\"
-log-plainwuvynqqs\"zoeyhewll@gmail.com\"2025-03-26 14:08:11main?? main@originba86ecc3\"add basic restart-case and handler-case\\n\"
+      (insert "log-headeruorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
+log-headertqqxztyu\"zoeyhewll@gmail.com\"2025-12-24 18:48:22main??1ae95f23\"long\\nmultiline\\nmessage\\nhere\\nand\\nhere\\n\"
+log-headerzsrpuxsq/0\"zoeyhewll@gmail.com\"2026-01-11 18:58:04d4b4e2fcconflict\"diverge 2\\n\"
+log-headerzsrpuxsq/9\"zoeyhewll@gmail.com\"2025-12-29 22:14:42c33a9601\"diverge 1\\n\"
+log-headerznpwrszt\"zoeyhewll@gmail.com\"2025-12-29 22:14:42a2fd03adconflictempty\"\"
+log-headeruwoorszk\"zoeyhewll@gmail.com\"2025-12-29 22:14:353c9908cd\"foo\\n\"
+log-headernqzyvomm\"zoeyhewll@gmail.com\"2025-12-29 22:14:420c0b58a0\"foo\\n\"
+log-headeroqnyxnnn\"zoeyhewll@gmail.com\"2025-12-26 23:28:3452c23b7fempty\"foo sample commit to edit\\n\"
+log-headerwuvynqqs\"zoeyhewll@gmail.com\"2025-03-26 14:08:11main?? main@originba86ecc3\"add basic restart-case and handler-case\\n\"
 (elided revisions)
-log-plainzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
-log-plainzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
+log-headerzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
+log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
 "))
     (should (equal (cl-loop while (not (eobp))
                             for n = (let ((errors))
                                       (or (push-errors errors (list :entry (prog1
-                                                                               (read-jj-log-plain)
+                                                                               (read-jj-log-header)
                                                                              (jj--re-step-over "\n"))))
                                           (push-errors errors (list :elided (jj-read-elided)))
                                           (error "Line is not a recognised part of a jj log. %s: %s"
@@ -1928,9 +1928,9 @@ log-plainzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
                             while n
                             collect n)
                    '((:entry
-                      #s(jj-log-plain "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil))
+                      #s(jj-log-header "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil))
                      (:entry
-                      #s(jj-log-plain "tqqxztyu" "zoeyhewll@gmail.com" "2025-12-24 18:48:22"
+                      #s(jj-log-header "tqqxztyu" "zoeyhewll@gmail.com" "2025-12-24 18:48:22"
                                       ("main??")
                                       nil nil "1ae95f23" nil nil "long
 multiline
@@ -1940,82 +1940,82 @@ and
 here
 "))
                      (:entry
-                      #s(jj-log-plain "zsrpuxsq/0" "zoeyhewll@gmail.com" "2026-01-11 18:58:04" nil nil nil "d4b4e2fc" "conflict" nil "diverge 2
+                      #s(jj-log-header "zsrpuxsq/0" "zoeyhewll@gmail.com" "2026-01-11 18:58:04" nil nil nil "d4b4e2fc" "conflict" nil "diverge 2
 "))
                      (:entry
-                      #s(jj-log-plain "zsrpuxsq/9" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "c33a9601" nil nil "diverge 1
+                      #s(jj-log-header "zsrpuxsq/9" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "c33a9601" nil nil "diverge 1
 "))
                      (:entry
-                      #s(jj-log-plain "znpwrszt" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "a2fd03ad" "conflict" "empty" nil))
+                      #s(jj-log-header "znpwrszt" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "a2fd03ad" "conflict" "empty" nil))
                      (:entry
-                      #s(jj-log-plain "uwoorszk" "zoeyhewll@gmail.com" "2025-12-29 22:14:35" nil nil nil "3c9908cd" nil nil "foo
+                      #s(jj-log-header "uwoorszk" "zoeyhewll@gmail.com" "2025-12-29 22:14:35" nil nil nil "3c9908cd" nil nil "foo
 "))
                      (:entry
-                      #s(jj-log-plain "nqzyvomm" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "0c0b58a0" nil nil "foo
+                      #s(jj-log-header "nqzyvomm" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "0c0b58a0" nil nil "foo
 "))
                      (:entry
-                      #s(jj-log-plain "oqnyxnnn" "zoeyhewll@gmail.com" "2025-12-26 23:28:34" nil nil nil "52c23b7f" nil "empty" "foo sample commit to edit
+                      #s(jj-log-header "oqnyxnnn" "zoeyhewll@gmail.com" "2025-12-26 23:28:34" nil nil nil "52c23b7f" nil "empty" "foo sample commit to edit
 "))
                      (:entry
-                      #s(jj-log-plain "wuvynqqs" "zoeyhewll@gmail.com" "2025-03-26 14:08:11"
+                      #s(jj-log-header "wuvynqqs" "zoeyhewll@gmail.com" "2025-03-26 14:08:11"
                                       ("main??" "main@origin")
                                       nil nil "ba86ecc3" nil nil "add basic restart-case and handler-case
 "))
                      (:elided
                       "(elided revisions)")
                      (:entry
-                      #s(jj-log-plain "zwxrqwwv" "zoeyhewll@gmail.com" "2025-12-21 22:36:01"
+                      #s(jj-log-header "zwxrqwwv" "zoeyhewll@gmail.com" "2025-12-21 22:36:01"
                                       ("foo")
                                       nil nil "087ec1fb" nil "empty" nil))
                      (:entry
-                      #s(jj-log-plain "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)))))))
+                      #s(jj-log-header "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)))))))
 
-(ert-deftest jj-test-plain-log-graph-split ()
+(ert-deftest jj-test-header-log-graph-split ()
   (with-temp-buffer
     (save-excursion
-      (insert "@    log-plainuorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
+      (insert "@    log-headeruorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
 ├─╮  
 │ │  
 │ │  
-│ o  log-plaintqqxztyu\"zoeyhewll@gmail.com\"2025-12-24 18:48:22main??1ae95f23\"long\\nmultiline\\nmessage\\nhere\\nand\\nhere\\n\"
+│ o  log-headertqqxztyu\"zoeyhewll@gmail.com\"2025-12-24 18:48:22main??1ae95f23\"long\\nmultiline\\nmessage\\nhere\\nand\\nhere\\n\"
 │ │  
 │ │  
 │ │  
-× │  log-plainzsrpuxsq/0\"zoeyhewll@gmail.com\"2026-01-11 18:58:04d4b4e2fcconflict\"diverge 2\\n\"
+× │  log-headerzsrpuxsq/0\"zoeyhewll@gmail.com\"2026-01-11 18:58:04d4b4e2fcconflict\"diverge 2\\n\"
 │ │  
 │ │  
 │ │  
-│ │ o  log-plainzsrpuxsq/9\"zoeyhewll@gmail.com\"2025-12-29 22:14:42c33a9601\"diverge 1\\n\"
+│ │ o  log-headerzsrpuxsq/9\"zoeyhewll@gmail.com\"2025-12-29 22:14:42c33a9601\"diverge 1\\n\"
 ├───╯  
 │ │    
 │ │    
-× │    log-plainznpwrszt\"zoeyhewll@gmail.com\"2025-12-29 22:14:42a2fd03adconflictempty\"\"
+× │    log-headerznpwrszt\"zoeyhewll@gmail.com\"2025-12-29 22:14:42a2fd03adconflictempty\"\"
 ├───╮  
 │ │ │  
 │ │ │  
-│ │ o  log-plainuwoorszk\"zoeyhewll@gmail.com\"2025-12-29 22:14:353c9908cd\"foo\\n\"
+│ │ o  log-headeruwoorszk\"zoeyhewll@gmail.com\"2025-12-29 22:14:353c9908cd\"foo\\n\"
 │ │ │  
 │ │ │  
 │ │ │  
-o │ │  log-plainnqzyvomm\"zoeyhewll@gmail.com\"2025-12-29 22:14:420c0b58a0\"foo\\n\"
+o │ │  log-headernqzyvomm\"zoeyhewll@gmail.com\"2025-12-29 22:14:420c0b58a0\"foo\\n\"
 │ │ │  
 │ │ │  
 │ │ │  
-o │ │  log-plainoqnyxnnn\"zoeyhewll@gmail.com\"2025-12-26 23:28:3452c23b7fempty\"foo sample commit to edit\\n\"
+o │ │  log-headeroqnyxnnn\"zoeyhewll@gmail.com\"2025-12-26 23:28:3452c23b7fempty\"foo sample commit to edit\\n\"
 ├───╯  
 │ │    
 │ │    
-+ │  log-plainwuvynqqs\"zoeyhewll@gmail.com\"2025-03-26 14:08:11main?? main@originba86ecc3\"add basic restart-case and handler-case\\n\"
++ │  log-headerwuvynqqs\"zoeyhewll@gmail.com\"2025-03-26 14:08:11main?? main@originba86ecc3\"add basic restart-case and handler-case\\n\"
 │ │  
 │ │  
 │ │  
 ! │  (elided revisions)
 ├─╯
-│ o  log-plainzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
+│ o  log-headerzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
 ├─╯  
 │    
 │    
-+  log-plainzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
++  log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    
    
    
@@ -2071,144 +2071,31 @@ here
                        () "   ")))))
     (should (string=
              (buffer-string)
-             "log-plainuorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
-log-plaintqqxztyu\"zoeyhewll@gmail.com\"2025-12-24 18:48:22main??1ae95f23\"long\\nmultiline\\nmessage\\nhere\\nand\\nhere\\n\"
-log-plainzsrpuxsq/0\"zoeyhewll@gmail.com\"2026-01-11 18:58:04d4b4e2fcconflict\"diverge 2\\n\"
-log-plainzsrpuxsq/9\"zoeyhewll@gmail.com\"2025-12-29 22:14:42c33a9601\"diverge 1\\n\"
-log-plainznpwrszt\"zoeyhewll@gmail.com\"2025-12-29 22:14:42a2fd03adconflictempty\"\"
-log-plainuwoorszk\"zoeyhewll@gmail.com\"2025-12-29 22:14:353c9908cd\"foo\\n\"
-log-plainnqzyvomm\"zoeyhewll@gmail.com\"2025-12-29 22:14:420c0b58a0\"foo\\n\"
-log-plainoqnyxnnn\"zoeyhewll@gmail.com\"2025-12-26 23:28:3452c23b7fempty\"foo sample commit to edit\\n\"
-log-plainwuvynqqs\"zoeyhewll@gmail.com\"2025-03-26 14:08:11main?? main@originba86ecc3\"add basic restart-case and handler-case\\n\"
+             "log-headeruorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
+log-headertqqxztyu\"zoeyhewll@gmail.com\"2025-12-24 18:48:22main??1ae95f23\"long\\nmultiline\\nmessage\\nhere\\nand\\nhere\\n\"
+log-headerzsrpuxsq/0\"zoeyhewll@gmail.com\"2026-01-11 18:58:04d4b4e2fcconflict\"diverge 2\\n\"
+log-headerzsrpuxsq/9\"zoeyhewll@gmail.com\"2025-12-29 22:14:42c33a9601\"diverge 1\\n\"
+log-headerznpwrszt\"zoeyhewll@gmail.com\"2025-12-29 22:14:42a2fd03adconflictempty\"\"
+log-headeruwoorszk\"zoeyhewll@gmail.com\"2025-12-29 22:14:353c9908cd\"foo\\n\"
+log-headernqzyvomm\"zoeyhewll@gmail.com\"2025-12-29 22:14:420c0b58a0\"foo\\n\"
+log-headeroqnyxnnn\"zoeyhewll@gmail.com\"2025-12-26 23:28:3452c23b7fempty\"foo sample commit to edit\\n\"
+log-headerwuvynqqs\"zoeyhewll@gmail.com\"2025-03-26 14:08:11main?? main@originba86ecc3\"add basic restart-case and handler-case\\n\"
 (elided revisions)
-log-plainzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
-log-plainzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
+log-headerzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
+log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
 "))))
 ;; tests:1 ends here
 
 ;; Generic format macro
 
 ;; [[file:majjik.org::*Generic format macro][Generic format macro:1]]
-(defmacro define-jj-plain-format (type-name &rest fields)
-  "Define the format to be used for parsing and formatting various jj output.
-Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
-- `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
-- `:parser' specifies how to read the data in to lisp.
-- `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
-- `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
-- `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
-  (declare (indent 1))
-  `(progn
-     (require 'json)
-     (define-short-documentation-group ,(intern (format "jj-%s" type-name))
-       (define-jj-plain-format
-           :no-manual t)
-       (,(intern (format "read-jj-%s" type-name))
-        :no-manual t)
-       (,(intern (format "insert-jj-%s" type-name))
-        :no-manual t)
-       (,(intern (format "jj-%s-template" type-name))
-        :no-manual t)
-       (,(intern (format "make-jj-%s" type-name))
-        :args (&key ,@(mapcar #'car fields))
-        :no-manual t))
-     ;; (defvar ,(intern (format "jj-%s-regex" type-name))
-     ;;   ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-     ;;      `(rx line-start
-     ;;           (seq
-     ;;            ,(format "%s" type-name)
-     ;;            ;; struct delimiter
-     ;;            ,jj--major-delim
-     ;;            ;; struct elements
-     ;;            (* ,content)
-     ;;            (= ,(1- (length fields))
-     ;;               ,jj--delim
-     ;;               (* ,content))
-     ;;            "\n")))
-     ;;   ,(format "Regex to match a full `jj-%1$s' entry. This *should* match exactly the same content that `read-jj-%1$s' will parse." type-name))
-     (defun ,(intern (format "jj-%s-template" type-name)) (self)
-       ,(format "Get a commit template to produce entries parseable by `read-jj-%s'. SELF is the symbol to use for the self-type; usually this will just be `self', but if using the template in a lambda you may want a different type-name." type-name)
-       (jj-template (cl-subst self 'self
-                              '(++ ,(format "%S" type-name)
-                                   ,jj--major-delim
-                                   (join ,jj--delim
-                                         ,@(cl-loop for (field-name . props) in fields
-                                                    for form = (plist-get props :form)
-                                                    collect form))
-                                   ))))
-     (defun ,(intern (format "read-jj-%s" type-name)) ()
-       ,(format "With point at the beginning of a `jj-%1$s' entry, parse the entry into a `jj-%1$s' struct." type-name)
-       ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-          `(cl-loop initially (with-error-context (lambda (msg)
-                                                    (format "failed to read struct label %s: %s" ',type-name msg))
-                                (jj--re-step-over (rx ,(format "%s" type-name) ,jj--major-delim)))
-                    for (field-name key parser) in (list ,@(cl-loop for (field-name . props) in fields
-                                                           for key = (intern (format ":%s" field-name))
-                                                           for parser = (plist-get props :parser)
-                                                           collect `(list ',field-name ,key ,parser)))
-                    ;; no delimiter for first field
-                    for first = t then nil
-                    for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
-                    when (with-error-context (lambda (msg)
-                                               (format "failed to read field %s: %s" field-name msg))
-                           (jj--re-step-over field-rx))
-                    for parsed = (if parser
-                                       (save-match-data
-                                         (funcall parser (match-string 1)))
-                                     (match-string 1))
-                    nconc `(,key ,parsed)
-                    into struct-props
-                    finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props))))
-     (defun ,(intern (format "insert-jj-%s" type-name)) (entry)
-       ,(format "Insert the ENTRY, formatted as a `jj-%s' entry." type-name)
-       ,(cl-labels ((field (name-sym)
-                      `(,(intern (format "jj-%s-%s" type-name name-sym))
-                        entry)))
-          `(let ((target-buffer (current-buffer)))
-             ;; open a buffer to make a mess in
-             ;; we'll insert its contents later
-             (with-temp-buffer
-               (cl-loop for (field-name val printer face sep) in (list ,@(cl-loop  
-                                                                          for (field-name . props) in fields
-                                                                          for first = t then nil
-                                                                          for sep = (if-let ((sep (plist-get props :separator)))
-                                                                                        sep
-                                                                                      (cond
-                                                                                       (first "")
-                                                                                       (t " ")))
-                                                                          for face = (plist-get props :face)
-                                                                          for printer = (plist-get props :printer)
-                                                                          collect `(list ',field-name ,(field field-name) ,printer ,face ,sep)))
-                        do (when-let ((printed (s-presence
-                                                (if printer
-                                                    (funcall printer val entry)
-                                                  val))))
-                             (insert sep (apply #'propertize
-                                                `(,printed
-                                                  help-echo ,(symbol-name field-name)
-                                                  ,@(jj--if-arg face #'identity 'face))))))
-               ;; ensure commit text ends on a newline
-               (unless (bolp)
-                 (insert "\n"))
-               ;; add field to all the commit text (including newlines)
-               ;; pointing to the entry struct
-               (add-text-properties (point-min) (point-max) `(jj-object ,entry))
-               ;; insert the content of this temp buffer into the target buffer
-               ;; we can't just return it from the with-temp-buffer block,
-               ;; as by that point it's been disposed
-               (let ((content-buffer (current-buffer)))
-                 (with-current-buffer target-buffer
-                   (insert-buffer-substring content-buffer)))))))
-     (cl-defstruct ,(intern (format "jj-%s" type-name))
-       ;; semantic fields
-       ,@(cl-loop for (field-name . props) in fields
-                  collect field-name))))
+
 ;; Generic format macro:1 ends here
 
 ;; Status format
 
 ;; [[file:majjik.org::*Status format][Status format:1]]
-(define-jj-plain-format status-lineage-entry
+(define-jj-format status-lineage-entry
   (change-id
    :face '(:foreground "magenta")
    :form (:chain self (format_short_change_id_with_change_offset)))
@@ -2228,7 +2115,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
    :parser #'json-parse-string
    :form (:chain self (.description) (.trim) (.escape_json))))
 
-(define-jj-plain-format status-wc-change
+(define-jj-format status-wc-change
   (status
    :form (:chain self (.status)))
   (path-source
@@ -2238,7 +2125,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
    :parser #'json-parse-string
    :form (:chain self (.target) (.path) (.display) (.escape_json))))
 
-(define-jj-plain-format status-file-conflict
+(define-jj-format status-file-conflict
   (path
    :face '(:foreground "red")
    :parser #'json-parse-string
@@ -2246,18 +2133,18 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   ;; (num-sides) ;; todo once it's representable in a template. for now, always unknown.
   )
 
-(define-jj-plain-format status-file-untracked
+(define-jj-format status-file-untracked
   (path
    :face '(:foreground "magenta")
    :parser #'json-parse-string
    :form (++ (:chain self (.display t) (.escape_json)) "\n")))
 
-(define-jj-plain-format status-file-tracked
+(define-jj-format status-file-tracked
   (path
    :parser #'json-parse-string
    :form (++ (:chain self (.path) (.display) (.escape_json)) "\n")))
 
-(define-jj-plain-format status-bookmark-conflict
+(define-jj-format status-bookmark-conflict
   (name
    :face '(:foreground "magenta")
    :form (:chain self (.name) ))
@@ -3178,8 +3065,6 @@ Also sets `jj--current-status' in the initial buffer when the status process com
      (jj-log-header-change-id (jj-log-entry-header cmt)))
     ((and cmt (pred jj-log-header-p))
      (jj-log-header-change-id cmt))
-    ((and cmt (pred jj-log-plain-p))
-     (jj-log-plain-change-id cmt))
     (unmatched (jj-read-revset prompt))))
 ;; revset:1 ends here
 
@@ -3336,10 +3221,6 @@ When it is additionally on a FIELD of the OBJECT, also print that FIELD's name a
 (cl-defmethod jj-inspect-thing ((thing jj-log-header))
   "Show the change at point."
   (jj-show (jj-log-header-commit-id thing)))
-
-(cl-defmethod jj-inspect-thing ((thing jj-log-plain))
-  "Show the change at point."
-  (jj-show (jj-log-plain-commit-id thing)))
 ;; thing at point:1 ends here
 
 ;; swap buffers, same dir
