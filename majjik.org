@@ -33,7 +33,7 @@
 *** collect-repeat
 #+begin_src elisp
   (defmacro collect-repeat (&rest body)
-    "Call FN repeatedly until it returns nil. Return the list of non-nil values."
+    "Evaluate BODY repeatedly until it returns nil. Return the list of non-nil values."
     (let ((vals-sym (gensym "vals")))
       `(let ((,vals-sym))
          (while-let ((val (progn ,@body)))
@@ -1391,7 +1391,7 @@ this might not actually work. I'm big sus actually.
                          "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n")))))
 #+end_src
 *** TODO separate graph as a first step, so log format can use generic macro
-** TODO COMMENT Log-graph separation
+** TODO Log-graph separation
 *** utils
 #+begin_src elisp
   (cl-defmacro with-stream-to-string ((stream) &body body)
@@ -1440,7 +1440,6 @@ this might not actually work. I'm big sus actually.
                  (buffer-substring-no-properties (line-beginning-position) (line-end-position))))))
 
   (defun jj-read-graph-and-elided ()
-    "TODO need to take care with streaming data. this will happily eat the prefix before the entry is complete."
     (prog1 (with-error-format
                "error reading elided graph: %s"
              (save-excursion (jj-parse-erase-elided-prefix)))
@@ -1460,7 +1459,8 @@ this might not actually work. I'm big sus actually.
     "Strip the graph prefix of the node starting at point. Return the graph as a vector of the form [[PRE NODE POST] . TAIL] where PRE, NODE, and POST are strings representing the 3 parts of the first line, and TAIL is a sequence of `jj--count-graph-lines' strings for the subsequent lines.
   If the line is an elided entry, returns a single string, which is the prefix before the "
     (let ((1st)
-          (rest))
+          (rest)
+          (regions))
       (with-error-label "1st graph line"
         (jj--re-step-over (rx
                            (group (* (not control)))
@@ -1471,25 +1471,32 @@ this might not actually work. I'm big sus actually.
                            (literal jj--major-delim))))
       (let-match (pre node suf)
         (setq 1st `(,pre ,node ,suf)))
-      (delete-region (match-beginning 0) (match-end 0))
+      (push (list (match-beginning 0) (match-end 0)) regions)
       ;; skip over arbitrary content here.
+      (forward-line 1)
       (with-error-label "graph tail"
         (cl-loop for x from 1 below jj--count-graph-lines
-               ;; skip counting the first, which we matched just now
-               ;; all the tail lines are empty besides the graph prefix
-               do (progn
-                    (jj--re-step-over (rx (group (* (not control)))
-                                          (literal jj--major-delim)
-                                          "\n"))
-                    (push (match-string 1) rest)
-                    (delete-region (match-beginning 0) (match-end 0)))))
-      (apply #'make-jj-log-graph `(,@1st ,@(nreverse rest)))))
+                 ;; skip counting the first, which we matched just now
+                 ;; all the tail lines are empty besides the graph prefix
+                 do (progn
+                      (jj--re-step-over (rx (group (* (not control)))
+                                            (literal jj--major-delim)
+                                            "\n"))
+                      (push (match-string 1) rest)
+                      (push (list (match-beginning 0) (match-end 0)) regions))))
+      (prog1
+          (apply #'make-jj-log-graph `(,@1st ,@(nreverse rest)))
+        ;; delete the matched regions at the end
+        ;; so if we're not ready, it's ok.
+        (cl-loop for reg in regions
+                 do (apply #'delete-region reg)))))
 
   (defun jj-parse-erase-elided-prefix ()
     (let ((graph-pre)
           (graph-node)
           (graph-suf)
-          (graph-tail))
+          (graph-tail)
+          (regions))
       (jj--re-step-over (rx line-start
                             (group (* (not control)))
                             (literal jj--delim)
@@ -1502,19 +1509,29 @@ this might not actually work. I'm big sus actually.
         (setq graph-pre pre
               graph-node node
               graph-suf suf))
-      (delete-region (match-beginning 0) (match-end 3))
-      (cl-loop while (looking-at (rx (group
-                                      line-start
-                                      (* (not control))
-                                      line-end)
-                                     "\n"))
+      (push (list (match-beginning 0) (match-end 3)) regions)
+      (cl-loop while (jj--re-step-over (rx (group
+                                            line-start
+                                            (* (not control))
+                                            line-end)
+                                           "\n")
+                                       nil :no-err)
                do (progn
                     (push (match-string 1) graph-tail)
-                    (delete-region (match-beginning 0) (match-end 0))))
-      (make--jj-log-graph :first-line-prefix graph-pre
-                          :first-line-node graph-node
-                          :first-line-suffix graph-suf
-                          :mandatory-segments graph-tail)))
+                    (push (list (match-beginning 0) (match-end 0)) regions)))
+      ;; assumption: an elided revision is never the last entry in a log
+      ;; so expect the next graph section before we cut anything.
+      ;; this handles streaming data.
+      (should (looking-at (rx
+                           (* anychar)
+                           (literal jj--major-delim))))
+      (prog1
+          (make--jj-log-graph :first-line-prefix graph-pre
+                              :first-line-node graph-node
+                              :first-line-suffix graph-suf
+                              :mandatory-segments graph-tail)
+        (cl-loop for reg in regions
+                 do (apply #'delete-region reg)))))
 
   (defun insert-jj-log-graph-prefix (graph)
     "Add the GRAPH prefix to the entry starting at point. assume that the buffer is narrowed so as to end at the end of the entry."
@@ -2051,6 +2068,40 @@ this might not actually work. I'm big sus actually.
   log-plainzwxrqwwv\"zoeyhewll@gmail.com\"2025-12-21 22:36:01foo087ec1fbempty\"\"
   log-plainzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
   "))))
+#+end_src
+*** scratch
+#+begin_src elisp
+  (let* ((buf (current-buffer))
+         (temp (generate-new-buffer "*jj-log-temp*"))
+         (err (generate-new-buffer "*jj-log-stderr*"))
+         (filter (cl-labels ((read-next ()
+                               (unless (condition-case e
+                                           (dbg (jj-read-graph-and-maybe-elided))
+                                         (error (dbg e)
+                                                (dbg (point))
+                                                nil))
+                                 ;; (dbg (buffer-substring (line-beginning-position) (line-end-position)))
+                                 ))
+                             (print-entries (news)
+                               (with-current-buffer buf
+                                 (let ((inhibit-read-only t))
+                                   ;; (mapc #'insert-jj-log-maybe-elided news)
+                                   (cl-loop for new in news
+                                            do (insert-jj-log-maybe-elided (dbg new)))))))
+                   (make-jj-generic-buffered-filter temp #'read-next #'print-entries))))
+    (make-process
+     :name "jj-log"
+     :buffer buf
+     :stderr err
+     :filter filter
+     :noquery t
+     :command `("jj" "log"
+                "-T" ,jj-parseable-template
+                ,@jj-global-default-args
+                ,@(and jj-do-debug jj-global-debug-args)
+                ,@jj-parsing-default-args
+                "--config" ,(format "templates.log_node='%s'"
+                                    (jj--toml-quote-string jj-log-node-template)))))
 #+end_src
 ** Generic format macro
 #+begin_src elisp
