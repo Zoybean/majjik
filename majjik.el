@@ -199,6 +199,19 @@ Use me with comma-at!"
   (when item `(,item)))
 ;; opt:1 ends here
 
+;; promise debugging
+
+;; [[file:majjik.org::*promise debugging][promise debugging:1]]
+(defmacro pdbg (px)
+  (cl-labels ((debug (name arrow)
+                `(lambda (,name)
+                   (message ,(concat "%s " arrow " %S") ',px ,name)
+                   ,name)))
+    `(promise-then ,px
+                   ,(debug 'val "=>")
+                   ,(debug 'err "=/>"))))
+;; promise debugging:1 ends here
+
 ;; argument utils
 
 ;; [[file:majjik.org::*argument utils][argument utils:1]]
