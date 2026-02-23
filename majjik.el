@@ -169,6 +169,25 @@ Where each VAR is the local variable, and each GROUP is a numeric literal or var
                    (list "foo" "bar" "baz")))))
 ;; let-match:1 ends here
 
+;; with-insert-temp-buffer
+
+;; [[file:majjik.org::*with-insert-temp-buffer][with-insert-temp-buffer:1]]
+(defmacro with-insert-temp-buffer (&rest body)
+  "Spin up a temp buffer, evaluate BODY, and then (if it returned normally) insert the temp buffer's contents at point."
+  (cl-with-gensyms (target-buffer content-buffer)
+    `(let ((,target-buffer (current-buffer)))
+       ;; open a buffer to make a mess in
+       ;; we'll insert its contents later
+       (with-temp-buffer
+         ,@body
+         ;; insert the content of this temp buffer into the target buffer
+         ;; we can't just return it from the with-temp-buffer block,
+         ;; as by that point it's been disposed
+         (let ((,content-buffer (current-buffer)))
+           (with-current-buffer ,target-buffer
+             (insert-buffer-substring ,content-buffer)))))))
+;; with-insert-temp-buffer:1 ends here
+
 ;; opt
 
 ;; [[file:majjik.org::*opt][opt:1]]
@@ -1542,6 +1561,27 @@ If the line is an elided entry, returns a single string, which is the prefix bef
       (cl-loop for reg in regions
                do (apply #'delete-region reg)))))
 
+(defun insert-jj-log-elided (graph)
+  "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
+  (with-insert-temp-buffer
+   (insert (propertize "(elided revisions)\n" 'face '(:foreground "grey")))
+   ;; insert the mandatory graph segments
+   ;; these will add new lines if there arent enough already
+   (cl-loop initially (progn
+                        (goto-char (point-min))
+                        (insert (jj-log-graph-first-line-prefix graph)
+                                (propertize (jj-log-graph-first-line-node graph)
+                                            'face '(:foreground "grey"))
+                                (jj-log-graph-first-line-suffix graph))
+                        (forward-line 1))
+            for prefix in (jj-log-graph-mandatory-segments graph)
+            do (progn
+                 (insert prefix)
+                 (forward-line 1)
+                 ;; while there's more mandatory graph segments, put them on new lines if you have to
+                 (unless (bolp)
+                   (insert "\n"))))))
+
 (defun insert-jj-log-graph-prefix (graph)
   "Add the GRAPH prefix to the entry starting at point. assume that the buffer is narrowed so as to end at the end of the entry."
   ;; insert the mandatory graph prefix segments
@@ -1668,41 +1708,32 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
        ,(cl-labels ((field (name-sym)
                       `(,(intern (format "jj-%s-%s" type-name name-sym))
                         entry)))
-          `(let ((target-buffer (current-buffer)))
-             ;; open a buffer to make a mess in
-             ;; we'll insert its contents later
-             (with-temp-buffer
-               (cl-loop for (field-name val printer face sep) in (list ,@(cl-loop  
-                                                                          for (field-name . props) in fields
-                                                                          for first = t then nil
-                                                                          for sep = (if-let ((sep (plist-get props :separator)))
-                                                                                        sep
-                                                                                      (cond
-                                                                                       (first "")
-                                                                                       (t " ")))
-                                                                          for face = (plist-get props :face)
-                                                                          for printer = (plist-get props :printer)
-                                                                          collect `(list ',field-name ,(field field-name) ,printer ,face ,sep)))
-                        do (when-let ((printed (s-presence
-                                                (if printer
-                                                    (funcall printer val entry)
-                                                  val))))
-                             (insert sep (apply #'propertize
-                                                `(,printed
-                                                  help-echo ,(symbol-name field-name)
-                                                  ,@(jj--if-arg face #'identity 'face))))))
-               ;; ensure commit text ends on a newline
-               (unless (bolp)
-                 (insert "\n"))
-               ;; add field to all the commit text (including newlines)
-               ;; pointing to the entry struct
-               (add-text-properties (point-min) (point-max) `(jj-object ,entry))
-               ;; insert the content of this temp buffer into the target buffer
-               ;; we can't just return it from the with-temp-buffer block,
-               ;; as by that point it's been disposed
-               (let ((content-buffer (current-buffer)))
-                 (with-current-buffer target-buffer
-                   (insert-buffer-substring content-buffer)))))))
+          `(with-insert-temp-buffer
+            (cl-loop for (field-name val printer face sep) in (list ,@(cl-loop  
+                                                                       for (field-name . props) in fields
+                                                                       for first = t then nil
+                                                                       for sep = (if-let ((sep (plist-get props :separator)))
+                                                                                     sep
+                                                                                   (cond
+                                                                                    (first "")
+                                                                                    (t " ")))
+                                                                       for face = (plist-get props :face)
+                                                                       for printer = (plist-get props :printer)
+                                                                       collect `(list ',field-name ,(field field-name) ,printer ,face ,sep)))
+                     do (when-let ((printed (s-presence
+                                             (if printer
+                                                 (funcall printer val entry)
+                                               val))))
+                          (insert sep (apply #'propertize
+                                             `(,printed
+                                               help-echo ,(symbol-name field-name)
+                                               ,@(jj--if-arg face #'identity 'face))))))
+            ;; ensure commit text ends on a newline
+            (unless (bolp)
+              (insert "\n"))
+            ;; add field to all the commit text (including newlines)
+            ;; pointing to the entry struct
+            (add-text-properties (point-min) (point-max) `(jj-object ,entry)))))
      (cl-defstruct ,(intern (format "jj-%s" type-name))
        ;; semantic fields
        ,@(cl-loop for (field-name . props) in fields
