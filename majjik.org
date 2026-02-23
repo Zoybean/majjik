@@ -2107,8 +2107,10 @@ this might not actually work. I'm big sus actually.
          (temp (generate-new-buffer "*jj-log-temp*"))
          (err (generate-new-buffer "*jj-log-stderr*"))
          (filter (cl-labels ((read-next ()
-                               (ignore-errors
-                                 (jj-read-graph-and-maybe-elided)))
+                               (condition-case e
+                                   (jj-read-graph-and-maybe-elided)
+                                 (error (dbg e)
+                                        nil)))
                              (print-entries (news)
                                (with-current-buffer buf
                                  (let ((inhibit-read-only t))
@@ -2129,6 +2131,7 @@ this might not actually work. I'm big sus actually.
                 ,@jj-parsing-default-args
                 "--config" ,(format "templates.log_node='%s'"
                                     (jj--toml-quote-string jj-log-node-template)))))
+
 #+end_src
 ** Generic format macro
 #+begin_src elisp
