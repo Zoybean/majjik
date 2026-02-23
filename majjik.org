@@ -208,6 +208,23 @@
                      ,(debug 'val "=>")
                      ,(debug 'err "=/>"))))
 #+end_src
+*** COMMENT futur debugging
+#+begin_src elisp
+  (defmacro fdbg (fx)
+    (cl-with-gensyms (sx)
+      (cl-labels ((debug (name arrow)
+                    `(lambda (,name)
+                       (message ,(concat "%s " arrow " %S") ',fx ,name)
+                       ,name)))
+        `(futur-let* ((,sx <- ,fx))
+           :error-fun (lambda (,sx)
+                        (message "%s: %S" ',fx ,sx)
+                        ,sx)
+           (message "%s: %S" ',fx ,sx) ,sx
+           ))))
+  (let ((x88233 x))
+    (message "%s: %S" ',fx ,sx) ,sx)
+#+end_src
 ** argument utils
 #+begin_src elisp
   (defun jj--quote-argument (name)
@@ -3394,6 +3411,15 @@ might actually not use these as I need a lexical variable anyway in most cases w
      (jj-cmd--promise name cmd output-buffer)
      (jj--make-async-success-callback name no-revert silent-ok no-kill-output)
      (jj--make-async-failure-callback name)))
+  
+  (defun jj-cmd-futur (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
+    "Run CMD asynchronously, returning a futur of its completion.
+
+  On success, reverts the repo's dash buffer unless NO-REVERT, prints a message unless SILENT-OK, kills the output buffer unless NO-KILL-OUTPUT, and returns the process. On error, prints a message indicating the command log buffer, and returns a cons (PROCESS . EVENT). If OUTPUT-BUFFER, use that buffer for stdout instead of a temp indirect buffer."
+    (declare (indent 2))
+    (futur-let* ((proc <- (jj-cmd--futur name cmd output-buffer)))
+      :error-fun (jj--make-async-failure-callback name)
+      (funcall (jj--make-async-success-callback name no-revert silent-ok no-kill-output) proc)))
 
   (defun jj--make-async-success-callback (name &optional no-revert silent-ok no-kill-output)
     (lambda (proc)
@@ -3495,6 +3521,61 @@ might actually not use these as I need a lexical variable anyway in most cases w
                (add-function :after (process-sentinel proc)
                              (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
 
+  (defun jj-cmd--futur (name cmd &optional output-buffer)
+    "Run CMD asynchronously, returning a futur that is resolved (returning the process) on completion."
+    (declare (indent 2))
+    (let ((repo-dir default-directory))
+      (let ((full-cmd `("jj"
+                        ,@jj-global-default-args
+                        ,@(and jj-do-debug jj-global-debug-args)
+                        ,@jj-logging-default-args
+                        ,@cmd)))
+        (pcase-let (((and proc-entry
+                          (cl-struct jj--process-log-entry
+                                     buf-code
+                                     buf-stdout
+                                     buf-stderr
+                                     ovl-control
+                                     ovl-collapse
+                                     ovl-err))
+                     (jj--make-process-log-entry name full-cmd)))
+          (futur-new
+           (lambda (f)
+             (let ((proc (make-process
+                          :name (format "jj-%s" name)
+                          :buffer (or output-buffer buf-stdout)
+                          :stderr buf-stderr
+                          :sentinel (jj--make-update-exit-code-sentinel buf-code)
+                          :filter #'jj--ansi-color-filter
+                          :noquery t
+                          :command full-cmd)))
+               (setf (jj--process-log-entry-process proc-entry) proc)
+               (overlay-put ovl-control 'jj-object proc-entry)
+               (jj--set-collapse-process proc-entry t)
+               ;; (overlay-put ovl-err 'face '(:foreground "grey"))
+               (jj--set-initial-run-status buf-code)
+
+               (when output-buffer
+                 (kill-buffer buf-stdout))
+               (let ((stderr (get-buffer-process buf-stderr)))
+                 (set-process-sentinel stderr
+                                       #'jj--default-stderr-sentinel)
+                 (set-process-filter stderr
+                                     #'jj--ansi-color-filter))
+               ;; print any abnormal process termination
+               (add-function :after (process-sentinel proc)
+                             (jj--make-print-status-sentinel buf-stderr))
+               ;; handle the promise state
+               (add-function :after (process-sentinel proc)
+                             (make-jj-callback-sentinel
+                              (lambda (exit-status event)
+                                (if (eq exit-status 0)
+                                    (futur-deliver-value f proc)
+                                  (futur-blocker-abort f (cons proc event))))))
+               ;; this always runs before the subsequent futurs,
+               ;; which means they are not themselves callbacks
+               (add-function :after (process-sentinel proc)
+                             (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
 #+end_src
 **** command log mode
 #+begin_src elisp
