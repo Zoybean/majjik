@@ -5372,6 +5372,8 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
      ("F" "fetch" jj--git-fetch-suffix :transient nil)])
 #+end_src
 *** TODO COMMENT Interactive commands
+**** emacsclient as diffedit
+***** utils
 #+begin_src elisp
   (defun jj--editor-path ()
     (if (string-prefix-p "~" with-editor-emacsclient-executable)
@@ -5388,6 +5390,47 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
               (expand-file-name server-name
                                 server-socket-dir))))
 
+  (defun jj--merge-tool-args (entry-point-exp)
+    "Returns the arguments needed to register emacs as the merge tool for a JJ command.
+  ENTRY-POINT-EXP must be a quoted sexpression that can handle the file arguments for emacs to run as a mergetool. `jj--call-from-cli' is designed for this purpose.
+  Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool to select it."
+    ;; this is almost right.
+    ;; left and right are actually directories most of the time, not files.
+    (let* ((program (jj--editor-path))
+           (edit-args
+            `(,(jj--editor-server-path-arg)
+              ;; need a new frame, or `jj--call-from-cli' won't work
+              "-c"
+              "-e" ,(prin1-to-string
+                     entry-point-exp)
+              ;; always pass the files as the last arguments
+              "--" "$left" "$right")))
+      `("--config" ,(concat "merge-tools.emacs.program=" program)
+        "--config" ,(concat "merge-tools.emacs.edit-args="
+                            (jj--toml-list
+                             (mapcar #'prin1-to-string
+                                     edit-args)))
+        "--tool" "emacs")))
+
+  (defun jj--editor-args ()
+    "Returns the arguments needed to register emacs as the editor for a JJ command."
+    ;; this is almost right.
+    ;; left and right are actually directories most of the time, not files.
+    (let* ((program (jj--editor-path))
+           (server (jj--editor-server-path-arg))
+           (editor `(,program ,server)))
+      `("--config" ,(concat "ui.editor="
+                            (jj--toml-list
+                             (mapcar #'prin1-to-string
+                                     editor))))))
+
+  (defun jj--toml-list (list)
+    (format "[%s]"
+            (s-join "," list)))
+
+#+end_src
+***** 1st attempt
+#+begin_src elisp
   (defvar jj--do-diff-function 'jj--do-diff-file-buffers)
 
   (defun jj--do-diff-file-buffers (b-left b-right)
@@ -5396,7 +5439,8 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
     (vdiff-buffers b-left b-right))
 
   (defun jj--do-diff-dir-buffers (b-left b-right)
-    (jj--begin-dired-merge b-left b-right))
+    ;; (jj--begin-dired-merge b-left b-right)
+    (ediff-directories))
 
   ;; vdiff3 crashed my emacs last time I tried using it 
   ;; (defun jj--do-diff3 (b-left b-right merged)
@@ -5448,56 +5492,164 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
                ;; otherwise they are evalled after this
                (setq server-eval-args-left nil)))))
 
-  (defun jj--merge-tool-args (server-edit-function)
-    "Returns the arguments needed to register emacs as the merge tool for a JJ command.
-  SERVER-EDIT-FUNCTION must be a quoted sexpression that would be a valid argument to `function' (i.e. a lambda or a symbol). The resulting function must be a valid argument to `jj--call-from-cli'.
-  Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool to select it."
-    ;; this is almost right.
-    ;; left and right are actually directories most of the time, not files.
-    (let* ((program (jj--editor-path))
-           (edit-args
-            `(,(jj--editor-server-path-arg)
-              ;; need a new frame, or `jj--call-from-cli' won't work
-              "-c"
-              "-e" ,(prin1-to-string
-                     `(jj--call-from-cli
-                       #',server-edit-function))
-              ;; always pass the files as the last arguments
-              "--" "$left" "$right")))
-      `("--config" ,(concat "merge-tools.emacs.program=" program)
-        "--config" ,(concat "merge-tools.emacs.edit-args="
-                            (jj--toml-list
-                             (mapcar #'prin1-to-string
-                                     edit-args)))
-        "--tool" "emacs")))
-
-  (defun jj--editor-args ()
-    "Returns the arguments needed to register emacs as the editor for a JJ command."
-    ;; this is almost right.
-    ;; left and right are actually directories most of the time, not files.
-    (let* ((program (jj--editor-path))
-           (server (jj--editor-server-path-arg))
-           (editor `(,program ,server)))
-      `("--config" ,(concat "ui.editor="
-                            (jj--toml-list
-                             (mapcar #'prin1-to-string
-                                     editor))))))
-
-  (defun jj--toml-list (list)
-    (format "[%s]"
-            (s-join "," list)))
-
   (defun jj-split (rev)
-    (jj-cmd-async "split"
+    (jj-cmd-async
         `("split" "-r" ,rev "-i"
           "--debug"
           ,@(jj--merge-tool-args
-             'jj--client-edit-for-diff-dirs)
+             '(jj--call-from-cli
+               #'jj--client-edit-for-diff-dirs))
           ,@(jj--editor-args))))
 
-  (jj-split "rsvvutqn")
+  ;; (jj-split "rsvvutqn")
 #+end_src
-**** diff dir buffers
+***** 2nd attempt
+what I want is a more general way to record buffers as tied to a client, which doesn't constrain the startup function to taking buffer arguments, and working in those buffers.
+could I have the server call the (plugin) startup function, which returns a list of buffers, and have those buffers recorded for server-edit?
+#+begin_src elisp
+  (define-advice ediff-directories-internal (:override (dir1 dir2 dir3 regexp action jobname
+  					                   &optional startup-hooks
+  					                   merge-autostore-dir)
+                                                       jj--ediff-directories-internal-advice)
+    "Update to return the main buffer (i.e. ediff meta buffer) handle."
+    (if (stringp dir3)
+        (setq dir3 (if (file-directory-p dir3) dir3 (file-name-directory dir3))))
+
+    (cond ((string= dir1 dir2)
+  	 (user-error "Directories A and B are the same: %s" dir1))
+  	((and (eq jobname 'ediff-directories3)
+  	      (string= dir1 dir3))
+  	 (user-error "Directories A and C are the same: %s" dir1))
+  	((and (eq jobname 'ediff-directories3)
+  	      (string= dir2 dir3))
+  	 (user-error "Directories B and C are the same: %s" dir1)))
+
+    (if merge-autostore-dir
+        (or (stringp merge-autostore-dir)
+  	  (error "%s: Directory for storing merged files must be a string"
+  		 jobname)))
+    (let (dir-diff-struct
+  	meta-buf)
+      (if (and ediff-autostore-merges
+  	     (ediff-merge-metajob jobname)
+  	     (not merge-autostore-dir))
+  	(setq merge-autostore-dir
+  	      (read-directory-name "Save merged files in directory: "
+  			      (if ediff-use-last-dir
+  					ediff-last-merge-autostore-dir
+  				      (ediff-strip-last-dir dir1))
+  			      nil
+  			      'must-match)))
+      (if merge-autostore-dir
+  	(cond ((and (stringp dir1) (string= merge-autostore-dir dir1))
+  	       (or (y-or-n-p
+  		    "Directory for saving merged files = Directory A.  Sure? ")
+  		   (user-error "Directory merge aborted")))
+  	      ((and (stringp dir2) (string= merge-autostore-dir dir2))
+  	       (or (y-or-n-p
+  		    "Directory for saving merged files = Directory B.  Sure? ")
+  		   (user-error "Directory merge aborted")))
+  	      ((and (stringp dir3) (string= merge-autostore-dir dir3))
+  	       (or (y-or-n-p
+  		    "Directory for saving merged files = Ancestor Directory.  Sure? ")
+  		   (user-error "Directory merge aborted")))))
+
+      (setq dir-diff-struct (ediff-intersect-directories
+  			   jobname
+  			   regexp dir1 dir2 dir3 merge-autostore-dir))
+      (push (lambda ()
+  	    (setq ediff-session-action-function action)
+  	    (setq ediff-dir-difference-list
+  		  (cdr dir-diff-struct)))
+  	  startup-hooks)
+      (setq meta-buf (ediff-prepare-meta-buffer
+  		    #'ediff-filegroup-action
+  		    (car dir-diff-struct)
+  		    "*Ediff Session Group Panel"
+  		    #'ediff-redraw-directory-group-buffer
+  		    jobname
+  		    startup-hooks))
+      (ediff-show-meta-buffer meta-buf)
+      ;; this is the change
+      meta-buf))
+
+  (defun jj--server-wait-bufs (bufs proc)
+    "Instruct the server that PROC is a client waiting for BUFS.
+  BUFS is an alist whose elements are (BUFFER . NEW-P)
+  where NEW-P is true if the buffer was just created for this client
+  to edit, and nil if it already existed.
+  PROC is the client that requested this operation."
+    (let ((last-nonmenu-event t)
+          client-record)
+      ;; Restore the current buffer afterward, but not using save-excursion,
+      ;; because we don't want to save point in this buffer
+      ;; if it happens to be one of those specified by the server.
+      (save-current-buffer
+        (dolist (buf-row bufs)
+          (let ((minibuffer-auto-raise (or server-raise-frame
+        				         minibuffer-auto-raise))
+                (buf (car buf-row))
+                (new-p (cdr buf-row)))
+            (if new-p
+                (progn
+        	        (run-hooks 'pre-command-hook)
+        	        (set-buffer buf))
+              (set-buffer buf)
+              ;; separately for each file, in sync with post-command hooks,
+              ;; with the new buffer current:
+              (run-hooks 'pre-command-hook)
+              ;; it might be pre-existing but created for a different client,
+              ;; in which case it's not a `server-existing-buffer'.
+              ;; so only set if it's pre-existing and this is its first client.
+              (unless server-buffer-clients
+                (setq server-existing-buffer t)))
+            (run-hooks 'server-visit-hook)
+            ;; hooks may be specific to current buffer.
+            (run-hooks 'post-command-hook)
+            ;; When the buffer is killed, inform the clients.
+            (add-hook 'kill-buffer-hook #'server-kill-buffer nil t)
+            (push proc server-buffer-clients)
+            (push buf client-record))))
+      (process-put proc 'buffers
+                   (nconc (process-get proc 'buffers) client-record))
+      client-record))
+
+  (defun jj--call-from-cli (fun)
+    "For use as the first parameter to an --eval invocation of emacsclient which has also supplied the -c argument. Calls FUN with the string ARGS to --eval that were provided later on the command line. FUN should return an alist of buffers to be associated with the new client, to be supplied to `jj--server-wait-bufs'."
+    (let* (;; get the process handle for the new frame's client
+           ;; (which is the new client)
+           (frame (selected-frame))
+           (proc (frame-parameter frame 'client))
+           (args
+            (mapcar (lambda (s)
+                      ;; make sure it's a string
+                      ;; unquoted args are symbols
+                      (format "%s" s))
+                    (prog1 server-eval-args-left
+                      ;; treat other args exclusively as filenames.
+                      ;; otherwise they are evalled after this
+                      (setq server-eval-args-left nil)))))
+      (jj--server-wait-bufs
+       (apply fun frame args)
+       proc)))
+
+  (defun jj--client-edit-for-diff-dirs (frame left right)
+    "Diff directories LEFT and RIGHT and return the buffers as an alist of (BUF . NEW-P) where NEW-P is nil if the buffer already existed."
+    ;; assume meta buffer was created just now, becasue I can't think how to do it otherwise.
+    `((,(ediff-directories left right (rx (* anychar))) . t)))
+
+  (defun jj-split (rev)
+    (jj-cmd-async
+        `("split" "-r" ,rev "-i"
+          "--debug"
+          ,@(jj--merge-tool-args
+             '(jj--call-from-cli
+               #'jj--client-edit-for-diff-dirs))
+          ,@(jj--editor-args))))
+
+  ;; (jj-split "rsvvutqn")
+#+end_src
+**** diff directory buffers
 #+begin_src elisp
   (defun jj--begin-dired-merge (old new)
     (let ((b-old (if (bufferp old)
@@ -5506,17 +5658,19 @@ Full-interactive split will require an interactive hunk selector. Maybe just use
           (b-new (if (bufferp new)
                      new
                    (dired-other-window new))))
-      (with-current-buffer b-old
-        (jj--dired-merge-mode 1)
-        (setq-local
-         jj--dired-merge-which :old
-         jj--dired-merge-other b-new)
-        )
-      (with-current-buffer b-new
-        (jj--dired-merge-mode 1)
-        (setq-local
-         jj--dired-merge-which :new
-         jj--dired-merge-other b-old))))
+      (jj--enter-dired-merge b-old b-new)))
+
+  (defun jj--enter-dired-merge (b-old b-new)
+    (with-current-buffer b-old
+      (jj--dired-merge-mode 1)
+      (setq-local
+       jj--dired-merge-which :old
+       jj--dired-merge-other b-new))
+    (with-current-buffer b-new
+      (jj--dired-merge-mode 1)
+      (setq-local
+       jj--dired-merge-which :new
+       jj--dired-merge-other b-old)))
 
   (defvar jj--dired-merge-which nil
     "In `jj--dired-merge-mode', whether this buffer is the `:old' or `:new' contents")
