@@ -4092,16 +4092,41 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 
 ;; [[file:majjik.org::*transient][transient:1]]
 (transient-define-suffix jj--git-push-suffix (args)
-    "do a jj git push."
-    (interactive (list (transient-args (oref transient-current-prefix command))))
-    (apply #'jj-git-push args))
+  "do a jj git push."
+  (interactive (list (transient-args (oref transient-current-prefix command))))
+  (apply #'jj-git-push args))
+
+(defmacro prod-cartes (&rest sets)
+  "Return the cartesian product of SETS, that is, all the ways to take one element from each SET.
+Each SET should be a list."
+  (let ((syms (cl-loop for ix from 0 below (length sets)
+                       collect (gensym (format "elem-%d-" ix)))))
+    (cl-loop for set in sets
+             for ix upfrom 0
+             for sym in syms
+             for first = t then nil
+             for form = `(cl-loop for ,sym in ,set
+                                  collect (list ,@syms))
+             then `(cl-loop for ,sym in ,set
+                            nconc ,form)
+             finally return form)))
 
 (transient-define-prefix jj-git-push-prefix ()
   ;; these flags unset one-another
-  :incompatible `(("--remote=" "--all-remotes")
-                  ("--all" "--deleted" "--tracked" "--bookmark=" "--change=" "--revisions=" "--named"))
+  :incompatible (let ((coarse-flags '("--all" "--deleted" "--tracked"))
+                      (fine-flags '("--bookmark=" "--change=" "--revisions=" "--named=")))
+                  ;; all the fine flags are incompatible with all the coarse flags,
+                  ;; but they are mostly compatible with each other.
+                  `(("--all" "--tracked")
+                    ,@(prod-cartes coarse-flags fine-flags)))
   ["args"
-   ["revisions"
+   ["coarse"
+    ;; just a layout option
+    :pad-keys t
+    ("-d" "deleted" "--deleted")
+    ("-a" "all" "--all")
+    ("-t" "tracked" "--tracked")]
+   ["fine"
     ;; just a layout option
     :pad-keys t
     ("-b" "bookmarks" "--bookmark="
@@ -4117,17 +4142,18 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                  (completing-read-multiple
                   prompt (jj-list-bookmarks)
                   nil nil initial-input history))))
-    ("-d" "deleted" "--deleted")
-    ("-a" "all" "--all")
-    ("-t" "tracked" "--tracked")
-    ;; requires reader
-    ("-r" "revisions" "--revisions=")
-    ;; requires reader
-    ("-c" "change" "--change=")
-    ;; this one needs a weird format
-    ;; ("-n" "named" "--named=<NAME=REVISION>")
+    ("-r" "revisions" "--revisions="
+     :multi-value repeat)
+    ("-c" "change" "--change="
+     :multi-value repeat)
+    ;; this one needs a weird format so I havent implemented it for now
+    ;; ("-n" "named" "--named=<NAME=REVISION>"
+    ;;  :multi-value repeat
+    ;; )
     ]
-   ["remote" :pad-keys t
+   ["remote"
+    ;; just a layout option
+    :pad-keys t
     ("-m" "remote" "--remote="
      :prompt "remote: "
      :reader (lambda (prompt initial-input history)
@@ -4139,6 +4165,8 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                 initial-input history))
      )]
    ["misc"
+    ;; just a layout option
+    :pad-keys t
     ("-D" "dry-run" "--dry-run")
     ("-E" "allow undescribed" "--allow-empty-description")
     ("-P" "allow private" "--allow-private")]
