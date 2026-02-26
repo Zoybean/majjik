@@ -3000,6 +3000,46 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                    (:chain self (.remote)))
                   "\n"))))
 
+(defun jj-bookmark-list-verbose-template (self)
+  "List bookmarks and their corresponding ids as (BOOKMARK CHANGE_ID COMMIT_ID)."
+  (jj-template
+   (cl-subst self 'self
+             '(++ (separate " "
+                            (:chain self (.name))
+                            (if (:chain self (.normal_target))
+                                (separate " "
+                                          (:chain self
+                                                  (.normal_target)
+                                                  (.change_id))
+                                          (:chain self
+                                                  (.normal_target)
+                                                  (.commit_id)))))
+                  "\n"))))
+
+
+(defun jj-list-bookmarks-annotated ()
+  "List all bookmarks, and their respective ids."
+  (mapcar
+   (## s-split " " %)
+   (string-lines
+    (jj-cmd-sync
+     `("bookmark" "list"
+       "-T" ,(jj-template
+              '(++ (separate " "
+                             (:chain self (.name))
+                             (if (:chain self (.normal_target))
+                                 (separate " "
+                                           (:chain self
+                                                   (.normal_target)
+                                                   (.change_id))
+                                           (:chain self
+                                                   (.normal_target)
+                                                   (.commit_id)))))
+                   "\n")))
+     :no-revert)
+    :omit)))
+
+
 (defun jj-list-bookmarks ()
   "List all bookmarks."
   (string-lines (jj-cmd-sync `("bookmark" "list"
@@ -4111,6 +4151,52 @@ Each SET should be a list."
                             nconc ,form)
              finally return form)))
 
+(defun completion-table-with-annotation (table annotator)
+  "Decorate an existing TABLE completion function to add (or replace) an annotation function without modifying the other behaviours."
+  (lambda (str pred flag)
+    (let ((delegate (funcall table str pred flag)))
+      (pcase flag
+        ('metadata
+         `(metadata (annotation-function . ,annotator)
+                    ,@(cdr delegate)))
+        (_ delegate)))))
+
+
+
+(defun make--jj-named-infix-table ()
+  "For use as a completion table for the `jj-git-push--named-infix'"
+  (let* ((options `("@"
+                    ,@(jj-list-bookmarks)
+                    ,@(jj-match-revisions))))
+    (completion-table-dynamic
+     (lambda (str)
+       (when (string-match
+              (rx string-start
+                  (group (* (not (any "=")))
+                         "=")
+                  (group (* (not (any "="))))
+                  string-end)
+              str)
+         (let-match-string
+             ((pref)
+              (suf))
+             str
+           (->> options
+                (-filter (## string-prefix-p suf %))
+                (mapcar (## concat pref %)))))))))
+
+
+(transient-define-argument jj-git-push--named-infix ()
+  "Push a new bookmark NAME at REVISION."
+  :class 'transient-option
+  :multi-value 'repeat
+  :reader (lambda (prompt initial-input history)
+            (let* ((crm-separator (rx (* blank)
+                                      (any ",| ")
+                                      (* blank))))
+              (completing-read-multiple prompt (make--jj-named-infix-table)
+                                        nil nil initial-input history))))
+
 (transient-define-prefix jj-git-push-prefix ()
   ;; these flags unset one-another
   :incompatible (let ((coarse-flags '("--all" "--deleted" "--tracked"))
@@ -4130,6 +4216,7 @@ Each SET should be a list."
     ;; just a layout option
     :pad-keys t
     ("-b" "bookmarks" "--bookmark="
+     ;; push the named bookmark
      :prompt "bookmarks: "
      :multi-value repeat
      ;; really, this should read a limited revset
@@ -4139,17 +4226,50 @@ Each SET should be a list."
                (let ((crm-separator (rx (* blank)
                                         (any ",| ")
                                         (* blank))))
-                 (completing-read-multiple
-                  prompt (jj-list-bookmarks)
-                  nil nil initial-input history))))
+                 (let ((options (jj-list-bookmarks-annotated)))
+                   (completing-read-multiple
+                    prompt (completion-table-with-annotation
+                            (completion-table-dynamic (cl-constantly options))
+                            (lambda (c)
+                              (-let (((chg cmt) (alist-get c options nil nil #'string=)))
+                                (format "\t%s\t%s"
+                                        (propertize chg 'face '(:foreground "magenta"))
+                                        (propertize cmt 'face '(:foreground "light blue"))))))
+                    nil nil initial-input history)))))
     ("-r" "revisions" "--revisions="
-     :multi-value repeat)
+     ;; push existing bookmarks that are within the given revset
+     :multi-value repeat
+     :reader (lambda (prompt initial-input history)
+               (let ((crm-separator (rx (* blank)
+                                        (any ",| ")
+                                        (* blank))))
+                 (let ((options (mapcar (-lambda ((bk chg cmt))
+                                          `(,chg ,cmt ,bk))
+                                        (jj-list-bookmarks-annotated))))
+                   (completing-read-multiple
+                    prompt (completion-table-with-annotation
+                            (completion-table-dynamic (cl-constantly options))
+                            (lambda (c)
+                              (-let (((cmt bk) (alist-get c options nil nil #'string=)))
+                                (format "\t%s\t%s"
+                                        (propertize cmt 'face '(:foreground "light blue"))
+                                        (propertize bk 'face '(:foreground "magenta"))))))
+                    nil nil initial-input history))
+                 )))
     ("-c" "change" "--change="
-     :multi-value repeat)
-    ;; this one needs a weird format so I havent implemented it for now
-    ;; ("-n" "named" "--named=<NAME=REVISION>"
-    ;;  :multi-value repeat
-    ;; )
+     ;; push a change, adding a new bookmark there
+     :multi-value repeat
+     :reader (lambda (prompt initial-input history)
+               (let ((crm-separator (rx (* blank)
+                                        (any ",| ")
+                                        (* blank))))
+                 (completing-read-multiple
+                  prompt `("@"
+                           ,@(jj-match-revisions))
+                  nil nil initial-input history))))
+    ("-n" "named" jj-git-push--named-infix
+     ;; push a change, adding a new bookmark with the given name
+     :argument "--named=")
     ]
    ["remote"
     ;; just a layout option
