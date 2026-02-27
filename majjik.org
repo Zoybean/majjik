@@ -3965,6 +3965,7 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
 #+end_src
 ***** jj bookmark
 ****** new
+******* simple
 #+begin_src elisp
   (defun jj-bookmark-new-dwim (bookmark rev)
     "Create new BOOKMARK pointing at revision REV."
@@ -3974,6 +3975,29 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
         `("bookmark" "create" ,bookmark
           "-r" ,rev)
       nil :silent-ok))
+#+end_src
+******* TODO COMMENT transient
+#+begin_src elisp
+  ;; TODOs:
+  ;; - history in the editing buffer. needs:
+  ;;   - new function like `read-string-from-buffer' which has:
+  ;;     - history
+  ;;     - a keymap to cycle history
+  ;; - truncating the display of the value. needs:
+  ;;   - its own new infix subclass
+  ;;   - new method on that class for `transient-format-value'
+  ;; - multiple ways to set one arg
+
+  (transient-define-prefix jj-commit-prefix ()
+    ["args"
+     ("-m" "message" "--message="
+      :reader (lambda (prompt init _hist)
+                (read-string-from-buffer prompt (or init ""))))
+     ("-D" "dry run" "--dry-run")]
+    ["go"
+     ("c" "commit" (lambda (args)
+                     (interactive (list (transient-args (oref transient-current-prefix command))))
+                     (message "commit %s" args)))])
 #+end_src
 ****** move
 #+begin_src elisp
