@@ -7,7 +7,7 @@
 ;; Version: 0.1.0
 ;; Keywords: vc
 ;; URL: https://github.com/Zoybean/majjik
-;; Package-Requires: (dash s eieio with-editor promise transient llama string-edit)
+;; Package-Requires: (dash s eieio with-editor promise transient llama)
 
 ;;; Commentary:
 
@@ -3318,32 +3318,46 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (define-error 'jj-repo-missing-at "Not at a jj repo root")
 ;; repo query commands:1 ends here
 
+;; generic
+
+;; [[file:majjik.org::*generic][generic:1]]
+(cl-defgeneric jj--get-revset (thing &optional default)
+  "Get a revision or revset from THING, or use DEFAULT if not available."
+  default)
+(cl-defmethod jj--get-revset ((cmt jj-log-entry) &optional default)
+  (jj-log-header-change-id (jj-log-entry-header cmt)))
+(cl-defmethod jj--get-revset ((cmt jj-log-header) &optional default)
+  (jj-log-header-change-id cmt))
+(cl-defmethod jj--get-revset ((lin jj-status-lineage-entry) &optional default)
+  (jj-status-lineage-entry-change-id lin))
+
+(cl-defgeneric jj--get-revision (thing &optional default)
+  "Get a revision from THING, or use DEFAULT if not available."
+  default)
+(cl-defmethod jj--get-revision ((cmt jj-log-entry) &optional default)
+  (jj-log-header-change-id (jj-log-entry-header cmt)))
+(cl-defmethod jj--get-revision ((cmt jj-log-header) &optional default)
+  (jj-log-header-change-id cmt))
+(cl-defmethod jj--get-revision ((lin jj-status-lineage-entry) &optional default)
+  (jj-status-lineage-entry-change-id lin))
+;; generic:1 ends here
+
 ;; revset
 
 ;; [[file:majjik.org::*revset][revset:1]]
 (defun jj-get-revset-dwim (&optional prompt)
   "Get a revision or revset based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
-  (pcase (jj-thing-at-point)
-    ((and cmt (pred jj-log-entry-p))
-     (jj-log-header-change-id (jj-log-entry-header cmt)))
-    ((and cmt (pred jj-log-header-p))
-     (jj-log-header-change-id cmt))
-    ((and lin (pred jj-status-lineage-entry-p))
-     (jj-status-lineage-entry-change-id lin))
-    (unmatched (jj-read-revset prompt))))
+  (or (jj--get-revset (jj-thing-at-point))
+      (jj-read-revset prompt)))
 ;; revset:1 ends here
 
 ;; single revision
 
 ;; [[file:majjik.org::*single revision][single revision:1]]
 (defun jj-get-revision-dwim (&optional prompt mutable)
-  "Get a revision or revset based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT. If MUTABLE, only include mutable commits in the completion options."
-  (pcase (jj-thing-at-point)
-    ((and cmt (pred jj-log-entry-p))
-     (jj-log-header-change-id (jj-log-entry-header cmt)))
-    ((and cmt (pred jj-log-header-p))
-     (jj-log-header-change-id cmt))
-    (unmatched (jj-read-revision prompt (when mutable "~immutable()")))))
+  "Get a revision based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT. If MUTABLE, only include mutable commits in the completion options."
+  (or (jj--get-revision (jj-thing-at-point))
+      (jj-read-revision prompt (when mutable "~immutable()"))))
 ;; single revision:1 ends here
 
 ;; rev is wc
@@ -3739,7 +3753,7 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
           transient--suffixes)))
 
 (transient-define-argument jj-single-revision-argument ()
-  :class 'jj-short-option
+  :class 'transient-option
   :multi-value nil
   :reader (lambda (prompt initial-input history)
             (completing-read
@@ -4059,6 +4073,79 @@ Will likely fail for any interactive command."
                      (jj-read-revset "child revs: ")))
   (jj-new :before children-revset :after parents-revset :message message :no-edit no-edit))
 ;; simple:1 ends here
+
+;; transient
+;; TODOs:
+;; - truncating the display of multiline message. needs:
+;;   - its own new infix subclass
+;;   - new method on that class for `transient-format-value'
+;; - multiple ways to set one arg? so you can do easy single-line messages.
+
+
+;; [[file:majjik.org::*transient][transient:1]]
+(defun jj--ensure-message (args)
+  "If --message= is not present in ARGS, prompt the user and add it."
+  (jj--ensure-arg args "--message="
+                  (apply-partially #'read-string "message: ")
+                  #'concat))
+(defun jj--ensure-arg (args arg reader formatter)
+  "If ARG is not present in ARGS, push the result of calling READER and FORMATTER.
+READER should be a function of no args.
+FORMATTER should be a function of 2 arguments: the ARG, and the value returned by READER."
+  (if (transient-arg-value arg args)
+      args
+    (cons (funcall formatter arg (funcall reader)) args)))
+
+(transient-define-prefix jj-commit-prefix ()
+  :refresh-suffixes t
+  :incompatible (prod-cartes '("-r") '("-B" "-A"))
+  ["targets"
+   ("-r" "on revision" jj-multi-revision-argument
+    :argument "-r")
+   ("-A" "insert after" jj-multi-revision-argument
+    :argument "-A")
+   ("-B" "insert before" jj-multi-revision-argument
+    :argument "-B")]
+  ["meta"
+   ("-m" "message" "--message="
+    :always-read t
+    :history-key jj-description-history
+    :reader read-string-from-buffer-with-history)]
+  ["go"
+   ("n" "new" (lambda (args)
+                (interactive (list (transient-args (oref transient-current-prefix command))))
+                (let ((cmd "new"))
+                  (jj-cmd-async cmd
+                      `(,cmd ,@args)
+                    nil
+                    :silent-ok))))
+   ("c" "commit" (lambda (args)
+                   (interactive (list (jj--ensure-message
+                                       (transient-args (oref transient-current-prefix command)))))
+                   (let ((cmd "commit"))
+                     (jj-cmd-async cmd
+                         `(,cmd ,@args)
+                       nil
+                       :silent-ok)))
+    :inapt-if (lambda () (transient--any-on-p "-B" "-A" "-r")))
+   ("e" "edit" (lambda (args)
+                 (interactive (list (transient-args (oref transient-current-prefix command))))
+                   (let ((cmd "edit"))
+                     (jj-cmd-async cmd
+                         `(,cmd ,@args)
+                       nil
+                       :silent-ok)))
+    :inapt-if (lambda () (transient--any-on-p "-B" "-A" "--message=" "--no-edit")))
+   ("w" "describe" (lambda (args)
+                     (interactive (list (jj--ensure-message
+                                         (transient-args (oref transient-current-prefix command)))))
+                     (let ((cmd "describe"))
+                       (jj-cmd-async cmd
+                           `(,cmd ,@args)
+                         nil
+                         :silent-ok)))
+    :inapt-if (lambda () (transient--any-on-p "-B" "-A" "--no-edit")))])
+;; transient:1 ends here
 
 ;; jj edit
 
