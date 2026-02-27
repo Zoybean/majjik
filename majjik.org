@@ -3424,6 +3424,46 @@ need error handling in these. but I do like them being synchronous i think.
     (jj-log-header-change-id cmt))
   (cl-defmethod jj--get-revision ((lin jj-status-lineage-entry) &optional default)
     (jj-status-lineage-entry-change-id lin))
+  
+  (cl-defgeneric jj--get-change (thing &optional default)
+    "Get a change id from THING, or use DEFAULT if not available."
+    default)
+  (cl-defmethod jj--get-change ((cmt jj-log-entry) &optional default)
+    (jj-log-header-change-id (jj-log-entry-header cmt)))
+  (cl-defmethod jj--get-change ((cmt jj-log-header) &optional default)
+    (jj-log-header-change-id cmt))
+  (cl-defmethod jj--get-change ((lin jj-status-lineage-entry) &optional default)
+    (jj-status-lineage-entry-change-id lin))
+
+  (cl-defgeneric jj--get-commit (thing &optional default)
+    "Get a commit id from THING, or use DEFAULT if not available."
+    default)
+  (cl-defmethod jj--get-commit ((cmt jj-log-entry) &optional default)
+    (jj-log-header-commit-id (jj-log-entry-header cmt)))
+  (cl-defmethod jj--get-commit ((cmt jj-log-header) &optional default)
+    (jj-log-header-commit-id cmt))
+  (cl-defmethod jj--get-commit ((lin jj-status-lineage-entry) &optional default)
+    (jj-status-lineage-entry-commit-id lin))
+
+  (cl-defgeneric jj--get-description (thing &optional default)
+    "Get a description from THING, or use DEFAULT if not available."
+    default)
+  (cl-defmethod jj--get-description ((cmt jj-log-entry) &optional default)
+    (jj-log-header-description (jj-log-entry-header cmt)))
+  (cl-defmethod jj--get-description ((cmt jj-log-header) &optional default)
+    (jj-log-header-description cmt))
+  (cl-defmethod jj--get-description ((lin jj-status-lineage-entry) &optional default)
+    (jj-status-lineage-entry-description lin))
+
+  (cl-defgeneric jj--get-bookmarks (thing &optional default)
+    "Get a list of bookmarks from THING, or use DEFAULT if not available."
+    default)
+  (cl-defmethod jj--get-bookmarks ((cmt jj-log-entry) &optional default)
+    (jj-log-header-bookmarks (jj-log-entry-header cmt)))
+  (cl-defmethod jj--get-bookmarks ((cmt jj-log-header) &optional default)
+    (jj-log-header-bookmarks cmt))
+  (cl-defmethod jj--get-bookmarks ((lin jj-status-lineage-entry) &optional default)
+    (jj-status-lineage-entry-bookmarks lin))
 #+end_src
 ***** revset
 #+begin_src elisp
