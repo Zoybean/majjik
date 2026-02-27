@@ -7,7 +7,7 @@
 ;; Version: 0.1.0
 ;; Keywords: vc
 ;; URL: https://github.com/Zoybean/majjik
-;; Package-Requires: (dash s eieio with-editor promise transient)
+;; Package-Requires: (dash s eieio with-editor promise transient llama string-edit)
 
 ;;; Commentary:
 
@@ -22,6 +22,8 @@
 (require 'with-editor)
 (require 'promise)
 (require 'transient)
+(require 'llama)
+(require 'string-edit)
 ;; Require:1 ends here
 
 ;; collect-repeat
@@ -212,6 +214,25 @@ Use me with comma-at!"
                    ,(debug 'val "=>")
                    ,(debug 'err "=/>"))))
 ;; promise debugging:1 ends here
+
+;; cartesian product
+
+;; [[file:majjik.org::*cartesian product][cartesian product:1]]
+(defmacro prod-cartes (&rest sets)
+  "Return the cartesian product of SETS, that is, all the ways to take one element from each SET.
+Each SET should be a list."
+  (let ((syms (cl-loop for ix from 0 below (length sets)
+                       collect (gensym (format "elem-%d-" ix)))))
+    (cl-loop for set in sets
+             for ix upfrom 0
+             for sym in syms
+             for first = t then nil
+             for form = `(cl-loop for ,sym in ,set
+                                  collect (list ,@syms))
+             then `(cl-loop for ,sym in ,set
+                            nconc ,form)
+             finally return form)))
+;; cartesian product:1 ends here
 
 ;; argument utils
 
@@ -744,6 +765,157 @@ this defaults to the current buffer."
       (put-text-property sub-start sub-end prop prop-list object)
       (setq sub-start sub-end))))
 ;; rendering utils:1 ends here
+
+;; string-edit
+
+;; [[file:majjik.org::*string-edit][string-edit:1]]
+(defvar-keymap string-edit-history-mode-map
+  "C-c C-p" #'string-edit-history-previous
+  "C-c C-n" #'string-edit-history-next)
+
+(define-minor-mode string-edit-history-mode
+  "Minor mode for navigating input history within a string-edit prompt.")
+
+(defun string-edit-history--editable-region-start ()
+  (save-excursion
+    (goto-char (point-min))
+    ;; Skip past the help text.
+    (text-property-search-forward 'string-edit--prompt)
+    (point)))
+
+(defun string-edit-history--current ()
+  (buffer-substring (string-edit-history--editable-region-start) (point-max)))
+
+(defun string-edit-history--save-current (mode)
+  "Save the editable region as current element and return the new value for MODE.
+Assumes the current buffer is a string-edit input buffer."
+  (-let (((list pos) mode))
+    (setf (nth pos list) (string-edit-history--current))
+    `(,list ,pos)))
+
+(defun string-edit-history--offset (mode offset)
+  "Replace the editable region with the previous history item and return the new value for MODE.
+Assumes the current buffer is a string-edit input buffer."
+  (-if-let* (((list pos) mode)
+             (npos (+ pos offset))
+             (_ (<= 0 npos))
+             (current (or (nth npos list)
+                          (progn (setq npos pos)
+                                 nil))))
+      (progn
+        (replace-region-contents
+         (string-edit-history--editable-region-start)
+         (point-max)
+         (cl-constantly current))
+        `(,list ,npos))
+    (beep)
+    (message "No more history")
+    mode))
+
+(defun string-edit-history-previous ()
+  (interactive nil string-edit-history-mode)
+  (cl-callf string-edit-history--save-current
+      string-edit-history-mode)
+  (cl-callf string-edit-history--offset
+      string-edit-history-mode 1))
+
+(defun string-edit-history-next ()
+  (interactive nil string-edit-history-mode)
+  (cl-callf string-edit-history--save-current
+      string-edit-history-mode)
+  (cl-callf string-edit-history--offset
+      string-edit-history-mode -1))
+
+(defun string-edit-history--start (hist-var &optional initial)
+  "If HIST-VAR is non-nil, enter `string-edit-history-mode' using VAR for the history."
+  (interactive)
+  (string-edit-history-mode)
+  (setq string-edit-history-mode
+        (and hist-var
+             (list (cons (or initial "")
+                         (seq-copy (symbol-value hist-var)))
+                   0))))
+
+(defun read-string-from-buffer-with-history (prompt string hist-var)
+  "Switch to a new buffer to edit STRING in a recursive edit.
+The user finishes editing with \\<string-edit-mode-map>\\[string-edit-done], or aborts with \\<string-edit-mode-map>\\[string-edit-abort]).
+
+PROMPT will be inserted at the start of the buffer, but won't be
+included in the resulting string.  If nil, no prompt will be
+inserted in the buffer.
+
+If HIST-VAR is non-nil, it should be a symbol whose value cell
+is a list. \\<string-edit-history-mode-map>\\[string-edit-history-next] and \\<string-edit-history-mode-map>\\[string-edit-history-previous] can be used to traverse the
+history list in the buffer.
+
+When the user exits recursive edit, this function returns the
+edited STRING.
+
+Also see `string-edit'."
+  (with-current-buffer
+      (jj--string-edit
+       prompt
+       (or string "")
+       (lambda (edited)
+         (setq string edited)
+         (exit-recursive-edit))
+       :abort-callback (lambda ()
+                         (throw 'exit t)))
+    (string-edit-history--start hist-var string))
+  (recursive-edit)
+  (when hist-var
+    (add-to-history hist-var string))
+  string)
+
+(cl-defun jj--string-edit (prompt string success-callback
+                                  &key abort-callback)
+  "Switch to a new buffer to edit STRING.
+When the user finishes editing (with \\<string-edit-mode-map>\\[string-edit-done]), SUCCESS-CALLBACK
+is called with the resulting string.
+
+If the user aborts (with \\<string-edit-mode-map>\\[string-edit-abort]), ABORT-CALLBACK (if any) is
+called with no parameters.
+
+PROMPT will be inserted at the start of the buffer, but won't be
+included in the resulting string.  If PROMPT is nil, no help text
+will be inserted.
+
+Also see `read-string-from-buffer'."
+  (with-current-buffer (generate-new-buffer "*edit string*")
+    (when prompt
+      (let ((inhibit-read-only t))
+        (insert prompt)
+        (ensure-empty-lines 0)
+        (add-text-properties (point-min) (point)
+                             (list 'intangible t
+                                   'face 'string-edit-prompt
+                                   'read-only t))
+        (insert (propertize (make-separator-line)
+                            'read-only t 'rear-nonsticky t))
+        (add-text-properties (point-min) (point)
+                             (list 'string-edit--prompt t))))
+    (let ((start (point)))
+      (insert string)
+      (goto-char start))
+
+    ;; Use `fit-window-to-buffer' after the buffer is filled with text.
+    (pop-to-buffer (current-buffer)
+                   '(display-buffer-below-selected
+                     (window-height . (lambda (window)
+                                        (fit-window-to-buffer window nil 10)))))
+
+    (set-buffer-modified-p nil)
+    (setq buffer-undo-list nil)
+    (string-edit-mode)
+    (setq-local string-edit--success-callback success-callback)
+    (setq-local string-edit--abort-callback abort-callback)
+    (setq-local header-line-format
+                (substitute-command-keys
+                 "Type \\<string-edit-mode-map>\\[string-edit-done] when you've finished editing or \\[string-edit-abort] to abort"))
+    (message "%s" (substitute-command-keys
+                   "Type \\<string-edit-mode-map>\\[string-edit-done] when you've finished editing"))
+    (current-buffer)))
+;; string-edit:1 ends here
 
 ;; Fileset
 
@@ -3547,6 +3719,49 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                            (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
 ;; async command utils:1 ends here
 
+;; transient command utils
+
+;; [[file:majjik.org::*transient command utils][transient command utils:1]]
+(defun transient--any-on-p (&rest switches)
+  (transient--with-emergency-exit :get-value
+    (-some (lambda (obj)
+             (and (not (oref obj inactive))
+                  (not (oref obj inapt))
+                  ;; it is an infix, so it has an argument slot
+                  (obj-of-class-p obj 'transient-infix)
+                  ;; argument is one we asked for
+                  (cl-member
+                   (oref obj argument)
+                   switches
+                   :test #'string=)
+                  ;; value is set
+                  (oref obj value)))
+          transient--suffixes)))
+
+(transient-define-argument jj-single-revision-argument ()
+  :class 'jj-short-option
+  :multi-value nil
+  :reader (lambda (prompt initial-input history)
+            (completing-read
+             prompt `("@"
+                      ,@(jj-match-revisions)
+                      ,@(jj-list-bookmarks))
+             nil nil initial-input history)))
+
+(transient-define-argument jj-multi-revision-argument ()
+  :class 'transient-option
+  :multi-value 'repeat
+  :reader (lambda (prompt initial-input history)
+            (let ((crm-separator (rx (* blank)
+                                     (any ",| ")
+                                     (* blank))))
+              (completing-read-multiple
+               prompt `("@"
+                        ,@(jj-match-revisions)
+                        ,@(jj-list-bookmarks))
+               nil nil initial-input history))))
+;; transient command utils:1 ends here
+
 ;; command log mode
 
 ;; [[file:majjik.org::*command log mode][command log mode:1]]
@@ -3801,9 +4016,9 @@ Will likely fail for any interactive command."
   (jj-cmd-async "redo" `("redo") nil :silent-ok))
 ;; jj redo:1 ends here
 
-;; jj new
+;; simple
 
-;; [[file:majjik.org::*jj new][jj new:1]]
+;; [[file:majjik.org::*simple][simple:1]]
 (cl-defun jj-new (&key rev before after message no-edit)
   (when (and rev (or before after))
     (user-error "cannot supply REV with BEFORE or AFTER"))
@@ -3843,7 +4058,7 @@ Will likely fail for any interactive command."
   (interactive (list (jj-read-revset "parent revs: ")
                      (jj-read-revset "child revs: ")))
   (jj-new :before children-revset :after parents-revset :message message :no-edit no-edit))
-;; jj new:1 ends here
+;; simple:1 ends here
 
 ;; jj edit
 
@@ -4136,21 +4351,6 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (interactive (list (transient-args (oref transient-current-prefix command))))
   (apply #'jj-git-push args))
 
-(defmacro prod-cartes (&rest sets)
-  "Return the cartesian product of SETS, that is, all the ways to take one element from each SET.
-Each SET should be a list."
-  (let ((syms (cl-loop for ix from 0 below (length sets)
-                       collect (gensym (format "elem-%d-" ix)))))
-    (cl-loop for set in sets
-             for ix upfrom 0
-             for sym in syms
-             for first = t then nil
-             for form = `(cl-loop for ,sym in ,set
-                                  collect (list ,@syms))
-             then `(cl-loop for ,sym in ,set
-                            nconc ,form)
-             finally return form)))
-
 (defun completion-table-with-annotation (table annotator)
   "Decorate an existing TABLE completion function to add (or replace) an annotation function without modifying the other behaviours."
   (lambda (str pred flag)
@@ -4160,8 +4360,6 @@ Each SET should be a list."
          `(metadata (annotation-function . ,annotator)
                     ,@(cdr delegate)))
         (_ delegate)))))
-
-
 
 (defun make--jj-named-infix-table ()
   "For use as a completion table for the `jj-git-push--named-infix'"
@@ -4184,7 +4382,6 @@ Each SET should be a list."
            (->> options
                 (-filter (## string-prefix-p suf %))
                 (mapcar (## concat pref %)))))))))
-
 
 (transient-define-argument jj-git-push--named-infix ()
   "Push a new bookmark NAME at REVISION."
@@ -4236,7 +4433,7 @@ Each SET should be a list."
                                         (propertize chg 'face '(:foreground "magenta"))
                                         (propertize cmt 'face '(:foreground "light blue"))))))
                     nil nil initial-input history)))))
-    ("-r" "revisions" "--revisions="
+    ("-r" "bookmarks in revset" "--revisions="
      ;; push existing bookmarks that are within the given revset
      :multi-value repeat
      :reader (lambda (prompt initial-input history)
@@ -4256,7 +4453,7 @@ Each SET should be a list."
                                         (propertize bk 'face '(:foreground "magenta"))))))
                     nil nil initial-input history))
                  )))
-    ("-c" "change" "--change="
+    ("-c" "new on change" "--change="
      ;; push a change, adding a new bookmark there
      :multi-value repeat
      :reader (lambda (prompt initial-input history)
@@ -4267,7 +4464,7 @@ Each SET should be a list."
                   prompt `("@"
                            ,@(jj-match-revisions))
                   nil nil initial-input history))))
-    ("-n" "named" jj-git-push--named-infix
+    ("-n" "new named on change" jj-git-push--named-infix
      ;; push a change, adding a new bookmark with the given name
      :argument "--named=")
     ]
