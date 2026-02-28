@@ -4084,17 +4084,18 @@ Will likely fail for any interactive command."
   (jj-new :before children-revset :after parents-revset :message message :no-edit no-edit))
 ;; simple:1 ends here
 
-;; transient
+;; TODO transient
 ;; TODOs:
 ;; - truncating the display of multiline message. needs:
 ;;   - its own new infix subclass
 ;;   - new method on that class for `transient-format-value'
 ;; - multiple ways to set one arg? so you can do easy single-line messages.
+;; - i'm combining :init-value with :refresh-suffixes, which is not compatible. I need a way to initialise it only the once, when the transient is first shown...
 
 
 ;; [[file:majjik.org::*transient][transient:1]]
 (defun jj--ensure-message (args)
-  "If --message= is not present in ARGS, prompt the user and add it."
+  "If --message= is not present in ARGS, prompt the user with `read-string' and add it."
   (jj--ensure-arg args "--message="
                   (apply-partially #'read-string "message: ")
                   #'concat))
@@ -4106,47 +4107,25 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
       args
     (cons (funcall formatter arg (funcall reader)) args)))
 
-;; ("a" "amend into" (lambda ()
-;;                     (interactive)
-;;                     (error "unimplemented: jj-amend-into-dwim"))
-;;  :inapt-if (lambda () (transient--any-on-p "-B" "-A" "--no-edit" "--message=")))
-;; ("s" "squash down" (lambda ()
-;;                      (interactive)
-;;                      (error "unimplemented: jj-squash-down-dwim"))
-;;  :inapt-if (lambda () (transient--any-on-p "-B" "-A" "--no-edit" "--message=")))
-
 (transient-define-prefix jj-commit-prefix ()
   ["commit"
    ("n" "new/edit" jj-commit-new-prefix)
-   ("w" "describe" jj-commit-desc-prefix)
+   ("w" "describe" jj-commit-describe-prefix)
+   ("s" "squash" jj-commit-squash-prefix)
    ("k" "abandon" jj-commit-abandon-prefix)])
 
-(transient-define-prefix jj-commit-abandon-prefix ()
+(transient-define-prefix jj-commit-squash-prefix ()
   :refresh-suffixes t
   :incompatible (prod-cartes '("-r") '("-B" "-A"))
   ["targets"
-   ("-r" "on revision" jj-multi-revision-argument
+   ("-r" "revision" jj-single-revision-argument
     :argument "-r"
     :init-value (lambda (opt)
-                  (transient-infix-set opt (list (jj--get-revset (jj-thing-at-point))))))]
-  ["go"
-   ("k" "abandon" (lambda (args)
-                    (interactive (list (jj--ensure-message
-                                        (transient-args (oref transient-current-prefix command)))))
-                    (let ((cmd "abandon"))
-                      (jj-cmd-async cmd
-                          `(,cmd ,@args)
-                        nil
-                        :silent-ok))))])
-
-(transient-define-prefix jj-commit-desc-prefix ()
-  :refresh-suffixes t
-  :incompatible (prod-cartes '("-r") '("-B" "-A"))
-  ["targets"
-   ("-r" "on revision" jj-multi-revision-argument
-    :argument "-r"
-    :init-value (lambda (opt)
-                  (transient-infix-set opt (list (jj--get-revset (jj-thing-at-point))))))]
+                  (transient-infix-set opt (jj--get-revset (jj-thing-at-point)))))
+   ("-f" "from" jj-single-revision-argument
+    :argument "-f")
+   ("-t" "to" jj-single-revision-argument
+    :argument "-t")]
   ["meta"
    ("-m" "message" "--message="
     :init-value (lambda (opt)
@@ -4155,21 +4134,32 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
     :history-key jj-description-history
     :reader read-string-from-buffer-with-history)]
   ["go"
-   ("w" "describe" (lambda (args)
-                     (interactive (list (jj--ensure-message
-                                         (transient-args (oref transient-current-prefix command)))))
-                     (let ((cmd "describe"))
-                       (jj-cmd-async cmd
-                           `(,cmd ,@args)
-                         nil
-                         :silent-ok)))
-    :inapt-if (lambda () (transient--any-on-p "-B" "-A" "--no-edit")))])
-
-(transient-define-prefix jj-commit-prefix ()
-  ["commit"
-   ("n" "new/edit" jj-commit-new-prefix)
-   ("w" "describe" jj-commit-describe-prefix)
-   ("k" "abandon" jj-commit-abandon-prefix)])
+   ("s" "squash" (lambda (args)
+                   (interactive (list (jj--ensure-message
+                                       (transient-args (oref transient-current-prefix command)))))
+                   (let ((cmd "squash"))
+                     (jj-cmd-async cmd
+                         `(,cmd ,@args)
+                       nil
+                       :silent-ok))))
+   ("d" "squash down" (lambda (args)
+                        (interactive (list (jj--ensure-message
+                                            (transient-args (oref transient-current-prefix command)))))
+                        (let ((cmd "squash"))
+                          (jj-cmd-async cmd
+                              `(,cmd ,@args)
+                            nil
+                            :silent-ok)))
+    :inapt-if (lambda () (transient--any-on-p "-f" "-t")))
+   ("a" "amend into" (lambda (args)
+                       (interactive (list (jj--ensure-message
+                                           (transient-args (oref transient-current-prefix command)))))
+                       (let ((cmd "squash"))
+                         (jj-cmd-async cmd
+                             `(,cmd ,@args)
+                           nil
+                           :silent-ok)))
+    :inapt-if (lambda () (transient--any-on-p "-f" "-t")))])
 
 (transient-define-prefix jj-commit-abandon-prefix ()
   :refresh-suffixes t
@@ -4177,7 +4167,7 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
    ("-r" "on revision" jj-multi-revision-argument
     :argument "-r"
     :init-value (lambda (opt)
-                  (transient-infix-set opt (list (jj--get-revset (jj-thing-at-point))))))]
+                  (transient-infix-set opt (opt (jj--get-revset (jj-thing-at-point))))))]
   ["go"
    ("k" "abandon" (lambda (args)
                     (interactive (list (transient-args (oref transient-current-prefix command))))
@@ -4190,10 +4180,10 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
 (transient-define-prefix jj-commit-describe-prefix ()
   :refresh-suffixes t
   ["targets"
-   ("-r" "on revision" jj-multi-revision-argument
+   ("-r" "on revision" jj-single-revision-argument
     :argument "-r"
     :init-value (lambda (opt)
-                  (transient-infix-set opt (list (jj--get-revset (jj-thing-at-point))))))]
+                  (transient-infix-set opt (jj--get-revset (jj-thing-at-point)))))]
   ["meta"
    ("-m" "message" "--message="
     :init-value (lambda (opt)
@@ -4209,8 +4199,7 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
                        (jj-cmd-async cmd
                            `(,cmd ,@args)
                          nil
-                         :silent-ok)))
-    :inapt-if (lambda () (transient--any-on-p "-B" "-A" "--no-edit")))])
+                         :silent-ok))))])
 
 (transient-define-prefix jj-commit-new-prefix ()
   :refresh-suffixes t
@@ -4219,7 +4208,7 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
    ("-r" "on revision" jj-multi-revision-argument
     :argument "-r"
     :init-value (lambda (opt)
-                  (transient-infix-set opt (list (jj--get-revset (jj-thing-at-point))))))
+                  (transient-infix-set opt (opt (jj--get-revset (jj-thing-at-point))))))
    ("-A" "insert after" jj-multi-revision-argument
     :argument "-A")
    ("-B" "insert before" jj-multi-revision-argument
