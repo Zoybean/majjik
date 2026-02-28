@@ -2552,6 +2552,7 @@ This is concatenated with an identifier for the repository to define the buffer 
   "C-_" #'jj-undo
   "C-M-_" #'jj-redo
   "C-x u" #'jj-undo
+  "C" #'jj-commit-entry-prefix
   "c e" #'jj-edit-dwim
   "c n e" #'jj-edit-dwim
   "c n n" #'jj-new-on-dwim
@@ -2564,6 +2565,7 @@ This is concatenated with an identifier for the repository to define the buffer 
   "c w" #'jj-desc-dwim
   "c a" #'jj-amend-into-dwim
   "c s" #'jj-squash-down-dwim
+  "d" #'jj-diff-entry-prefix
   "F" #'jj-git-fetch-prefix
   "P" #'jj-git-push-prefix
   "b n" #'jj-bookmark-new-dwim
@@ -2580,6 +2582,7 @@ This is concatenated with an identifier for the repository to define the buffer 
   "f u" #'jj-file-untrack-dwim
   "f k" #'jj-file-delete-dwim
   "$" #'jj-pop-to-command-log)
+
 
 (keymap-global-set "C-x j" #'jj-dash--async)
 ;; Keymaps:1 ends here
@@ -3470,7 +3473,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun jj-get-revset-dwim (&optional prompt)
   "Get a revision or revset based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
   (or (jj--get-revset (jj-thing-at-point))
-      (jj-read-revset prompt)))
+      (jj-read-multi-revision prompt nil nil)))
 ;; revset:1 ends here
 
 ;; single revision
@@ -3879,30 +3882,54 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                    :test #'string=)
                   ;; value is set
                   (oref obj value)))
-          transient--suffixes)))
+           transient--suffixes)))
+
+(defun transient--all-on-p (&rest switches)
+  "Returns if any of SWITCHES exist for this prefix, and are not set.
+Note: this returns possibly-unexpected results for nonexistent switches - they are always on."
+  (transient--with-emergency-exit :get-value
+    (-all-p (lambda (obj)
+              ;; value is set
+              (oref obj value))
+            (-filter (lambda (obj)
+                       (and (not (oref obj inactive))
+                            (not (oref obj inapt))
+                            ;; it is an infix, so it has an argument slot
+                            (obj-of-class-p obj 'transient-infix)
+                            ;; argument is one we asked for
+                            (cl-member
+                             (oref obj argument)
+                             switches
+                             :test #'string=)))
+                     transient--suffixes))))
 
 (transient-define-argument jj-single-revision-argument ()
   :class 'transient-option
   :multi-value nil
-  :reader (lambda (prompt initial-input history)
-            (completing-read
-             prompt `("@"
-                      ,@(jj-match-revisions)
-                      ,@(jj-list-bookmarks))
-             nil nil initial-input history)))
+  :always-read nil
+  :reader #'jj-read-single-revision)
 
 (transient-define-argument jj-multi-revision-argument ()
   :class 'transient-option
   :multi-value 'repeat
-  :reader (lambda (prompt initial-input history)
-            (let ((crm-separator (rx (* blank)
-                                     (any ",| ")
-                                     (* blank))))
-              (completing-read-multiple
-               prompt `("@"
-                        ,@(jj-match-revisions)
-                        ,@(jj-list-bookmarks))
-               nil nil initial-input history))))
+  :always-read nil
+  :reader #'jj-read-multi-revision)
+
+(defun jj--ensure-message (args)
+  "If --message= is not present in ARGS, prompt the user with `read-string' and add it."
+  (jj--ensure-arg args "--message="
+                  (apply-partially #'read-string "message: ")
+                  #'concat))
+(defun jj--ensure-arg (args arg reader formatter)
+  "If ARG is not present in ARGS, push the result of calling READER and FORMATTER.
+READER should be a function of no args.
+FORMATTER should be a function of 2 arguments: the ARG, and the value returned by READER."
+  (if (transient-arg-value arg args)
+      args
+    (cons (funcall formatter arg (funcall reader)) args)))
+
+(defun jj--transient-args ()
+  (transient-args (oref transient-current-prefix command)))
 ;; transient command utils:1 ends here
 
 ;; command log mode
@@ -4063,47 +4090,137 @@ Will likely fail for any interactive command."
                   ((pred symbolp) (symbol-name val))
                   ((pred stringp) val)
                   (_ (user-error "unquoted parens in command line: %s" val)))))
-    (let* ((cmd-strings (flat cmd))
-           (name (s-join " " cmd-strings))
-           (buf (generate-new-buffer name)))
-      (promise-then (jj-cmd-async name cmd-strings nil nil t buf)
-                    (lambda (_)
-                      (if (jj--empty-buffer-p buf)
-                          (kill-buffer buf)
-                        (with-current-buffer buf
-                          (font-lock-mode)
-                          (view-mode-enter nil #'kill-buffer))
-                        (pop-to-buffer buf)))))))
+    (let* ((cmd-strings (flat cmd)))
+      (jj-cmd-async-view cmd-strings))))
+
+(defun jj-cmd-async-view (cmd &optional no-revert silent-ok)
+  "Run jj command CMD and view the output in its own buffer."
+  (let* ((name (s-join " " cmd))
+         (buf (generate-new-buffer name)))
+    (promise-then (jj-cmd-async name cmd no-revert silent-ok :no-kill buf)
+                  (lambda (_)
+                    (if (jj--empty-buffer-p buf)
+                        (kill-buffer buf)
+                      (with-current-buffer buf
+                        (font-lock-mode)
+                        (view-mode-enter nil #'kill-buffer))
+                      (pop-to-buffer buf))))))
 ;; anything:1 ends here
+
+;; entry
+
+;; [[file:majjik.org::*entry][entry:1]]
+(transient-define-prefix jj-diff-entry-prefix ()
+  [["diff"
+    ("d" "diff" jj-diff-prefix)
+    ("i" "interdiff" jj-interdiff-prefix)]
+   ["show"
+    ("s" "show" jj-show-prefix)]])
+;; entry:1 ends here
+
+;; common
+
+;; [[file:majjik.org::*common][common:1]]
+(transient-define-group jj-diff-formats-group
+  ["summary formats"
+   ("-T" "template" "--template=")
+   ("-s" "summary" "--summary")
+   ("-S" "stat" "--stat")
+   ("-Y" "types" "--types")
+   ("-N" "name-only" "--name-only")]
+  ["diff formats"
+   ("-T" "template" "--template=")
+   ("-g" "git" "--git")
+   ("-l" "tool" "--tool=")
+   ("-c" "color-words" "--color-words")]
+  ["meta"
+   ("-C" "context" "--context="
+    :reader (lambda (p s h)
+              (number-to-string (read-number p s h))))
+   ("-w" "ignore all space" "--ignore-all-space")
+   ("-b" "ignore space change" "--ignore-space-change")])
+
+(defvar jj-diff-format-incompatibilities
+  `(("--template=" "--summary" "--stat" "--types" "--name-only")
+    ("--template=" "--tool=" "--git" "--color-words")
+    ("--ignore-all-space" "--ignore-space-change")))
+;; common:1 ends here
+
+;; diff
+
+;; [[file:majjik.org::*diff][diff:1]]
+(transient-define-prefix jj-diff-prefix ()
+  :refresh-suffixes t
+  :incompatible `(,@(prod-cartes '("-r") '("-f" "-t"))
+                  ,@jj-diff-format-incompatibilities)
+  [["targets"
+    ("-r" "revisions" jj-multi-revision-argument
+     :argument "-r")
+    ("-f" "from" jj-single-revision-argument
+     :argument "-f")
+    ;; TODO fileset argument: --
+    ("-t" "to" jj-single-revision-argument
+     :argument "-t")]
+   jj-diff-formats-group]
+  ["go"
+   ("d" "diff" (lambda (args)
+                 (interactive (list (jj--transient-args)))
+                 (jj-cmd-async-view `("diff" ,@args)))
+    :inapt-if-not (lambda () (or (transient--all-on-p "-f" "-t")
+                                 (transient--any-on-p "-r"))))])
+;; diff:1 ends here
+
+;; interdiff
+
+;; [[file:majjik.org::*interdiff][interdiff:1]]
+(transient-define-prefix jj-interdiff-prefix ()
+  :refresh-suffixes t
+  :incompatible jj-diff-format-incompatibilities
+  [["targets"
+    ("-f" "from" jj-single-revision-argument
+     :argument "-f")
+    ;; TODO fileset argument: --
+    ("-t" "to" jj-single-revision-argument
+     :argument "-t")]
+   jj-diff-formats-group]
+  ["go"
+   ("i" "interdiff" (lambda (args)
+                 (interactive (list (jj--transient-args)))
+                 (jj-cmd-async-view `("interdiff" ,@args)))
+    :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))])
+;; interdiff:1 ends here
+
+;; show
+
+;; [[file:majjik.org::*show][show:1]]
+(transient-define-prefix jj-show-prefix ()
+  :refresh-suffixes t
+  :incompatible jj-diff-format-incompatibilities
+  [["targets"
+    ("-r" "revision" jj-single-revision-argument
+     :argument "-r")]
+   jj-diff-formats-group]
+  ["go"
+   ("s" "show" (lambda (args)
+                   (interactive (list (jj--transient-args)))
+                   (jj-cmd-async-view `("show" ,@args)))
+    :inapt-if-not (lambda () (transient--any-on-p "-r")))])
+;; show:1 ends here
 
 ;; jj diff
 
 ;; [[file:majjik.org::*jj diff][jj diff:1]]
 (cl-defun jj-diff (&key at from to fileset)
   "View the diff for AT, or between FROM and TO, optionally limited to files in FILESET."
-  (let* ((repo-dir default-directory)
-         (main-buf (get-buffer-create (format "*jj-diff %s:%s:%s*" repo-dir at fileset))))
-    (with-current-buffer main-buf
-      (let ((inhibit-read-only t))
-        (erase-accessible-buffer)))
-    (promise-then
-     (jj-cmd-async
-         "diff"
-         `("diff"
-           "--git"
-           ,@(jj--if-arg at #'identity "--revisions")
-           ,@(jj--if-arg from #'identity "--from")
-           ,@(jj--if-arg to #'identity "--to")
-           "--"
-           ,@(jj--if-arg fileset #'identity nil))
-       :no-revert :silent-ok :no-kill-output main-buf)
-     (lambda (proc)
-       (with-current-buffer main-buf
-         (font-lock-mode)
-         (view-mode-enter nil #'kill-buffer)
-         (setq-local default-directory repo-dir))
-
-       (pop-to-buffer main-buf)))))
+  (jj-cmd-async-view
+   `("diff"
+     "--git"
+     ,@(jj--if-arg at #'identity "--revisions")
+     ,@(jj--if-arg from #'identity "--from")
+     ,@(jj--if-arg to #'identity "--to")
+     "--"
+     ,@(jj--if-arg fileset #'identity nil))
+   :no-revert :silent-ok))
 
 (defun jj-diff-at (revset &optional fileset)
   "View the diff for REVISION, optionally limited to files in FILESET."
@@ -4119,28 +4236,12 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*jj show][jj show:1]]
 (cl-defun jj-show (commit &optional fileset)
   "View COMMIT, optionally limited to files in FILESET."
-  (let* ((repo-dir default-directory)
-         (main-buf (get-buffer-create (format "*jj-show %s:%s:%s*" repo-dir commit fileset))))
-    (with-current-buffer main-buf
-      (let ((inhibit-read-only t))
-        (erase-accessible-buffer)))
-    (promise-then
-     (jj-cmd-async
-         "show"
-         `("show"
-           "--git"
-           "-r" ,commit
-           "--"
-           ,@(jj--if-arg fileset #'identity nil))
-       :no-revert :silent-ok :no-kill-output main-buf)
-     (lambda (proc)
-       (with-current-buffer main-buf
-         ;; TODO get a better mode for full commit view
-         (font-lock-mode)
-         (view-mode-enter nil #'kill-buffer)
-         (setq-local default-directory repo-dir))
-
-       (pop-to-buffer main-buf)))))
+  (jj-cmd-async-view
+   `("show"
+     "--git"
+     "-r" ,commit
+     ,@(jj--if-arg fileset #'identity "--"))
+   :no-revert :silent-ok))
 ;; jj show:1 ends here
 
 ;; jj undo
@@ -4159,9 +4260,449 @@ Will likely fail for any interactive command."
   (jj-cmd-async "redo" `("redo") nil :silent-ok))
 ;; jj redo:1 ends here
 
-;; simple
+;; entry point
 
-;; [[file:majjik.org::*simple][simple:1]]
+;; [[file:majjik.org::*entry point][entry point:1]]
+(transient-define-prefix jj-commit-entry-prefix ()
+  [["work"
+    ("n" "new" jj-commit-new-prefix)
+    ("e" "edit" jj-commit-edit-prefix)
+    ("w" "describe" jj-commit-describe-prefix)
+    ("m" "metaedit" jj-commit-metaedit-prefix)
+    ]
+   ["rework"
+    ("a" "absorb" jj-commit-absorb-prefix)
+    ("s" "squash" jj-commit-squash-prefix)
+    ("x" "restore" jj-commit-restore-prefix)
+    ("k" "abandon" jj-commit-abandon-prefix)
+    ]
+   ["rearrange"
+    ("r" "rebase" jj-commit-rebase-prefix)
+    ("d" "duplicate" jj-commit-duplicate-prefix)
+    ("p" "parallelize" jj-commit-parallelize-prefix)
+    ("P" "simplify-parents" jj-commit-simplify-parents-prefix)]])
+;; entry point:1 ends here
+
+;; squash
+
+;; [[file:majjik.org::*squash][squash:1]]
+(transient-define-prefix jj-commit-squash-prefix ()
+  :refresh-suffixes t
+  :incompatible `(,@(prod-cartes '("-r") '("-f" "-t"))
+                  ("-m" "-u"))
+  [["targets"
+    ("-r" "revision" jj-single-revision-argument
+     :argument "-r")
+    ("-f" "from" jj-multi-revision-argument
+     :argument "-f")
+    ("-t" "to" jj-single-revision-argument
+     :argument "-t")]
+   ["meta"
+    ("-m" "message" "--message="
+     :always-read t
+     :history-key jj-description-history
+     :reader (lambda (p s h)
+               (condition-case e
+                   (read-string-from-buffer-with-history p s h)
+                 (error (progn
+                          (message "%s" e)
+                          s)))))
+    ("-u" "use dest message" "-u")
+    ("-k" "keep emptied" "-k")]]
+  ["go"
+   ("s" "squash" (lambda (args)
+                   (interactive (list (jj--transient-args)))
+                   (let ((cmd "squash"))
+                     (jj-cmd-async cmd
+                         `(,cmd ,@args)
+                       nil
+                       :silent-ok)))
+    :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))
+   ("d" "squash down" (lambda (args)
+                        (interactive (list (jj--transient-args)))
+                        (let ((cmd "squash"))
+                          (jj-cmd-async cmd
+                              `(,cmd ,@args)
+                            nil
+                            :silent-ok)))
+    :inapt-if-not (lambda () (and (transient--any-on-p "-r")
+                                  (not (transient--any-on-p "-t" "-f")))))
+   ("a" "amend @ into" (lambda (args)
+                         (interactive (list (jj--transient-args)))
+                         (let ((cmd "squash"))
+                           (jj-cmd-async cmd
+                               `(,cmd ,@args)
+                             nil
+                             :silent-ok)))
+    :inapt-if-not (lambda () (and (transient--any-on-p "-r" "-t")
+                                  (not (transient--any-on-p "-f")))))])
+;; squash:1 ends here
+
+;; absorb
+
+;; [[file:majjik.org::*absorb][absorb:1]]
+(transient-define-prefix jj-commit-absorb-prefix ()
+  :refresh-suffixes t
+  [["targets"
+    ("-f" "from" jj-single-revision-argument
+     :argument "-f")
+    ("-t" "to" jj-multi-revision-argument
+     :argument "-t")]]
+  ["go"
+   ("a" "absorb" (lambda (args)
+                   (interactive (list (jj--transient-args)))
+                   (let ((cmd "absorb"))
+                     (jj-cmd-async cmd
+                         `(,cmd ,@args)
+                       nil
+                       :silent-ok)))
+    :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))])
+;; absorb:1 ends here
+
+;; abandon
+
+;; [[file:majjik.org::*abandon][abandon:1]]
+(transient-define-prefix jj-commit-abandon-prefix ()
+  :refresh-suffixes t
+  ["targets"
+   ("-r" "revisions" jj-multi-revision-argument
+    :argument "-r")]
+  ["go"
+   ("k" "abandon" (lambda (args)
+                    (interactive (list (jj--transient-args)))
+                    (let ((cmd "abandon"))
+                      (jj-cmd-async cmd
+                          `(,cmd ,@args)
+                        nil
+                        :silent-ok)))
+    :inapt-if-not (lambda () (transient--any-on-p "-r")))])
+;; abandon:1 ends here
+
+;; describe
+
+;; [[file:majjik.org::*describe][describe:1]]
+(transient-define-prefix jj-commit-describe-prefix ()
+  :refresh-suffixes t
+  [["targets"
+    ("-r" "revision" jj-single-revision-argument
+     :argument "-r")]
+   ["meta"
+    ("-m" "message" "--message="
+     :always-read t
+     :history-key jj-description-history
+     :reader (lambda (p s h)
+               (let ((prev (jj--get-description (jj-thing-at-point))))
+                 (condition-case e
+                     (read-string-from-buffer-with-history p (or s prev) h)
+                   (error (progn
+                            (message "%s" e)
+                            s))))))]]
+  ["go"
+   ("w" "describe" (lambda (args)
+                     (interactive (list (jj--ensure-message
+                                         (jj--transient-args))))
+                     (let ((cmd "describe"))
+                       (jj-cmd-async cmd
+                           `(,cmd ,@args)
+                         nil
+                         :silent-ok)))
+    :inapt-if-not (lambda () (transient--any-on-p "-r")))
+   ("c" "commit" (lambda (args)
+                   (interactive (list (jj--ensure-message
+                                       (jj--transient-args))))
+                   (let ((cmd "commit"))
+                     (jj-cmd-async cmd
+                         `(,cmd ,@args)
+                       nil
+                       :silent-ok)))
+    :inapt-if (lambda () (transient--any-on-p "-r")))])
+;; describe:1 ends here
+
+;; metaedit
+
+;; [[file:majjik.org::*metaedit][metaedit:1]]
+(transient-define-prefix jj-commit-metaedit-prefix ()
+  :refresh-suffixes t
+  [["targets"
+    ("-r" "revisions" jj-multi-revision-argument
+     :argument "-r")]
+   ["set"
+    ("-m" "message" "--message="
+     :always-read t
+     :history-key jj-description-history
+     :reader (lambda (p s h)
+               (let ((prev (jj--get-description (jj-thing-at-point))))
+                 (condition-case e
+                     (read-string-from-buffer-with-history p (or s prev) h)
+                   (error (progn
+                            (message "%s" e)
+                            s))))))
+    
+    ("-a" "set author" "--author=")
+    ("-t" "set timestamp" "--author-timestamp=")]
+   ["regen"
+    ("-uc" "update change id" "--update-change-id")
+    ("-ut" "update timestamp" "--update-author-timestamp")
+    ("-ua" "update author" "--update-author")
+    ("-uf" "force-rewrite" "--force-rewrite")]
+   ["go"
+    ("m" "metaedit"
+     (lambda (args)
+       (interactive (list (jj--transient-args)))
+       (let ((cmd "metaedit"))
+         (jj-cmd-async cmd
+             `(,cmd ,@args)
+           nil
+           :silent-ok)))
+     :inapt-if-not (lambda ()
+                     (transient--any-on-p "-r")))]])
+;; metaedit:1 ends here
+
+;; new
+
+;; [[file:majjik.org::*new][new:1]]
+(transient-define-prefix jj-commit-new-prefix ()
+  :refresh-suffixes t
+  :incompatible (prod-cartes '("-r") '("-B" "-A"))
+  [["targets"
+    ("-r" "on revisions" jj-multi-revision-argument
+     :argument "-r")
+    ("-A" "insert after" jj-multi-revision-argument
+     :argument "-A")
+    ("-B" "insert before" jj-multi-revision-argument
+     :argument "-B")]
+   ["meta"
+    ("-m" "message" "--message="
+     :always-read t
+     :history-key jj-description-history
+     :reader (lambda (p s h)
+               (condition-case e
+                   (read-string-from-buffer-with-history p s h)
+                 (error (progn
+                          (message "%s" e)
+                          s)))))
+    ("-N" "no edit" "--no-edit")]]
+  ["go"
+   ("n" "new" (lambda (args)
+                (interactive (list (jj--transient-args)))
+                (let ((cmd "new"))
+                  (jj-cmd-async cmd
+                      `(,cmd ,@args)
+                    nil
+                    :silent-ok)))
+    :inapt-if-not (lambda ()
+                    (transient--any-on-p "-B" "-A" "-r")))
+   ("N" "next" (lambda ()
+                 (interactive)
+                 (let ((cmd "next"))
+                   (jj-cmd-async cmd
+                       `(,cmd)
+                     nil
+                     :silent-ok)))
+    :inapt-if (lambda ()
+                (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))
+   ("P" "prev" (lambda ()
+                 (interactive)
+                 (let ((cmd "prev"))
+                   (jj-cmd-async cmd
+                       `(,cmd)
+                     nil
+                     :silent-ok)))
+    :inapt-if (lambda ()
+                (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))])
+;; new:1 ends here
+
+;; edit
+
+;; [[file:majjik.org::*edit][edit:1]]
+(transient-define-prefix jj-commit-edit-prefix ()
+  :refresh-suffixes t
+  ["targets"
+   ("-r" "revision" jj-single-revision-argument
+    :argument "-r")
+   ]
+  ["go"
+   ("e" "edit" (lambda (args)
+                 (interactive (list (jj--transient-args)))
+                 (let ((cmd "edit"))
+                   (jj-cmd-async cmd
+                       `(,cmd ,@args)
+                     nil
+                     :silent-ok)))
+    :inapt-if-not (lambda () (transient--any-on-p "-r")))
+   ("N" "next --edit" (lambda ()
+                        (interactive)
+                        (let ((cmd "next"))
+                          (jj-cmd-async cmd
+                              `(,cmd "--edit")
+                            nil
+                            :silent-ok)))
+    :inapt-if (lambda ()
+                (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))
+   ("P" "prev --edit" (lambda ()
+                        (interactive)
+                        (let ((cmd "prev"))
+                          (jj-cmd-async cmd
+                              `(,cmd "--edit")
+                            nil
+                            :silent-ok)))
+    :inapt-if (lambda ()
+                (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))])
+;; edit:1 ends here
+
+;; rebase
+
+;; [[file:majjik.org::*rebase][rebase:1]]
+(transient-define-prefix jj-commit-rebase-prefix ()
+  :refresh-suffixes t
+  :incompatible `(("-r" "-s" "-b")
+                  ,@(prod-cartes '("-o") '("-B" "-A")))
+  [["sources"
+    ("-r" "revisions" jj-multi-revision-argument
+     :argument "-r")
+    ("-s" "source" jj-multi-revision-argument
+     :argument "-s")
+    ("-b" "branch" jj-multi-revision-argument
+     :argument "-b")]
+   ["targets"
+    ("-o" "onto revisions" jj-multi-revision-argument
+     :argument "-o")
+    ("-A" "insert after" jj-multi-revision-argument
+     :argument "-A")
+    ("-B" "insert before" jj-multi-revision-argument
+     :argument "-B")]
+   ["meta"
+    ("-S" "skip emptied" "--skip-emptied")
+    ("-D" "keep divergent" "--keep-divergent")]]
+  ["go"
+   ("r" "rebase" (lambda (args)
+                   (interactive (list (jj--transient-args)))
+                   (let ((cmd "rebase"))
+                     (jj-cmd-async cmd
+                         `(,cmd ,@args)
+                       nil
+                       :silent-ok)))
+    :inapt-if-not (lambda ()
+                    (and (transient--any-on-p "-r" "-s" "-b")
+                         (transient--any-on-p "-o" "-A" "-B"))))
+   ])
+;; rebase:1 ends here
+
+;; restore
+
+;; [[file:majjik.org::*restore][restore:1]]
+(transient-define-prefix jj-commit-restore-prefix ()
+  :refresh-suffixes t
+  :incompatible (prod-cartes '("-c") '("-f" "-t"))
+  [["targets"
+    ("-c" "changes in" jj-single-revision-argument
+     :argument "-c")
+    ("-f" "from" jj-single-revision-argument
+     :argument "-f")
+    ("-t" "to" jj-single-revision-argument
+     :argument "-t")]
+   ;; ["files"] ;; requires positional-argument processing
+   ["meta"
+    ("-D" "restore descendents" "--restore-descendants")
+    ;; ("-i" "interactive" "-i")
+    ;; ("-T" "tool" "--tool=")
+    ]]
+  ["go"
+   ("x" "restore" (lambda (args)
+                    (interactive (list (jj--transient-args)))
+                    (let ((cmd "restore"))
+                      (jj-cmd-async cmd
+                          `(,cmd ,@args)
+                        nil
+                        :silent-ok)))
+    :inapt-if-not (lambda () (or
+                              (transient--all-on-p "-f" "-t")
+                              (transient--any-on-p "-c"))))
+   ])
+;; restore:1 ends here
+
+;; duplicate/revert
+
+;; [[file:majjik.org::*duplicate/revert][duplicate/revert:1]]
+(transient-define-prefix jj-commit-copy-prefix ()
+  :refresh-suffixes t
+  :incompatible (prod-cartes '("-o") '("-B" "-A"))
+  [["sources"
+    ("-r" "revisions" jj-multi-revision-argument
+     :argument "-r")]]
+  [["targets"
+    ("-o" "onto revisions" jj-multi-revision-argument
+     :argument "-o")
+    ("-A" "insert after" jj-multi-revision-argument
+     :argument "-A")
+    ("-B" "insert before" jj-multi-revision-argument
+     :argument "-B")]]
+  ["go"
+   ("d" "duplicate" (lambda (args)
+                      (interactive (list (jj--transient-args)))
+                      (let ((cmd "duplicate"))
+                        (jj-cmd-async cmd
+                            `(,cmd ,@args)
+                          nil
+                          :silent-ok)))
+    :inapt-if-not (lambda ()
+                    (and (transient--any-on-p "-B" "-A" "-o")
+                         (transient--any-on-p "-r"))))
+   ("v" "revert" (lambda (args)
+                   (interactive (list (jj--transient-args)))
+                   (jj-cmd-async `("revert" ,@args)))
+    :inapt-if-not (lambda ()
+                    (and (jj-any-destination-provided)
+                         (transient--any-on-p "-r"))))])
+;; duplicate/revert:1 ends here
+
+;; parallelize
+
+;; [[file:majjik.org::*parallelize][parallelize:1]]
+(transient-define-prefix jj-commit-parallelize-prefix ()
+  :refresh-suffixes t
+  [["targets"
+    ("-r" "revisions" jj-multi-revision-argument
+     :argument "-r")]]
+  ["go"
+   ("p" "parallelize"
+    (lambda (args)
+      (interactive (list (jj--transient-args)))
+      (let ((cmd "parallelize"))
+        (jj-cmd-async cmd
+            `(,cmd ,@args)
+          nil
+          :silent-ok)))
+    :inapt-if-not (lambda ()
+                    (transient--any-on-p "-r")))])
+;; parallelize:1 ends here
+
+;; simplify-parents
+
+;; [[file:majjik.org::*simplify-parents][simplify-parents:1]]
+(transient-define-prefix jj-commit-simplify-parents-prefix ()
+  :refresh-suffixes t
+  [["targets"
+    ("-s" "sources" jj-multi-revision-argument
+     :argument "-s")
+    ("-r" "revisions" jj-multi-revision-argument
+     :argument "-r")]]
+  ["go"
+   ("p" "simplify-parents"
+    (lambda (args)
+      (interactive (list (jj--transient-args)))
+      (let ((cmd "simplify-parents"))
+        (jj-cmd-async cmd
+            `(,cmd ,@args)
+          nil
+          :silent-ok)))
+    :inapt-if-not (lambda ()
+                    (transient--any-on-p "-r" "-s")))])
+;; simplify-parents:1 ends here
+
+;; jj new
+
+;; [[file:majjik.org::*jj new][jj new:1]]
 (cl-defun jj-new (&key rev before after message no-edit)
   (when (and rev (or before after))
     (user-error "cannot supply REV with BEFORE or AFTER"))
@@ -4198,83 +4739,10 @@ Will likely fail for any interactive command."
 
 (cl-defun jj-new-insert (children-revset parents-revset &key message no-edit)
   "Insert a new commit before the chosen CHILDREN-REVSET, and after the chosen PARENTS-REVSET."
-  (interactive (list (jj-read-revset "parent revs: ")
-                     (jj-read-revset "child revs: ")))
+  (interactive (list (jj-read-multi-revision "parent revs: ")
+                     (jj-read-multi-revision "child revs: ")))
   (jj-new :before children-revset :after parents-revset :message message :no-edit no-edit))
-;; simple:1 ends here
-
-;; transient
-;; TODOs:
-;; - truncating the display of multiline message. needs:
-;;   - its own new infix subclass
-;;   - new method on that class for `transient-format-value'
-;; - multiple ways to set one arg? so you can do easy single-line messages.
-
-
-;; [[file:majjik.org::*transient][transient:1]]
-(defun jj--ensure-message (args)
-  "If --message= is not present in ARGS, prompt the user and add it."
-  (jj--ensure-arg args "--message="
-                  (apply-partially #'read-string "message: ")
-                  #'concat))
-(defun jj--ensure-arg (args arg reader formatter)
-  "If ARG is not present in ARGS, push the result of calling READER and FORMATTER.
-READER should be a function of no args.
-FORMATTER should be a function of 2 arguments: the ARG, and the value returned by READER."
-  (if (transient-arg-value arg args)
-      args
-    (cons (funcall formatter arg (funcall reader)) args)))
-
-(transient-define-prefix jj-commit-prefix ()
-  :refresh-suffixes t
-  :incompatible (prod-cartes '("-r") '("-B" "-A"))
-  ["targets"
-   ("-r" "on revision" jj-multi-revision-argument
-    :argument "-r")
-   ("-A" "insert after" jj-multi-revision-argument
-    :argument "-A")
-   ("-B" "insert before" jj-multi-revision-argument
-    :argument "-B")]
-  ["meta"
-   ("-m" "message" "--message="
-    :always-read t
-    :history-key jj-description-history
-    :reader read-string-from-buffer-with-history)]
-  ["go"
-   ("n" "new" (lambda (args)
-                (interactive (list (transient-args (oref transient-current-prefix command))))
-                (let ((cmd "new"))
-                  (jj-cmd-async cmd
-                      `(,cmd ,@args)
-                    nil
-                    :silent-ok))))
-   ("c" "commit" (lambda (args)
-                   (interactive (list (jj--ensure-message
-                                       (transient-args (oref transient-current-prefix command)))))
-                   (let ((cmd "commit"))
-                     (jj-cmd-async cmd
-                         `(,cmd ,@args)
-                       nil
-                       :silent-ok)))
-    :inapt-if (lambda () (transient--any-on-p "-B" "-A" "-r")))
-   ("e" "edit" (lambda (args)
-                 (interactive (list (transient-args (oref transient-current-prefix command))))
-                   (let ((cmd "edit"))
-                     (jj-cmd-async cmd
-                         `(,cmd ,@args)
-                       nil
-                       :silent-ok)))
-    :inapt-if (lambda () (transient--any-on-p "-B" "-A" "--message=" "--no-edit")))
-   ("w" "describe" (lambda (args)
-                     (interactive (list (jj--ensure-message
-                                         (transient-args (oref transient-current-prefix command)))))
-                     (let ((cmd "describe"))
-                       (jj-cmd-async cmd
-                           `(,cmd ,@args)
-                         nil
-                         :silent-ok)))
-    :inapt-if (lambda () (transient--any-on-p "-B" "-A" "--no-edit")))])
-;; transient:1 ends here
+;; jj new:1 ends here
 
 ;; jj edit
 
@@ -4564,7 +5032,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 ;; [[file:majjik.org::*transient][transient:1]]
 (transient-define-suffix jj--git-push-suffix (args)
   "do a jj git push."
-  (interactive (list (transient-args (oref transient-current-prefix command))))
+  (interactive (list (jj--transient-args)))
   (apply #'jj-git-push args))
 
 (defun completion-table-with-annotation (table annotator)
@@ -4722,7 +5190,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 ;; [[file:majjik.org::*transient][transient:1]]
 (transient-define-suffix jj--git-fetch-suffix (args)
   "do a jj git fetch."
-  (interactive (list (transient-args (oref transient-current-prefix command))))
+  (interactive (list (jj--transient-args)))
   (apply #'jj-git-fetch args))
 
 (transient-define-prefix jj-git-fetch-prefix ()

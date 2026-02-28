@@ -1,10 +1,9 @@
 <h1 align="center">It's Majjik</h1>
-<h2 align="center">Jujutsu within Emacs</h2>
+<h2 align="center">Jujutsu in Emacs</h2>
 
 ***
 
-Majjik.el is a [jujutsu][jj] interface within [Emacs].
-It is heavily inspired by [Magit]'s rich buffer-oriented interface.
+Majjik.el is a [jujutsu][jj] interface inside [Emacs], heavily inspired by [Magit]'s rich buffer-oriented interface.
 Eventually, I hope Majjik will be a complete jj interface, but for now it's just my first public elisp project. Please be patient.
 
 ## Project Status
@@ -38,7 +37,7 @@ Eventually, I hope Majjik will be a complete jj interface, but for now it's just
     - [ ] `annotate`
   - [x] `jj squash`
   - [ ] `jj split`
-  - [ ] `jj rebase`
+  - [x] `jj rebase`
   - [ ] `jj restore`
   - [ ] `jj op *`
   - [ ] `jj evolog`
