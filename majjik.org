@@ -2345,6 +2345,8 @@ this might not actually work. I'm big sus actually.
      :form (:chain self (.commit_id) (format_short_commit_id)))
     (bookmarks
      :face '(:foreground "magenta")
+     :parser (jj--make-list-parser " ")
+     :printer (jj--make-list-printer " ")
      :form (:chain self (.bookmarks)))
     (tags
      :face '(:foreground "yellow")

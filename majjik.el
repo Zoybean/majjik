@@ -2322,6 +2322,8 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    :form (:chain self (.commit_id) (format_short_commit_id)))
   (bookmarks
    :face '(:foreground "magenta")
+   :parser (jj--make-list-parser " ")
+   :printer (jj--make-list-printer " ")
    :form (:chain self (.bookmarks)))
   (tags
    :face '(:foreground "yellow")
