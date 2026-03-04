@@ -3802,8 +3802,8 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
 (defun jj-cmd-async (cmd &optional no-revert silent-ok no-kill-output buffer)
   "Run jj command CMD asynchronously."
   (let* ((name (s-join " " cmd))
-         (buf (generate-new-buffer name)))
-    (jj-cmd-async-named name cmd no-revert silent-ok no-kill-output buffer)))
+         (buf (or buffer (generate-new-buffer (format "*jj %s*" name)))))
+    (jj-cmd-async-named name cmd no-revert silent-ok no-kill-output buf)))
 
 (defalias 'jj-cmd-async-named 'jj-cmd-promise)
 ;; entry point:1 ends here
