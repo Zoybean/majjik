@@ -4273,7 +4273,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*jj undo][jj undo:1]]
 (cl-defun jj-undo ()
   (interactive)
-  (jj-cmd-async "undo" `("undo") nil :silent-ok))
+  (jj-cmd-async `("undo")))
 ;; jj undo:1 ends here
 
 ;; jj redo
@@ -4281,7 +4281,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*jj redo][jj redo:1]]
 (cl-defun jj-redo ()
   (interactive)
-  (jj-cmd-async "redo" `("redo") nil :silent-ok))
+  (jj-cmd-async `("redo")))
 ;; jj redo:1 ends here
 
 ;; entry point
@@ -4338,26 +4338,20 @@ Will likely fail for any interactive command."
                    (interactive (list (jj--transient-args)))
                    (let ((cmd "squash"))
                      (jj-cmd-async cmd
-                         `(,cmd ,@args)
-                       nil
-                       :silent-ok)))
+                         `(,cmd ,@args))))
     :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))
    ("d" "squash down" (lambda (args)
                         (interactive (list (jj--transient-args)))
                         (let ((cmd "squash"))
                           (jj-cmd-async cmd
-                              `(,cmd ,@args)
-                            nil
-                            :silent-ok)))
+                              `(,cmd ,@args))))
     :inapt-if-not (lambda () (and (transient--any-on-p "-r")
                                   (not (transient--any-on-p "-t" "-f")))))
    ("a" "amend @ into" (lambda (args)
                          (interactive (list (jj--transient-args)))
                          (let ((cmd "squash"))
                            (jj-cmd-async cmd
-                               `(,cmd ,@args)
-                             nil
-                             :silent-ok)))
+                               `(,cmd ,@args))))
     :inapt-if-not (lambda () (and (transient--any-on-p "-r" "-t")
                                   (not (transient--any-on-p "-f")))))])
 ;; squash:1 ends here
@@ -4377,9 +4371,7 @@ Will likely fail for any interactive command."
                    (interactive (list (jj--transient-args)))
                    (let ((cmd "absorb"))
                      (jj-cmd-async cmd
-                         `(,cmd ,@args)
-                       nil
-                       :silent-ok)))
+                         `(,cmd ,@args))))
     :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))])
 ;; absorb:1 ends here
 
@@ -4396,9 +4388,7 @@ Will likely fail for any interactive command."
                     (interactive (list (jj--transient-args)))
                     (let ((cmd "abandon"))
                       (jj-cmd-async cmd
-                          `(,cmd ,@args)
-                        nil
-                        :silent-ok)))
+                          `(,cmd ,@args))))
     :inapt-if-not (lambda () (transient--any-on-p "-r")))])
 ;; abandon:1 ends here
 
@@ -4427,18 +4417,14 @@ Will likely fail for any interactive command."
                                          (jj--transient-args))))
                      (let ((cmd "describe"))
                        (jj-cmd-async cmd
-                           `(,cmd ,@args)
-                         nil
-                         :silent-ok)))
+                           `(,cmd ,@args))))
     :inapt-if-not (lambda () (transient--any-on-p "-r")))
    ("c" "commit" (lambda (args)
                    (interactive (list (jj--ensure-message
                                        (jj--transient-args))))
                    (let ((cmd "commit"))
                      (jj-cmd-async cmd
-                         `(,cmd ,@args)
-                       nil
-                       :silent-ok)))
+                         `(,cmd ,@args))))
     :inapt-if (lambda () (transient--any-on-p "-r")))])
 ;; describe:1 ends here
 
@@ -4475,9 +4461,7 @@ Will likely fail for any interactive command."
        (interactive (list (jj--transient-args)))
        (let ((cmd "metaedit"))
          (jj-cmd-async cmd
-             `(,cmd ,@args)
-           nil
-           :silent-ok)))
+             `(,cmd ,@args))))
      :inapt-if-not (lambda ()
                      (transient--any-on-p "-r")))]])
 ;; metaedit:1 ends here
@@ -4511,27 +4495,21 @@ Will likely fail for any interactive command."
                 (interactive (list (jj--transient-args)))
                 (let ((cmd "new"))
                   (jj-cmd-async cmd
-                      `(,cmd ,@args)
-                    nil
-                    :silent-ok)))
+                      `(,cmd ,@args))))
     :inapt-if-not (lambda ()
                     (transient--any-on-p "-B" "-A" "-r")))
    ("N" "next" (lambda ()
                  (interactive)
                  (let ((cmd "next"))
                    (jj-cmd-async cmd
-                       `(,cmd)
-                     nil
-                     :silent-ok)))
+                       `(,cmd))))
     :inapt-if (lambda ()
                 (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))
    ("P" "prev" (lambda ()
                  (interactive)
                  (let ((cmd "prev"))
                    (jj-cmd-async cmd
-                       `(,cmd)
-                     nil
-                     :silent-ok)))
+                       `(,cmd))))
     :inapt-if (lambda ()
                 (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))])
 ;; new:1 ends here
@@ -4550,26 +4528,20 @@ Will likely fail for any interactive command."
                  (interactive (list (jj--transient-args)))
                  (let ((cmd "edit"))
                    (jj-cmd-async cmd
-                       `(,cmd ,@args)
-                     nil
-                     :silent-ok)))
+                       `(,cmd ,@args))))
     :inapt-if-not (lambda () (transient--any-on-p "-r")))
    ("N" "next --edit" (lambda ()
                         (interactive)
                         (let ((cmd "next"))
                           (jj-cmd-async cmd
-                              `(,cmd "--edit")
-                            nil
-                            :silent-ok)))
+                              `(,cmd "--edit"))))
     :inapt-if (lambda ()
                 (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))
    ("P" "prev --edit" (lambda ()
                         (interactive)
                         (let ((cmd "prev"))
                           (jj-cmd-async cmd
-                              `(,cmd "--edit")
-                            nil
-                            :silent-ok)))
+                              `(,cmd "--edit"))))
     :inapt-if (lambda ()
                 (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))])
 ;; edit:1 ends here
@@ -4603,9 +4575,7 @@ Will likely fail for any interactive command."
                    (interactive (list (jj--transient-args)))
                    (let ((cmd "rebase"))
                      (jj-cmd-async cmd
-                         `(,cmd ,@args)
-                       nil
-                       :silent-ok)))
+                         `(,cmd ,@args))))
     :inapt-if-not (lambda ()
                     (and (transient--any-on-p "-r" "-s" "-b")
                          (transient--any-on-p "-o" "-A" "-B"))))
@@ -4636,9 +4606,7 @@ Will likely fail for any interactive command."
                     (interactive (list (jj--transient-args)))
                     (let ((cmd "restore"))
                       (jj-cmd-async cmd
-                          `(,cmd ,@args)
-                        nil
-                        :silent-ok)))
+                          `(,cmd ,@args))))
     :inapt-if-not (lambda () (or
                               (transient--all-on-p "-f" "-t")
                               (transient--any-on-p "-c"))))
@@ -4666,9 +4634,7 @@ Will likely fail for any interactive command."
                       (interactive (list (jj--transient-args)))
                       (let ((cmd "duplicate"))
                         (jj-cmd-async cmd
-                            `(,cmd ,@args)
-                          nil
-                          :silent-ok)))
+                            `(,cmd ,@args))))
     :inapt-if-not (lambda ()
                     (and (transient--any-on-p "-B" "-A" "-o")
                          (transient--any-on-p "-r"))))
@@ -4694,9 +4660,7 @@ Will likely fail for any interactive command."
       (interactive (list (jj--transient-args)))
       (let ((cmd "parallelize"))
         (jj-cmd-async cmd
-            `(,cmd ,@args)
-          nil
-          :silent-ok)))
+            `(,cmd ,@args))))
     :inapt-if-not (lambda ()
                     (transient--any-on-p "-r")))])
 ;; parallelize:1 ends here
@@ -4717,9 +4681,7 @@ Will likely fail for any interactive command."
       (interactive (list (jj--transient-args)))
       (let ((cmd "simplify-parents"))
         (jj-cmd-async cmd
-            `(,cmd ,@args)
-          nil
-          :silent-ok)))
+            `(,cmd ,@args))))
     :inapt-if-not (lambda ()
                     (transient--any-on-p "-r" "-s")))])
 ;; simplify-parents:1 ends here
@@ -4738,8 +4700,7 @@ Will likely fail for any interactive command."
         ,@(jj--if-arg before #'identity "--before")
         ,@(jj--if-arg after #'identity "--after")
         ,@(jj--if-arg no-edit nil "--no-edit")
-        ,@(jj--if-arg message #'identity "-m"))
-    nil :silent-ok))
+        ,@(jj--if-arg message #'identity "-m"))))
 
 (cl-defun jj-new-on-dwim (parents-revset &key message no-edit)
   "Create a new commit after the chosen PARENTS-REVSET, with no children."
@@ -4776,8 +4737,7 @@ Will likely fail for any interactive command."
   (jj-cmd-async "edit"
       `("edit"
         "-r" ,rev
-        ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))
-    nil :silent-ok))
+        ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))))
 ;; jj edit:1 ends here
 
 ;; jj desc
@@ -4789,8 +4749,7 @@ Will likely fail for any interactive command."
   (jj-cmd-async "describe"
       `("describe"
         "-r" ,revset
-        "-m" ,message)
-    nil :silent-ok))
+        "-m" ,message)))
 ;; jj desc:1 ends here
 
 ;; jj drop
@@ -4802,8 +4761,7 @@ Will likely fail for any interactive command."
     (user-error "cancelled"))
   (jj-cmd-async "abandon"
       `("abandon"
-        "-r" ,revset)
-    nil :silent-ok))
+        "-r" ,revset)))
 ;; jj drop:1 ends here
 
 ;; jj git init
@@ -4842,8 +4800,7 @@ Will likely fail for any interactive command."
                      (jj-get-revision-dwim "At rev: ")))
   (jj-cmd-async "bookmark-create"
       `("bookmark" "create" ,bookmark
-        "-r" ,rev)
-    nil :silent-ok))
+        "-r" ,rev)))
 ;; new:1 ends here
 
 ;; move
@@ -4857,8 +4814,7 @@ Will likely fail for any interactive command."
   (jj-cmd-async "bookmark-move"
       `("bookmark" "move" ,bookmark
         "--to" ,to-rev
-        ,@(jj--if-arg allow-backwards nil "--allow-backwards"))
-    nil :silent-ok))
+        ,@(jj--if-arg allow-backwards nil "--allow-backwards"))))
 ;; move:1 ends here
 
 ;; set
@@ -4874,8 +4830,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (jj-cmd-async "bookmark-set"
       `("bookmark" "set" ,bookmark
         "-r" ,rev
-        ,@(jj--if-arg allow-backwards nil "--allow-backwards"))
-    nil :silent-ok))
+        ,@(jj--if-arg allow-backwards nil "--allow-backwards"))))
 ;; set:1 ends here
 
 ;; rename
@@ -4886,8 +4841,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (interactive (list (completing-read "Rename bookmark: " (jj-list-bookmarks))
                      (read-string "New name: ")))
   (jj-cmd-async "bookmark-rename"
-      `("bookmark" "rename" ,bookmark ,new-name)
-    nil :silent-ok))
+      `("bookmark" "rename" ,bookmark ,new-name)))
 ;; rename:1 ends here
 
 ;; delete
@@ -4900,8 +4854,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (unless (or noconfirm (yes-or-no-p (format "delete bookmark %s?" bookmark)))
     (user-error "cancelled"))
   (jj-cmd-async "bookmark-delete"
-      `("bookmark" "delete" ,bookmark)
-    nil :silent-ok))
+      `("bookmark" "delete" ,bookmark)))
 ;; delete:1 ends here
 
 ;; forget
@@ -4914,8 +4867,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (unless (or noconfirm (yes-or-no-p (format "forget bookmark %s?" bookmark)))
     (user-error "cancelled"))
   (jj-cmd-async "bookmark-forget"
-      `("bookmark" "forget" ,bookmark)
-    nil :silent-ok))
+      `("bookmark" "forget" ,bookmark)))
 ;; forget:1 ends here
 
 ;; track
@@ -4928,8 +4880,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                  (list remote bookmark)))
   (jj-cmd-async "bookmark-track"
       `("bookmark" "track" ,bookmark
-        "--remote" ,remote)
-    nil :silent-ok))
+        "--remote" ,remote)))
 
 (defun jj-bookmark-track-remote (remote bookmark)
   "Track BOOKMARK which is from REMOTE. Only prompts for untracked bookmarks at the given REMOTE."
@@ -4939,8 +4890,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                  (list remote bookmark)))
   (jj-cmd-async "bookmark-track"
       `("bookmark" "track" ,bookmark
-        "--remote" ,remote)
-    nil :silent-ok))
+        "--remote" ,remote)))
 
 (defun jj-bookmark-track-local (remote bookmark)
   "Track local BOOKMARK on REMOTE. Only prompts for local bookmarks."
@@ -4950,8 +4900,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                  (list remote bookmark)))
   (jj-cmd-async "bookmark-track"
       `("bookmark" "track" ,bookmark
-        "--remote" ,remote)
-    nil :silent-ok))
+        "--remote" ,remote)))
 ;; track:1 ends here
 
 ;; untrack
@@ -4970,8 +4919,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                  (list bookmark remotes)))
   (jj-cmd-async "bookmark-untrack"
       `("bookmark" "untrack" ,bookmark
-        ,@(jj--if-arg remotes (apply-partially #'apply #'jj-revs-as-revset) "--remote"))
-    nil :silent-ok))
+        ,@(jj--if-arg remotes (apply-partially #'apply #'jj-revs-as-revset) "--remote"))))
 ;; untrack:1 ends here
 
 ;; track
@@ -4981,8 +4929,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   "Track FILE."
   (interactive (list (jj-get-untracked-file-dwim "File to track")))
   (jj-cmd-async "file-track"
-      `("file" "track" ,(jj-paths-as-fileset file))
-    nil :silent-ok))
+      `("file" "track" ,(jj-paths-as-fileset file))))
 ;; track:1 ends here
 
 ;; untrack
@@ -4992,8 +4939,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   "Untrack FILE."
   (interactive (list (jj-get-tracked-file-dwim "File to untrack")))
   (jj-cmd-async "file-untrack"
-      `("file" "untrack" ,(jj-paths-as-fileset file))
-    nil :silent-ok))
+      `("file" "untrack" ,(jj-paths-as-fileset file))))
 ;; untrack:1 ends here
 
 ;; delete
@@ -5006,8 +4952,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (unless (or noconfirm (yes-or-no-p (format "delete file %s?" file)))
     (user-error "cancelled"))
   (jj-cmd-async "rm"
-      `("util" "exec" "rm" ,file)
-    nil :silent-ok))
+      `("util" "exec" "rm" ,file)))
 ;; delete:1 ends here
 
 ;; jj squash/amend
@@ -5024,8 +4969,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
     (jj-cmd-async "squash"
         `("squash"
           "-r" ,rev
-          ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))
-      nil :silent-ok)))
+          ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
 
 (cl-defun jj-amend-into-dwim (rev &optional noconfirm ignore-immutable)
   "Squash changes from @ into the chosen revision."
@@ -5038,8 +4982,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
     (jj-cmd-async "squash"
         `("squash"
           "--into" ,rev
-          ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))
-      nil :silent-ok)))
+          ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
 ;; jj squash/amend:1 ends here
 
 ;; simple
