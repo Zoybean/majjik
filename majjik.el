@@ -241,6 +241,14 @@ Each SET should be a list."
 ;; argument utils
 
 ;; [[file:majjik.org::*argument utils][argument utils:1]]
+(defun jj--maybe-quote-argument (name)
+  "If NAME needs quoting, return NAME in double-quotes, with nested double-quotes and backslashes escaped. Otherwise, return it unmodified.
+It doesn't need quoting if it is nonempty and composed only of alphanumeric characters, hyphens, and underscores."
+  (if (or (string-empty-p name)
+          (string-match-p (rx (not (any "a-z" "A-Z" "0-9" "-" "_"))) name))
+      (jj--quote-argument name)
+    name))
+
 (defun jj--quote-argument (name)
   "Return NAME in double-quotes, with nested double-quotes and backslashes escaped."
   (format "\"%s\""
@@ -362,13 +370,17 @@ When returning both a string result and an exit code, they are returned as a con
               :documentation "Buffer for process standard error.")
   (ovl-control nil :type overlay
                :documentation "Overlay for the area through which the user may interact with the process.")
+  (min-cmd nil :type string
+                :documentation "Abbreviated command string.")
+  (ovl-cmd nil :type overlay
+           :documentation "Overlay for the command string, which should be replaced with the min command string when collapsed.")
   (ovl-collapse nil :type overlay
                 :documentation "Overlay for the area which should be collapsible.")
   (ovl-err nil :type overlay
            :documentation "Overlay for the process standard error."))
 
-(defun jj--make-process-log-entry (name cmd)
-  "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams."
+(defun jj--make-process-log-entry (name cmd &optional min-cmd)
+  "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, MIN-CMD is a shorter version of CMD, e.g. omitting majjik's default arguments."
   (let ((repo-dir default-directory))
     (with-current-buffer (jj--get-command-log-buf repo-dir)
       (goto-char (point-max))
@@ -381,8 +393,10 @@ When returning both a string result and an exit code, they are returned as a con
              (code-buf (jj-make-section-buffer name inv inv))
              (header (propertize (mapconcat #'shell-quote-argument cmd " ")
                                  'face 'magit-section-heading))
+             (mark-header-start (progn (insert "> ")
+                                  (point-marker)))
              (mark-header-end (progn
-                                (insert "> " header)
+                                (insert header)
                                 (point-marker)))
              (stdout (jj-make-section-buffer name "\n" zws))
              (mark-err-start (point-marker))
@@ -391,6 +405,7 @@ When returning both a string result and an exit code, they are returned as a con
              (mark-control-end (point-marker))
              ;; this needs to be an overlay,
              ;; so we can toggle its properties as a unit
+             (ovl-cmd (make-overlay mark-header-start mark-header-end))
              (ovl-collapse (make-overlay mark-header-end mark-collapse-end))
              ;; these all also need to be overlays,
              ;; so they keep applying as text is added
@@ -404,6 +419,8 @@ When returning both a string result and an exit code, they are returned as a con
          :buf-stderr stderr
          :ovl-control ovl-control
          :ovl-collapse ovl-collapse
+         :ovl-cmd ovl-cmd
+         :min-cmd (and min-cmd (mapconcat #'jj--maybe-quote-argument min-cmd " "))
          :ovl-err ovl-err)))))
 
 (defun jj--set-initial-run-status (code-buf)
@@ -2432,21 +2449,23 @@ This is concatenated with an identifier for the repository to define the buffer 
 ;; Default args
 
 ;; [[file:majjik.org::*Default args][Default args:1]]
-(defconst jj-global-default-args
+(defvar jj-global-default-args
   '(;; never auto-track new files
     "--config" "snapshot.auto-track='none()'"
     ;; never request a pager
     "--no-pager"))
-(defconst jj-parsing-default-args
+(defvar jj-parsing-default-args
   '(;; never colourise output
     "--color=never"
     ;; omit extra output
     "--quiet"))
-(defconst jj-logging-default-args
+(defvar jj-logging-default-args
   '("--color=always"))
-(defconst jj-global-debug-args
+(defvar jj-global-debug-args
   '("--debug")
   "List of flags (if any) to debug jj commands.")
+(defvar jj-current-dynamic-args nil
+  "Vehicle for additional default command-line arguments to be supplied by the dynamic environment.")
 (defvar jj-do-debug nil
   "If non-nil, add `jj-global-debug-args' to all commands")
 
@@ -3708,6 +3727,68 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
                          :no-revert))))
 ;; jj bookmark list:1 ends here
 
+;; emacsclient as editor
+
+;; [[file:majjik.org::*emacsclient as editor][emacsclient as editor:1]]
+(defun jj--editor-path ()
+  (if (string-prefix-p "~" with-editor-emacsclient-executable)
+      (concat (expand-file-name "~")
+              (substring with-editor-emacsclient-executable 1))
+    with-editor-emacsclient-executable))
+
+(defun jj--editor-server-path-arg ()
+  (if server-use-tcp
+      (concat "--server-file="
+              (expand-file-name server-name
+                                server-auth-dir))
+    (concat "--socket-name="
+            (expand-file-name server-name
+                              server-socket-dir))))
+
+(defun jj--merge-tool-args (entry-point-exp)
+  "Returns the arguments needed to register emacs as the merge tool for a JJ command.
+ENTRY-POINT-EXP must be a quoted sexpression that can handle the file arguments for emacs to run as a mergetool. `jj--call-from-cli' is designed for this purpose.
+Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool to select it."
+  ;; this is almost right.
+  ;; left and right are actually directories most of the time, not files.
+  (let* ((program (jj--editor-path))
+         (edit-args
+          `(,(jj--editor-server-path-arg)
+            ;; need a new frame, or `jj--call-from-cli' won't work
+            "-c"
+            "-e" ,(prin1-to-string
+                   entry-point-exp)
+            ;; always pass the files as the last arguments
+            "--" "$left" "$right")))
+    `("--config" ,(concat "merge-tools.emacs.program=" program)
+      "--config" ,(concat "merge-tools.emacs.edit-args="
+                          (jj--toml-list
+                           (mapcar #'prin1-to-string
+                                   edit-args)))
+      "--tool" "emacs")))
+
+(defmacro jj-with-editor (&rest body)
+  "Specify emacs as the editor for jj commands invoked from BODY."
+  `(dlet ((jj-current-dynamic-args
+           `(,@(jj--editor-args)
+             ,@jj-current-dynamic-args)))
+     ,@body))
+
+(defun jj--editor-args ()
+  "Returns the arguments needed to register emacs as the editor for a JJ command."
+  (let* ((program (jj--editor-path))
+         (server (jj--editor-server-path-arg))
+         (editor `(,program ,server)))
+    `("--config" ,(concat "ui.editor="
+                          (jj--toml-list
+                           (mapcar #'prin1-to-string
+                                   editor))))))
+
+(defun jj--toml-list (list)
+  (format "[%s]"
+          (s-join "," list)))
+;; emacsclient as editor:1 ends here
+
 ;; entry point
 
 ;; [[file:majjik.org::*entry point][entry point:1]]
@@ -3720,9 +3801,9 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 (defalias 'jj-cmd-async-named 'jj-cmd-promise)
 ;; entry point:1 ends here
 
-;; async command utils
+;; async command plumbing
 
-;; [[file:majjik.org::*async command utils][async command utils:1]]
+;; [[file:majjik.org::*async command plumbing][async command plumbing:1]]
 (defun jj-cmd-promise (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
   "Run CMD asynchronously, returning a promise of its completion.
 
@@ -3739,8 +3820,8 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
 On success, reverts the repo's dash buffer unless NO-REVERT, prints a message unless SILENT-OK, kills the output buffer unless NO-KILL-OUTPUT, and returns the process. On error, prints a message indicating the command log buffer, and returns a cons (PROCESS . EVENT). If OUTPUT-BUFFER, use that buffer for stdout instead of a temp indirect buffer."
   (declare (indent 2))
   (futur-let* ((proc <- (jj-cmd--futur name cmd output-buffer)))
-    :error-fun (jj--make-async-failure-callback name)
-    (funcall (jj--make-async-success-callback name no-revert silent-ok no-kill-output) proc)))
+              :error-fun (jj--make-async-failure-callback name)
+              (funcall (jj--make-async-success-callback name no-revert silent-ok no-kill-output) proc)))
 
 (defun jj--make-async-success-callback (name &optional no-revert silent-ok no-kill-output)
   (lambda (proc)
@@ -3786,15 +3867,20 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
             (insert (ansi-color-apply string))
             (set-marker mark (point))))))))
 
+(defun jj-cmd--with-standard-args (cmd)
+  "Return CMD with added arguments for using emacs as editor, and all the applicable configured arguments for a logging command."
+  `(,@jj-current-dynamic-args
+    ,@jj-global-default-args
+    ,@(and jj-do-debug jj-global-debug-args)
+    ,@jj-logging-default-args
+    ,@cmd))
+
 (defun jj-cmd--promise (name cmd &optional output-buffer)
   "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
   (declare (indent 2))
   (let ((repo-dir default-directory))
-    (let ((full-cmd `("jj"
-                      ,@jj-global-default-args
-                      ,@(and jj-do-debug jj-global-debug-args)
-                      ,@jj-logging-default-args
-                      ,@cmd)))
+    (let ((full-cmd `("jj" ,@(jj-cmd--with-standard-args cmd)))
+          (min-cmd `("jj" ,@cmd)))
       (pcase-let (((and proc-entry
                         (cl-struct jj--process-log-entry
                                    buf-code
@@ -3803,7 +3889,7 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                                    ovl-control
                                    ovl-collapse
                                    ovl-err))
-                   (jj--make-process-log-entry name full-cmd)))
+                   (jj--make-process-log-entry name full-cmd min-cmd)))
         (promise-new
          (lambda (resolve reject)
            (let ((proc (make-process
@@ -3846,11 +3932,8 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
   "Run CMD asynchronously, returning a futur that is resolved (returning the process) on completion."
   (declare (indent 2))
   (let ((repo-dir default-directory))
-    (let ((full-cmd `("jj"
-                      ,@jj-global-default-args
-                      ,@(and jj-do-debug jj-global-debug-args)
-                      ,@jj-logging-default-args
-                      ,@cmd)))
+    (let ((full-cmd `("jj" ,@(jj-cmd--with-standard-args cmd)))
+          (min-cmd `("jj" ,@cmd)))
       (pcase-let (((and proc-entry
                         (cl-struct jj--process-log-entry
                                    buf-code
@@ -3859,7 +3942,7 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                                    ovl-control
                                    ovl-collapse
                                    ovl-err))
-                   (jj--make-process-log-entry name full-cmd)))
+                   (jj--make-process-log-entry name full-cmd min-cmd)))
         (futur-new
          (lambda (f)
            (let ((proc (make-process
@@ -3897,7 +3980,7 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
              ;; which means they are not themselves callbacks
              (add-function :after (process-sentinel proc)
                            (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
-;; async command utils:1 ends here
+;; async command plumbing:1 ends here
 
 ;; transient command utils
 
@@ -4060,7 +4143,9 @@ Sometimes this does not actually succeed at killing the process."
   (pcase-exhaustive proc-entry
     ((cl-struct jj--process-log-entry
                 ovl-control
-                ovl-collapse)
+                ovl-collapse
+                ovl-cmd
+                min-cmd)
      ;; store for next time
      (overlay-put ovl-collapse
                   'jj--section-collapsed
@@ -4090,7 +4175,13 @@ Sometimes this does not actually succeed at killing the process."
                   ;; there's no way to remove an overlay property except by
                   ;; setting it nil. this still overrides the corresponding
                   ;; text properties, unfortunately
-                  (and collapsed jj--process-ellipsis)))))
+                  (and collapsed jj--process-ellipsis))
+     (overlay-put ovl-cmd
+                  'display
+                  ;; there's no way to remove an overlay property except by
+                  ;; setting it nil. this still overrides the corresponding
+                  ;; text properties, unfortunately
+                  (and collapsed min-cmd)))))
 
 (defvar jj--process-ellipsis "\n"
   "String to show instead of process output when collapsing.")
@@ -4394,16 +4485,19 @@ PROC-PROMISE must be a promise which, on completion, returns a process with a li
   ["go"
    ("s" "squash" (lambda (args)
                    (interactive (list (jj--transient-args)))
-                   (jj-cmd-async `("squash" ,@args)))
+                   (jj-with-editor
+                    (jj-cmd-async `("squash" ,@args))))
     :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))
    ("d" "squash down" (lambda (args)
                         (interactive (list (jj--transient-args)))
-                        (jj-cmd-async `("squash" ,@args)))
+                        (jj-with-editor
+                         (jj-cmd-async `("squash" ,@args))))
     :inapt-if-not (lambda () (and (transient--any-on-p "-r")
                                   (not (transient--any-on-p "-t" "-f")))))
    ("a" "amend @ into" (lambda (args)
                          (interactive (list (jj--transient-args)))
-                         (jj-cmd-async `("squash" ,@args)))
+                         (jj-with-editor
+                          (jj-cmd-async `("squash" ,@args))))
     :inapt-if-not (lambda () (and (transient--any-on-p "-r" "-t")
                                   (not (transient--any-on-p "-f")))))])
 ;; squash:1 ends here
@@ -4961,7 +5055,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "squash %s into its parent?" rev)))
     (user-error "cancelled"))
-  (with-editor "VISUAL"
+  (jj-with-editor
     (jj-cmd-async
         `("squash"
           "-r" ,rev
@@ -4974,7 +5068,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "squash @ into %s?" rev)))
     (user-error "cancelled"))
-  (with-editor "VISUAL"
+  (jj-with-editor
     (jj-cmd-async
         `("squash"
           "--into" ,rev
