@@ -3775,10 +3775,18 @@ might actually not use these as I need a lexical variable anyway in most cases w
                            :no-revert))))
 #+end_src
 *** Async commands
+**** entry point
+#+begin_src elisp
+  (defun jj-cmd-async (cmd &optional no-revert silent-ok no-kill-output buffer)
+    "Run jj command CMD asynchronously."
+    (let* ((name (s-join " " cmd))
+           (buf (generate-new-buffer name)))
+      (jj-cmd-async-named name cmd no-revert silent-ok no-kill-output buffer)))
+
+  (defalias 'jj-cmd-async-named 'jj-cmd-promise)
+#+end_src
 **** async command utils
 #+begin_src elisp
-  (defalias 'jj-cmd-async 'jj-cmd-promise)
-
   (defun jj-cmd-promise (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
     "Run CMD asynchronously, returning a promise of its completion.
 
@@ -3788,7 +3796,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
      (jj-cmd--promise name cmd output-buffer)
      (jj--make-async-success-callback name no-revert silent-ok no-kill-output)
      (jj--make-async-failure-callback name)))
-  
+
   (defun jj-cmd-futur (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
     "Run CMD asynchronously, returning a futur of its completion.
 
@@ -4178,18 +4186,23 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
       (let* ((cmd-strings (flat cmd)))
         (jj-cmd-async-view cmd-strings))))
 
+  (defun jj-async-view (proc-promise)
+    "View the output buffer of PROC-PROMISE, if it is non-empty.
+  PROC-PROMISE must be a promise which, on completion, returns a process with a live output-buffer."
+    (promise-then
+     proc-promise
+     (lambda (proc)
+       (let ((buf (process-buffer proc)))
+         (if (jj--empty-buffer-p buf)
+             (kill-buffer buf)
+           (with-current-buffer buf
+             (font-lock-mode)
+             (view-mode-enter nil #'kill-buffer))
+           (pop-to-buffer buf))))))
+
   (defun jj-cmd-async-view (cmd &optional no-revert silent-ok)
     "Run jj command CMD and view the output in its own buffer."
-    (let* ((name (s-join " " cmd))
-           (buf (generate-new-buffer name)))
-      (promise-then (jj-cmd-async name cmd no-revert silent-ok :no-kill buf)
-                    (lambda (_)
-                      (if (jj--empty-buffer-p buf)
-                          (kill-buffer buf)
-                        (with-current-buffer buf
-                          (font-lock-mode)
-                          (view-mode-enter nil #'kill-buffer))
-                        (pop-to-buffer buf))))))
+    (jj-async-view (jj-cmd-async cmd no-revert silent-ok :no-kill)))
 #+end_src
 
 **** view
