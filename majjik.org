@@ -5135,6 +5135,9 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
 ***** jj split
 Full-interactive split will require an interactive hunk selector. Maybe just use magit for this?
 ***** jj git push
+****** TODO accept password input on terminal-only display
+magit does this. I can imitate it.
+for push and fetch
 ****** simple
 #+begin_src elisp
   (defun jj-git-push (&rest args)
