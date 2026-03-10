@@ -2590,6 +2590,7 @@ This is concatenated with an identifier for the repository to define the buffer 
 (defvar-keymap jj-dashboard-mode-map
   :parent jj-inspect-mode-map
   "Q" #'jj-cmd
+  "H" #'jj-help
   "C-/" #'jj-undo
   "C-?" #'jj-redo
   "C-_" #'jj-undo
@@ -4372,50 +4373,28 @@ PROC-PROMISE must be a promise which, on completion, returns a process with a li
 (defvar jj-cmd-hist nil
   "History for `jj-cmd' command.")
 
-(defun jj-cmd (cmd)
-  "Run an arbitrary command line. If there is any output, view it in its own buffer.
+(defun jj-cmd (args)
+  "Run jj with arbitrary command line ARGS, which is a list of strings. If there is any output, view it in its own buffer.
 Will likely fail for any interactive command."
-  (interactive (-let* ((str (read-from-minibuffer "command line: jj " nil nil nil 'jj-cmd-hist))
-                       (str-list (concat "( " str " )"))
-                       ((cmd . ix) (read-from-string str-list)))
-                 (unless (= ix (length str-list))
-                   (error "unbalanced closing paren at %d: %s" (- ix 2) str))
-                 (list cmd)))
-  (cl-labels ((flat (list)
-                (mapcar #'str-flat list))
-              (str-flat (val)
-                (pcase val
-                  ((pred symbolp) (symbol-name val))
-                  ((pred stringp) val)
-                  (_ (user-error "unquoted parens in command line: %s" val)))))
-    (let* ((cmd-strings (flat cmd)))
-      (jj-cmd-async-view cmd-strings))))
+  (interactive (list
+                (split-string-shell-command
+                 (read-from-minibuffer "command line: jj " nil nil nil 'jj-cmd-hist))))
+  (jj-with-editor
+   (jj-cmd-async-view args)))
 ;; anything:1 ends here
 
 ;; jj help
 
 ;; [[file:majjik.org::*jj help][jj help:1]]
 (defvar jj-help-hist nil
-  "History for `jj-cmd' command.")
+  "History for `jj-help' command.")
 
 (defun jj-help (args)
   "Get help for anything in jj."
-  (interactive (-let* ((str (read-from-minibuffer "command line: jj help " nil nil nil 'jj-help-hist))
-                       (str-list (concat "( " str " )"))
-                       ((cmd . ix) (read-from-string str-list)))
-                 (unless (= ix (length str-list))
-                   (error "unbalanced closing paren at %d: %s" (- ix 2) str))
-                 (list cmd)))
-  (cl-labels ((flat (list)
-                (mapcar #'str-flat list))
-              (str-flat (val)
-                (pcase val
-                  ((pred symbolp) (symbol-name val))
-                  ((pred stringp) val)
-                  (_ (user-error "unquoted parens in command line: %s" val)))))
-    (let* ((cmd-strings (flat cmd)))
-      (jj-cmd-async-view `("help" ,@cmd-strings)
-                         :no-revert))))
+  (interactive (list
+                (split-string-shell-command
+                 (read-from-minibuffer "jj help " nil nil nil 'jj-help-hist))))
+  (jj-cmd-async-view `("help" ,@args)))
 ;; jj help:1 ends here
 
 ;; jj undo
