@@ -4309,36 +4309,8 @@ might actually not use these as I need a lexical variable anyway in most cases w
     "String to show instead of process output when collapsing.")
 #+end_src
 
-**** anything
-run arbitrary jj commands. View the output if there is any.
-technically run any arbitrary command, since ~jj util exec~ exists
-
-seems to sometimes have the sentinel snipe the filter, so e.g. ~jj util exec echo hello~ registers no output. but the sentinel *always* waits for the filter, unless the filter yields. so this is a mystery.
-
-after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
+**** commands which view stdout
 #+begin_src elisp
-  (defvar jj-cmd-hist nil
-    "History for `jj-cmd' command.")
-
-  (defun jj-cmd (cmd)
-    "Run an arbitrary command line. If there is any output, view it in its own buffer.
-  Will likely fail for any interactive command."
-    (interactive (-let* ((str (read-from-minibuffer "command line: jj " nil nil nil 'jj-cmd-hist))
-                         (str-list (concat "( " str " )"))
-                         ((cmd . ix) (read-from-string str-list)))
-                   (unless (= ix (length str-list))
-                     (error "unbalanced closing paren at %d: %s" (- ix 2) str))
-                   (list cmd)))
-    (cl-labels ((flat (list)
-                  (mapcar #'str-flat list))
-                (str-flat (val)
-                  (pcase val
-                    ((pred symbolp) (symbol-name val))
-                    ((pred stringp) val)
-                    (_ (user-error "unquoted parens in command line: %s" val)))))
-      (let* ((cmd-strings (flat cmd)))
-        (jj-cmd-async-view cmd-strings))))
-
   (defun jj-async-view (proc-promise)
     "View the output buffer of PROC-PROMISE, if it is non-empty.
   PROC-PROMISE must be a promise which, on completion, returns a process with a live output-buffer."
@@ -4487,6 +4459,61 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
      :no-revert :silent-ok))
 #+end_src
 **** do
+***** anything
+run arbitrary jj commands. View the output if there is any.
+technically run any arbitrary command, since ~jj util exec~ exists
+
+seems to sometimes have the sentinel snipe the filter, so e.g. ~jj util exec echo hello~ registers no output. but the sentinel *always* waits for the filter, unless the filter yields. so this is a mystery.
+
+after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
+#+begin_src elisp
+  (defvar jj-cmd-hist nil
+    "History for `jj-cmd' command.")
+
+  (defun jj-cmd (cmd)
+    "Run an arbitrary command line. If there is any output, view it in its own buffer.
+  Will likely fail for any interactive command."
+    (interactive (-let* ((str (read-from-minibuffer "command line: jj " nil nil nil 'jj-cmd-hist))
+                         (str-list (concat "( " str " )"))
+                         ((cmd . ix) (read-from-string str-list)))
+                   (unless (= ix (length str-list))
+                     (error "unbalanced closing paren at %d: %s" (- ix 2) str))
+                   (list cmd)))
+    (cl-labels ((flat (list)
+                  (mapcar #'str-flat list))
+                (str-flat (val)
+                  (pcase val
+                    ((pred symbolp) (symbol-name val))
+                    ((pred stringp) val)
+                    (_ (user-error "unquoted parens in command line: %s" val)))))
+      (let* ((cmd-strings (flat cmd)))
+        (jj-cmd-async-view cmd-strings))))
+#+end_src
+
+***** jj help
+#+begin_src elisp
+  (defvar jj-help-hist nil
+    "History for `jj-cmd' command.")
+
+  (defun jj-help (args)
+    "Get help for anything in jj."
+    (interactive (-let* ((str (read-from-minibuffer "command line: jj help " nil nil nil 'jj-help-hist))
+                         (str-list (concat "( " str " )"))
+                         ((cmd . ix) (read-from-string str-list)))
+                   (unless (= ix (length str-list))
+                     (error "unbalanced closing paren at %d: %s" (- ix 2) str))
+                   (list cmd)))
+    (cl-labels ((flat (list)
+                  (mapcar #'str-flat list))
+                (str-flat (val)
+                  (pcase val
+                    ((pred symbolp) (symbol-name val))
+                    ((pred stringp) val)
+                    (_ (user-error "unquoted parens in command line: %s" val)))))
+      (let* ((cmd-strings (flat cmd)))
+        (jj-cmd-async-view `("help" ,@cmd-strings)
+                           :no-revert))))
+#+end_src
 ***** jj undo
 #+begin_src elisp
   (cl-defun jj-undo ()
