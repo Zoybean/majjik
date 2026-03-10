@@ -3860,8 +3860,57 @@ might actually not use these as I need a lexical variable anyway in most cases w
   (defun jj--toml-list (list)
     (format "[%s]"
             (s-join "," list)))
-
 #+end_src
+***** COMMENT hacks to get with-editor-mode in the new buffer
+#+begin_src elisp
+  (defun jj--editor-complex-args (entry-point-exp)
+    "Returns the arguments needed to register emacs as the editor for a JJ command and open the buffer in a dedicated mode (similar to magit's commit editor)."
+    (let* ((program (jj--editor-path))
+           (server (jj--editor-server-path-arg))
+           (editor
+            `(,program
+              ,server
+              ;; need a new frame, or the client will immediately exit after `jj--with-editor-mode-from-cli' 
+              "-c"
+              "-e" ,(prin1-to-string
+                     entry-point-exp))))
+      `("--config" ,(concat "ui.editor="
+                            (jj--toml-list
+                             (mapcar #'prin1-to-string
+                                     editor))))))
+
+  (defvar jj--current-eval-client nil)
+
+  (define-advice server-eval-and-print (:around (orig expr proc) jj/server-eval-and-print-advice)
+    "Ensure the --eval argument can access the newly-created client"
+    (dlet ((jj--current-eval-client proc))
+      (funcall orig (dbg expr) proc)))
+
+  (defun jj--with-editor-mode-from-cli ()
+    "For use as the first parameter to an --eval invocation of emacsclient which has also supplied the -c argument."
+    (let* ((proc jj--current-eval-client)
+           (args
+            (prog1 server-eval-args-left
+              ;; treat other args exclusively as filenames.
+              ;; otherwise they are evalled after this
+              (setq server-eval-args-left nil)))
+           (buffers (server-visit-files (mapcar #'list args) proc)))
+      (when buffers
+        (dolist (buf buffers)
+          (with-current-buffer buf
+            (with-editor-mode)))
+        (run-hooks 'server-after-make-frame-hook)
+        (server-switch-buffer
+         (car buffers) nil nil
+         ;; When triggered from "emacsclient -c", we popped up a
+         ;; new frame.  Ensure that we switch to the requested
+         ;; buffer in that frame, and not in some other frame
+         ;; where it may be displayed.
+         (plist-get (process-plist proc) 'frame))
+        (run-hooks 'server-switch-hook))))
+#+end_src
+
+
 **** entry point
 #+begin_src elisp
   (defun jj-cmd-async (cmd &optional no-revert silent-ok no-kill-output buffer)
