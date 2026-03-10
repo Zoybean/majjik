@@ -5340,6 +5340,44 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
    ("F" "fetch" jj--git-fetch-suffix :transient nil)])
 ;; transient:1 ends here
 
+;; entry
+
+;; [[file:majjik.org::*entry][entry:1]]
+(transient-define-prefix jj-config-prefix ()
+  :refresh-suffixes t
+  [["edit"
+    ("e" "edit" jj-config-edit-prefix)
+    ;; ("s" "set")
+    ;; ("u" "unset")
+    ]
+   ;; ["view"
+   ;;  ("g" "get")
+   ;;  ("l" "list")]
+   ;; ["meta"
+   ;;  ("p" "path")]
+   ])
+;; entry:1 ends here
+
+;; edit
+
+;; [[file:majjik.org::*edit][edit:1]]
+(transient-define-prefix jj-config-edit-prefix ()
+  :refresh-suffixes t
+  :incompatible '(("--user" "--repo" "--workspace"))
+  ["targets"
+   ("-u" "user" "--user")
+   ("-r" "repo" "--repo")
+   ("-w" "workspace" "--workspace")]
+  ["go"
+   ("e" "edit" (lambda (args)
+                 (interactive (list (jj--transient-args)))
+                 (jj-with-editor
+                  (jj-cmd-async `("config" "edit" ,@args))))
+    :inapt-if-not (lambda ()
+                    (transient--any-on-p "--user" "--repo" "--workspace")))
+   ])
+;; edit:1 ends here
+
 ;; Provide
 
 ;; [[file:majjik.org::*Provide][Provide:1]]
