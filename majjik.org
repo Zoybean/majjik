@@ -4331,6 +4331,127 @@ might actually not use these as I need a lexical variable anyway in most cases w
     (jj-async-view (jj-cmd-async cmd no-revert silent-ok :no-kill)))
 #+end_src
 
+**** TODO COMMENT todo list
+lists of unimplemented commands and their approximate groupings
+#+begin_src elisp
+  status
+  (:log
+   log
+   evolog
+   op log
+   )
+  (:diff
+   ;; diff
+   diffedit ;; waiting on difftool
+   ;; interdiff
+   ;; show
+   )
+  (:commit
+   ;; (:new
+   ;;  new
+   ;;  next
+   ;;  prev)
+   ;; (:edit
+   ;;  edit
+   ;;  next
+   ;;  prev)
+   ;; (:desc
+   ;;  commit
+   ;;  describe)
+   ;; metaedit
+   ;; abandon
+   ;; absorb
+   ;; duplicate
+   ;; parallelize
+   ;; rebase
+   ;; restore
+   ;; revert
+   split ;; waiting on difftool
+   ;; squash
+   ;; simplify-parents
+   )
+  (:bookmark
+   bookmark-create
+   bookmark-delete
+   bookmark-forget
+   bookmark-list
+   bookmark-move
+   bookmark-rename
+   bookmark-set
+   bookmark-track
+   bookmark-untrack
+   )
+  resolve ;; waiting on mergetool
+  (:tag
+   tag-delete
+   tag-list
+   tag-set
+   )
+  ;; undo
+  ;; redo
+  ;; bisect ;; don't bother yet - learn a use-case first
+  (:config
+   config-edit
+   config-get
+   config-list
+   config-path
+   config-set
+   config-unset
+   )
+  (:file
+   file-annotate
+   file-chmod
+   file-list
+   file-search
+   file-show
+   ;; file-track
+   ;; file-untrack
+   )
+  ;; fix ;; don't bother yet
+  (:gerrit
+   gerrit-upload)
+  (:git
+   git-clone
+   git-colocation
+   git-export
+   ;; git-fetch
+   git-import
+   git-init
+   ;; git-push
+   git-remote
+   git-root
+   )
+  ;; help ;; just accept any command-line for the help, similar to Q
+  (:op
+   op-abandon
+   op-diff
+   op-integrate
+   op-log
+   op-restore
+   op-revert
+   op-show
+   )
+  root
+  (:sparse
+   sparse-edit
+   sparse-list
+   sparse-reset
+   sparse-set
+   )
+  sign
+  unsign
+  ;; util ;; don't bother
+  version
+  (:workspace
+   workspace-add
+   workspace-forget
+   workspace-list
+   workspace-rename
+   workspace-root
+   workspace-update-stale
+   )
+#+end_src
+
 **** view
 ***** jj transient diff
 ****** entry
