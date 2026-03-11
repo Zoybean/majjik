@@ -241,6 +241,9 @@ Each SET should be a list."
 ;; argument utils
 
 ;; [[file:majjik.org::*argument utils][argument utils:1]]
+(defun jj--cmd-abbrev (args)
+  (mapconcat #'jj--maybe-quote-argument args " "))
+
 (defun jj--maybe-quote-argument (name)
   "If NAME needs quoting, return NAME in double-quotes, with nested double-quotes and backslashes escaped. Otherwise, return it unmodified.
 It doesn't need quoting if it is nonempty and composed only of alphanumeric characters, hyphens, and underscores."
@@ -390,17 +393,18 @@ When returning both a string result and an exit code, they are returned as a con
              (zws "\u200B")
              (inhibit-read-only t)
              (mark-control-start (point-marker))
-             (code-buf (jj-make-section-buffer name inv inv))
-             (header (propertize (mapconcat #'shell-quote-argument cmd " ")
+             (code-buf (jj-make-section-buffer (jj--replace-newlines name) inv inv))
+             (header (propertize (jj--replace-newlines
+                                  (mapconcat #'shell-quote-argument cmd " "))
                                  'face 'magit-section-heading))
              (mark-header-start (progn (insert "> ")
                                   (point-marker)))
              (mark-header-end (progn
                                 (insert header)
                                 (point-marker)))
-             (stdout (jj-make-section-buffer name "\n" zws))
+             (stdout (jj-make-section-buffer (jj--replace-newlines name) "\n" zws))
              (mark-err-start (point-marker))
-             (stderr (jj-make-section-buffer name zws "\n"))
+             (stderr (jj-make-section-buffer (jj--replace-newlines name) zws "\n"))
              (mark-collapse-end (point-marker))
              (mark-control-end (point-marker))
              ;; this needs to be an overlay,
@@ -420,7 +424,9 @@ When returning both a string result and an exit code, they are returned as a con
          :ovl-control ovl-control
          :ovl-collapse ovl-collapse
          :ovl-cmd ovl-cmd
-         :min-cmd (and min-cmd (mapconcat #'jj--maybe-quote-argument min-cmd " "))
+         :min-cmd (and min-cmd
+                       (jj--replace-newlines
+                        (jj--cmd-abbrev min-cmd)))
          :ovl-err ovl-err)))))
 
 (defun jj--set-initial-run-status (code-buf)
@@ -483,6 +489,16 @@ If INITIALLY-STAY is non-nil, point stays in place if it is at `bobp' even if th
         (jj--sticky-insert (process-mark proc)
                            (lambda () (insert string))
                            initially-stay)))))
+(defun jj--insert-crash-event (stderr-buf event)
+  "Insert into STDERR-BUF the final EVENT after the corresponding process crashed."
+  (with-current-buffer stderr-buf
+    (goto-char (point-max))
+    (let ((inhibit-read-only t))
+      (unless (bolp)
+        (insert "\n"))
+      (insert
+       (propertize (s-chomp event) 'face '(:foreground "red"))
+       "\n"))))
 
 (defun jj--make-print-status-sentinel (buffer)
   (lambda (proc event)
@@ -490,15 +506,7 @@ If INITIALLY-STAY is non-nil, point stays in place if it is at `bobp' even if th
       (when (buffer-live-p buffer)
         (unless (= (process-exit-status proc) 0)
           ;; exited abnormally
-          (with-current-buffer buffer
-            (goto-char (point-max))
-            ;; add error status to error buffer
-            (let ((inhibit-read-only t))
-              (unless (bolp)
-                (insert "\n"))
-              (insert
-               (propertize (s-chomp event) 'face '(:foreground "red"))
-               "\n"))))))))
+          (jj--insert-crash-event buffer event))))))
 
 (defun jj--make-cleanup-sentinel (&rest buffers)
   "Kill BUFFERS if process is no longer live."
@@ -754,13 +762,24 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
                      'face 'escape-glyph)))
      string t t)))
 
+(defun jj--replace-newlines (string)
+  "Propertize all newlines in STRING with the corresponding escape glyph, with the `escape-glyph' face."
+  (let* ((replacements `(("\n" . "^J")
+                         ("\r" . "^M"))))
+    (replace-regexp-in-string
+     (regexp-opt (mapcar 'car replacements))
+     (lambda (it)
+       (propertize (s--aget replacements it)
+                   'face 'escape-glyph))
+     string t t)))
+
 (ert-deftest jj-test-entitize-newlines ()
   (should (string= "foo\r\nbar"
                    (jj--entitize-newlines "foo\r\nbar"))))
 
 ;; modified from subr-x.el `add-display-text-property'
 (defun push-text-property (start end prop value
-                                        &optional object)
+                                 &optional object)
   "Push VALUE to the property PROP in the text from START to END.
 If any text in the region has a non-nil PROP property, those
 properties are retained as the `cdr' of the new property value, with VALUE as the `car'.
@@ -2858,8 +2877,8 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                   (expand-file-name u))
                                 untracked))
          (untracked-trim-abs (mapcar (lambda (u)
-                                  (expand-file-name u))
-                                untracked-trim))
+                                       (expand-file-name u))
+                                     untracked-trim))
          (all-files `(,@tracked ,@untracked)))
     (mapcar (lambda (f)
               (make-empty-file f :parents))
@@ -2881,10 +2900,9 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
    (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
      ;; let-binding works because the buffer is set up synchronously,
      ;; before the async dispatch
-     (jj-cmd-async-named "file-list"
+     (jj-cmd-async--for-status "file-list"
          `("file" "list"
-           "-T" ,(jj-status-file-tracked-template 'self))
-       :no-revert :silent-ok :no-kill))
+           "-T" ,(jj-status-file-tracked-template 'self))))
    (lambda (proc)
      (prog1
          (with-current-buffer (process-buffer proc)
@@ -2902,15 +2920,27 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
              for entry = (read-jj-status-file-tracked)
              collect entry)))
 
-(defun jj--check-files-ignored (files)
-  (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-    ;; let-binding works because the buffer is set up synchronously,
-    ;; before the async dispatch
-    (jj-cmd-async-named "git-ignored"
-        `("util" "exec" "--"
-          "git" "ls-files"
-          "--others" "--ignored" "--exclude-standard" "--directory" "-z" "--" ,@files)
-      :no-revert :silent-ok :no-kill)))
+(defun jj--check-files-ignored (untracked)
+  (promise-then (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
+                  ;; let-binding works because the buffer is set up synchronously,
+                  ;; before the async dispatch
+                  (jj-cmd-async--for-status "git-ignored"
+                      `("util" "exec" "--"
+                        "git" "ls-files"
+                        "--others" "--ignored" "--exclude-standard" "--directory" "-z" "--" ,@untracked)))
+                (lambda (proc)
+                  (with-current-buffer (process-buffer proc)
+                    (prog1
+                        (let ((ignored (cl-loop initially (goto-char (point-min))
+                                                while (not (eobp))
+                                                do (jj--re-step-over
+                                                    (rx (group (+ (not (any ?\0))))
+                                                        ?\0))
+                                                collect (match-string 1))))
+                          (cons ignored untracked))
+                      (kill-buffer (process-buffer proc))))))
+  )
+
 
 (defun jj-untracked-files-async (root-dir)
   "List untracked (non-ignored) files in repository ROOT-DIR."
@@ -2923,19 +2953,8 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                nil nil)))
       (then (lambda (untracked)
               ;; outer `then' implicitly flattens inner promises
-              (promise-then (let ((default-directory root-dir))
-                              (jj--check-files-ignored untracked))
-                            (lambda (proc)
-                              (with-current-buffer (process-buffer proc)
-                                (prog1
-                                    (let ((ignored (cl-loop initially (goto-char (point-min))
-                                                            while (not (eobp))
-                                                            do (jj--re-step-over
-                                                                (rx (group (+ (not (any ?\0))))
-                                                                    ?\0))
-                                                            collect (match-string 1))))
-                                      (cons ignored untracked))
-                                  (kill-buffer (process-buffer proc))))))))
+              (let ((default-directory root-dir))
+                (jj--check-files-ignored untracked))))
       (then (-lambda ((ignored . untracked))
               (cl-set-difference untracked `(".git" ".jj" ,@ignored)
                                  :test (lambda (u i)
@@ -2974,11 +2993,10 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
   (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
     ;; let-binding works because the buffer is set up synchronously,
     ;; before the async dispatch
-    (promise-then (jj-cmd-async-named "bookmarks-conflicted"
+    (promise-then (jj-cmd-async--for-status "bookmarks-conflicted"
                       `("bookmark" "list"
                         "--conflicted"
-                        "-T" ,(jj-status-bookmark-conflict-template 'self))
-                    :no-revert :silent-ok :no-kill)
+                        "-T" ,(jj-status-bookmark-conflict-template 'self)))
                   (lambda (proc)
                     (with-current-buffer (process-buffer proc)
                       (prog1
@@ -3014,11 +3032,10 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
   (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
     ;; let-binding works because the buffer is set up synchronously,
     ;; before the async dispatch
-    (promise-then (jj-cmd-async-named "show-status"
+    (promise-then (jj-cmd-async--for-status "show-status"
                       `("show"
                         "--no-patch"
-                        "-T" ,(jj-show-status-delim-template 'self))
-                    :no-revert :silent-ok :no-kill)
+                        "-T" ,(jj-show-status-delim-template 'self)))
                   (lambda (proc)
                     (with-current-buffer (process-buffer proc)
                       (prog1
@@ -3797,14 +3814,205 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
           (s-join "," list)))
 ;; emacsclient as editor:1 ends here
 
+;; post-command tasks
+
+;; [[file:majjik.org::*post-command tasks][post-command tasks:1]]
+(defun jj-revert-silently (proc)
+  (let ((jj--silent-revert t))
+    ;; set silent revert, rather than inhibiting messages
+    ;; because it's asynchronous, so the binding wouldnt last, and
+    ;; because we only want to prevent non-error messages
+    ;; and the revert function looks for silent-revert to suppress those.
+    (jj-revert-dash-buffer-async
+     (buffer-local-value 'default-directory
+                         (process-buffer (jj-process-process proc))))))
+
+(defun jj-post-message (&rest builders)
+  (lambda (proc)
+    (message "%s" (mapconcat (lambda (fn)
+                               (funcall fn proc))
+                             builders))))
+
+;; (let* ((cmd '("log"))
+;;        (proc (jj-cmd-async cmd)))
+;;   (promise-then proc
+;;                 (lambda (proc)
+;;                   (funcall (jj-post-message
+;;                             (jj-format-trimmed
+;;                              #'jj-format-see-log
+;;                              #'jj-format-simple-ok
+;;                              #'jj-format-stdout 
+;;                              #'jj-format-stderr))
+;;                            proc)))
+;;   (sit-for 5))
+
+(defun jj-format-simple-ok (proc)
+  (format "`jj %s' ok. " (jj--replace-newlines
+                          (process-name (jj-process-process proc)))))
+
+(defun jj-format-simple-fail (proc)
+  (format "`jj %s' failed. " (jj--replace-newlines
+                              (process-name (jj-process-process proc)))))
+
+(defun jj-format-see-log (_proc)
+  (let ((msg (substitute-command-keys "\\[jj-pop-to-command-log]")))
+    (format "Type %s to see full logs." msg)))
+
+(defun jj-format-see-secret-log (_proc)
+  (let ((msg (substitute-command-keys "\\[jj-pop-to-secret-command-log] or \\[jj-pop-to-command-log] \\<jj-process-mode-map>\\[jj-pop-to-secret-command-log]")))
+    (format "Type %s to see full logs." msg)))
+
+(defun jj-format-stderr-verbose (proc)
+  (let ((err-str (with-current-buffer (jj-process-stderr proc)
+                   (jj--apply-font-lock-properties
+                    (buffer-string)))))
+    (if (jj--empty-string-p err-str)
+        (format "no error output. %s" (jj-process-event proc))
+      (concat "\n" (s-chomp err-str)))))
+
+(defun jj-format-stderr (proc)
+  (let ((err-str (with-current-buffer (jj-process-stderr proc)
+                   (jj--apply-font-lock-properties
+                    (buffer-string)))))
+    (if (jj--empty-string-p err-str)
+        ""
+      (concat "\n" (s-chomp err-str)))))
+
+(defun jj-format-trimmed (log-referrer &rest builders)
+  (declare (indent 1))
+  (lambda (proc)
+    (let ((string)
+          (truncated))
+      (with-temp-buffer
+        (mapc (lambda (fn)
+                (insert (funcall fn proc)))
+              builders)
+        (goto-char (point-min))
+        (forward-line 10)
+        (setq string
+              (buffer-substring (point-min) (point)))
+        (setq truncated (not (eobp))))
+      (cond ((jj--empty-string-p string)
+             "")
+            (truncated
+             (format "%s\n%s\n%s"
+                     (s-chomp string)
+                     (propertize "... truncated" 'face 'shadow)
+                     (funcall log-referrer proc)))
+            (:else
+             (s-chomp string))))))
+
+(defun jj-format-stdout-verbose (proc)
+  (let ((out-str (with-current-buffer (process-buffer (jj-process-process proc))
+                   (jj--apply-font-lock-properties
+                    (buffer-string)))))
+    (if (jj--empty-string-p out-str)
+                 ""
+               (concat "\n" (s-chomp out-str)))))
+
+(defun jj-format-stdout (proc)
+  (let ((out-str (with-current-buffer (process-buffer (jj-process-process proc))
+                   (jj--apply-font-lock-properties
+                    (buffer-string)))))
+    (if (jj--empty-string-p out-str)
+                 ""
+               (concat "\n" (s-chomp out-str)))))
+
+(defun jj-format-stdout-trimmed (proc)
+  (let ((out-str (with-current-buffer (process-buffer (jj-process-process proc))
+                   (save-excursion
+                     (goto-char (point-min))
+                     (forward-line 10)
+                     (jj--apply-font-lock-properties
+                      (buffer-substring (point-min) (point)))))))
+    (if (jj--empty-string-p out-str)
+                 ""
+               (concat "\n" (s-chomp out-str)))))
+
+(defun jj-kill-output (proc)
+  (kill-buffer (process-buffer (jj-process-process proc))))
+
+(defun jj-kill-error (proc)
+  (kill-buffer (jj-process-stderr proc)))
+
+(defun jj-print-crash (proc)
+  (jj--insert-crash-event (jj-process-stderr proc) (jj-process-event proc)))
+
+(defun jj-view-output (proc)
+  (let ((buf (process-buffer (jj-process-process proc))))
+    (if (jj--empty-buffer-p buf)
+        (kill-buffer buf)
+      (with-current-buffer buf
+        (font-lock-mode)
+        (view-mode-enter nil #'kill-buffer))
+      (pop-to-buffer buf))))
+
+(defun jj-view-error (proc)
+  (let ((stderr (jj-process-stderr proc)))
+    (if (jj--empty-buffer-p stderr)
+        (kill-buffer stderr)
+      (with-current-buffer stderr
+        (font-lock-mode)
+        (view-mode-enter nil #'kill-buffer))
+      (pop-to-buffer stderr))))
+;; post-command tasks:1 ends here
+
+;; helpers
+
+;; [[file:majjik.org::*helpers][helpers:1]]
+(defun jj--finally (promise f)
+  "Like `promise-finally', but call F with an argument - the value or error from the PROMISE. If F is nil, just return the PROMISE."
+  (if f
+      (promise-then
+       promise
+       (lambda (value)
+         (promise-then (promise-resolve (funcall f value))
+                       (lambda (_) value)))
+       (lambda (err)
+         (promise-then (promise-resolve (funcall f err))
+                       (lambda (_)
+                         (promise-reject err)))))
+    promise))
+
+(defmacro jj--call-each (&rest pipeline)
+  "Return a lambda that gives its argument to each non-nil function in PIPELINE, then returns that argument."
+  `(lambda (x)
+     (prog1 x
+       ,@(cl-loop for func in pipeline
+                  collect `(when-let ((f ,func))
+                             (funcall f x))))))
+
+(defun jj--const (ok)
+  "Return a function that runs OK on its argument before returning the argument unmodified."
+  (lambda (val)
+    (prog1 val
+      (funcall ok val))))
+
+(defun jj--const-err (err)
+  "Return a function that runs ERR on its argument before returning the async rejection of the argument."
+  (lambda (val)
+    (prog1 (promise-reject val)
+      (funcall err val))))
+
+(defun jj--peek (promise &optional ok err final)
+  "Run PROMISE, calling OK on success, ERR on error, and FINALLY regardless, and return the unmodified result of PROMISE."
+  (jj--finally
+   (promise-then
+    promise
+    (and ok (jj--const ok))
+    (and err (jj--const-err err)))
+   final))
+;; helpers:1 ends here
+
 ;; entry point
 
+
 ;; [[file:majjik.org::*entry point][entry point:1]]
-(defun jj-cmd-async (cmd &optional no-revert silent-ok no-kill-output buffer)
+(defun jj-cmd-async (cmd &optional output-buffer silent)
   "Run jj command CMD asynchronously."
-  (let* ((name (s-join " " cmd))
-         (buf (or buffer (generate-new-buffer (format "*jj %s*" name)))))
-    (jj-cmd-async-named name cmd no-revert silent-ok no-kill-output buf)))
+  (let* ((name (jj--cmd-abbrev cmd))
+         (buf (or output-buffer (generate-new-buffer (format "*jj %s*" name)))))
+    (jj-cmd-async-named name cmd buf silent)))
 
 (defalias 'jj-cmd-async-named 'jj-cmd-promise)
 ;; entry point:1 ends here
@@ -3812,75 +4020,72 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
 ;; async command plumbing
 
 ;; [[file:majjik.org::*async command plumbing][async command plumbing:1]]
-(defun jj-cmd-promise (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
+(cl-defstruct jj-process
+  "A `process' object and various associated data that isn't otherwise stored directly, for easier use in async programs."
+  (process nil
+           :type process
+           :documentation "The process object itself."
+           :read-only t)
+  (stderr nil
+          :type buffer
+          :documentation "The buffer assigned to process stderr output when it was created."
+          :read-only t)
+  (log-entry nil
+             :type jj--process-log-entry
+             :documentation "The handle to the process's log entry"
+             :read-only t)
+  (event nil
+         :type string
+         :documentation "The final event after the process has exited, otherwise nil."))
+
+(defun jj-cmd-promise (name cmd &optional output-buffer silent)
   "Run CMD asynchronously, returning a promise of its completion.
 
-On success, reverts the repo's dash buffer unless NO-REVERT, prints a message unless SILENT-OK, kills the output buffer unless NO-KILL-OUTPUT, and returns the process. On error, prints a message indicating the command log buffer, and returns a cons (PROCESS . EVENT). If OUTPUT-BUFFER, use that buffer for stdout instead of a temp indirect buffer."
+On success, returns the (PROCESS ERR-BUF). On error, returns (PROCESS ERR-BUF EVENT). If OUTPUT-BUFFER, use that buffer for stdout instead of a temp indirect buffer."
   (declare (indent 2))
-  (unless silent-ok
-    (message "`jj %s'..." name))
-  (promise-then
-   (jj-cmd--promise name cmd output-buffer)
-   (jj--make-async-success-callback name no-revert silent-ok no-kill-output)
-   (jj--make-async-failure-callback name)))
+  (unless silent
+    (message "`jj %s'..." (jj--replace-newlines name)))
+  (jj-cmd--promise name cmd output-buffer))
 
-(defun jj-cmd-futur (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
+(defun jj-cmd-futur (name cmd &optional output-buffer silent)
   "Run CMD asynchronously, returning a futur of its completion.
 
-On success, reverts the repo's dash buffer unless NO-REVERT, prints a message unless SILENT-OK, kills the output buffer unless NO-KILL-OUTPUT, and returns the process. On error, prints a message indicating the command log buffer, and returns a cons (PROCESS . EVENT). If OUTPUT-BUFFER, use that buffer for stdout instead of a temp indirect buffer."
+On success, returns the (PROCESS ERR-BUF). On error, returns (PROCESS ERR-BUF EVENT). If OUTPUT-BUFFER, use that buffer for stdout instead of a temp indirect buffer."
   (declare (indent 2))
-  (futur-let* ((proc <- (jj-cmd--futur name cmd output-buffer)))
-              :error-fun (jj--make-async-failure-callback name)
-              (funcall (jj--make-async-success-callback name no-revert silent-ok no-kill-output) proc)))
+  (unless silent
+    (message "`jj %s'..." name))
+  (jj-cmd--futur name cmd output-buffer))
 
-(defun jj--make-async-success-callback (name &optional no-revert silent-ok no-kill-output)
-  (lambda (proc)
-    (unless no-revert
-      (let ((jj--silent-revert t))
-        ;; set silent revert, rather than inhibiting messages
-        ;; because it's asynchronous, so the binding wouldnt last, and
-        ;; because we only want to prevent non-error messages
-        ;; and the revert function looks for silent-revert to suppress those.
-        (jj-revert-dash-buffer-async
-         (buffer-local-value 'default-directory
-                             (process-buffer proc)))))
-    (unless silent-ok
-      (message "`jj %s' ok" name))
-    (unless no-kill-output
-      (kill-buffer (process-buffer proc)))
-    proc))
-
-(defun jj--make-async-failure-callback (name)
-  (-lambda ((proc . event))
-    (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))
-    (error "process failure: %s: %s" proc event)))
-
-(defun jj--default-stderr-sentinel (proc event)
-  "Process sentinel for stderr buffers. If the process is dead, and was not successful, and the buffer exists, insert the event into the buffer."
-  (unless (process-live-p proc)
-    (unless (= 0 (process-exit-status proc))
-      (when (buffer-live-p (process-buffer proc))
-        (with-current-buffer (process-buffer proc)
-          (save-excursion
-            (goto-char (process-mark proc))
-            (unless (bolp)
-              (insert "\n"))
-            (insert event)))))))
+(defun jj--apply-font-lock-properties (string)
+  "Within STRING, add a `face' property for every `font-lock-face' property."
+  (with-temp-buffer
+    (insert string)
+    (cl-loop for start = (point-min) then pos
+             for pos = (next-property-change start)
+             for end = (or pos
+                           (point-max))
+             for props = (text-properties-at start)
+             do (when-let ((face (plist-get props 'font-lock-face)))
+                  (plist-put props 'face face))
+             while pos)
+    (buffer-string)))
 
 ;; copied and heavily modified from `comint-osc-process-output'
-(defun jj--ansi-color-filter (proc string)
-  "Process filter for output buffers. Converts ANSI color sequences in the output."
-  (when-let ((buf (process-buffer proc)))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf
-        (let* ((inhibit-read-only t)
-               (mark (process-mark proc)))
-          (save-excursion
-            (goto-char mark)
-            ;; this already handles partial sequences, and assumes
-            ;; sequential calls apply to contiguous chunks of output.
-            (insert (ansi-color-apply string))
-            (set-marker mark (point))))))))
+(defun jj--make-ansi-color-multi-filter (buffers)
+  "Process filter for writing to multiple output buffers. Converts ANSI color sequences in the output."
+  (lambda (proc string)
+    (dolist (buf buffers)
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (let* ((inhibit-read-only t)
+                 (mark (process-mark proc)))
+            (save-excursion
+              (goto-char mark)
+              ;; this already handles partial sequences, and assumes
+              ;; sequential calls apply to contiguous chunks of output.
+              ;; it must be run in the buffer it's inserting into.
+              (insert (ansi-color-apply string))
+              (set-marker mark (point)))))))))
 
 (defun jj-cmd--with-standard-args (cmd)
   "Return CMD with added arguments for using emacs as editor, and all the applicable configured arguments for a logging command."
@@ -3907,41 +4112,49 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                    (jj--make-process-log-entry name full-cmd min-cmd)))
         (promise-new
          (lambda (resolve reject)
-           (let ((proc (make-process
-                        :name (format "jj-%s" name)
-                        :buffer (or output-buffer buf-stdout)
-                        :stderr buf-stderr
-                        :sentinel (jj--make-update-exit-code-sentinel buf-code)
-                        :filter #'jj--ansi-color-filter
-                        :noquery t
-                        :command full-cmd)))
+           (let* ((proc (make-process
+                         :name name
+                         :buffer (or output-buffer
+                                     buf-stdout)
+                         :stderr buf-stderr
+                         :sentinel (jj--make-update-exit-code-sentinel buf-code)
+                         :filter (jj--make-ansi-color-multi-filter `(,buf-stdout
+                                                                     ,@(opt output-buffer)))
+                         :noquery t
+                         :command full-cmd))
+                  (jj-proc (make-jj-process :process proc
+                                            :stderr buf-stderr
+                                            :log-entry proc-entry)))
              (setf (jj--process-log-entry-process proc-entry) proc)
              (overlay-put ovl-control 'jj-object proc-entry)
              (jj--set-collapse-process proc-entry t)
              ;; (overlay-put ovl-err 'face '(:foreground "grey"))
              (jj--set-initial-run-status buf-code)
 
-             (when output-buffer
-               (kill-buffer buf-stdout))
              (let ((stderr (get-buffer-process buf-stderr)))
+               ;; print any abnormal process termination
                (set-process-sentinel stderr
-                                     #'jj--default-stderr-sentinel)
+                                     (jj--make-print-status-sentinel buf-stderr))
                (set-process-filter stderr
                                    #'jj--ansi-color-filter))
-             ;; print any abnormal process termination
-             (add-function :after (process-sentinel proc)
-                           (jj--make-print-status-sentinel buf-stderr))
-             ;; handle the promise state
-             (add-function :after (process-sentinel proc)
-                           (make-jj-callback-sentinel
-                            (lambda (exit-status event)
-                              (if (eq exit-status 0)
-                                  (funcall resolve proc)
-                                (funcall reject (cons proc event))))))
              ;; this always runs before the subsequent promise callbacks,
              ;; which means `resolve' and `reject' are not themselves callbacks
              (add-function :after (process-sentinel proc)
-                           (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
+                           (apply #'jj--make-cleanup-sentinel
+                                  ;; also kill the stdout buffer when an output buffer is specified
+                                  `(,buf-code
+                                    ,@(opt (when output-buffer
+                                             buf-stdout)))))
+             
+             (add-function :after (process-sentinel proc)
+                           (make-jj-callback-sentinel
+                            (lambda (exit-status event)
+                              ;; record the process-end event
+                              (setf (jj-process-event jj-proc) event)
+                              ;; handle the promise state. this is basically the return-value
+                              (if (eq exit-status 0)
+                                  (funcall resolve jj-proc)
+                                (funcall reject jj-proc))))))))))))
 
 (defun jj-cmd--futur (name cmd &optional output-buffer)
   "Run CMD asynchronously, returning a futur that is resolved (returning the process) on completion."
@@ -3961,13 +4174,16 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
         (futur-new
          (lambda (f)
            (let ((proc (make-process
-                        :name (format "jj-%s" name)
+                        :name name
                         :buffer (or output-buffer buf-stdout)
                         :stderr buf-stderr
                         :sentinel (jj--make-update-exit-code-sentinel buf-code)
                         :filter #'jj--ansi-color-filter
                         :noquery t
-                        :command full-cmd)))
+                        :command full-cmd))
+                 (jj-proc (make-jj-process :process proc
+                                           :stderr buf-stderr
+                                           :log-entry proc-entry)))
              (setf (jj--process-log-entry-process proc-entry) proc)
              (overlay-put ovl-control 'jj-object proc-entry)
              (jj--set-collapse-process proc-entry t)
@@ -3977,24 +4193,25 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
              (when output-buffer
                (kill-buffer buf-stdout))
              (let ((stderr (get-buffer-process buf-stderr)))
+               ;; print any abnormal process termination
                (set-process-sentinel stderr
-                                     #'jj--default-stderr-sentinel)
+                                     (jj--make-print-status-sentinel buf-stderr))
                (set-process-filter stderr
                                    #'jj--ansi-color-filter))
-             ;; print any abnormal process termination
+             ;; this always runs before the subsequent futurs,
+             ;; which means they are not themselves callbacks
              (add-function :after (process-sentinel proc)
-                           (jj--make-print-status-sentinel buf-stderr))
+                           (jj--make-cleanup-sentinel buf-code))
              ;; handle the promise state
              (add-function :after (process-sentinel proc)
                            (make-jj-callback-sentinel
                             (lambda (exit-status event)
+                              ;; record the process-end event
+                              (setf (jj-process-event jj-proc) event)
+                              ;; handle the futur state. this is basically the return-value
                               (if (eq exit-status 0)
-                                  (futur-deliver-value f proc)
-                                (futur-blocker-abort f (cons proc event))))))
-             ;; this always runs before the subsequent futurs,
-             ;; which means they are not themselves callbacks
-             (add-function :after (process-sentinel proc)
-                           (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
+                                  (futur-deliver-value f jj-proc)
+                                (futur-blocker-abort f jj-proc))))))))))))
 ;; async command plumbing:1 ends here
 
 ;; transient command utils
@@ -4202,27 +4419,97 @@ Sometimes this does not actually succeed at killing the process."
   "String to show instead of process output when collapsing.")
 ;; command log mode:1 ends here
 
-;; commands which view stdout
+;; primary command invokers
+;; main functions intended to run commands for various purposes:
+;; - for producing the dashboard buffer:
+;;   - silent start
+;;   - silent on ok
+;;   - stdout is only killed on error - the command is run for its output
+;;   - errors direct user to check secret buffer
+;;   - stderr is killed always
+;; - for showing in the echo area
+;;   - verbose ok message
+;;   - variable verbosity error message
+;;   - stdout is killed always
+;;   - stderr is killed always
+;; - for showing in own buffer
+;;   - simple ok message
+;;   - show output in buffer, which is killed on close
+;;   - stdout is only killed on error - the command is run for its output
+;;   - variable verbosity error message
+;;   - stderr is killed always
 
-;; [[file:majjik.org::*commands which view stdout][commands which view stdout:1]]
-(defun jj-async-view (proc-promise)
-  "View the output buffer of PROC-PROMISE, if it is non-empty.
-PROC-PROMISE must be a promise which, on completion, returns a process with a live output-buffer."
-  (promise-then
-   proc-promise
-   (lambda (proc)
-     (let ((buf (process-buffer proc)))
-       (if (jj--empty-buffer-p buf)
-           (kill-buffer buf)
-         (with-current-buffer buf
-           (font-lock-mode)
-           (view-mode-enter nil #'kill-buffer))
-         (pop-to-buffer buf))))))
+;; [[file:majjik.org::*primary command invokers][primary command invokers:1]]
+(defun jj-cmd-async--for-status (name cmd)
+  "Run CMD for the purposes of getting its output buffer, for producing the jj dhashboard.
 
-(defun jj-cmd-async-view (cmd &optional no-revert silent-ok)
-  "Run jj command CMD and view the output in its own buffer."
-  (jj-async-view (jj-cmd-async cmd no-revert silent-ok :no-kill)))
-;; commands which view stdout:1 ends here
+This means on failure refer to secret log and kill associated buffers, and on success, just kill the error buffer.
+Returns the raw process, not the combined handler."
+  (promise-then (jj--peek
+                 (jj-cmd-async-named name cmd nil :silent)
+                 nil
+                 (jj--call-each
+                  #'jj-see-secret-log-fail
+                  #'jj-print-crash
+                  #'jj-kill-output)
+                 #'jj-kill-error)
+                #'jj-process-process))
+
+(defun jj-cmd-async-view (cmd &optional no-revert verbose-error)
+  "Run jj command CMD asynchronously, view the stdout output in its own buffer (if there is any), and message the stderr output in the echo area."
+  (jj--peek
+   (jj-cmd-async cmd)
+   (jj--call-each
+    (jj-post-message
+     (jj-format-trimmed
+         #'jj-format-see-log
+       #'jj-format-simple-ok
+       #'jj-format-stderr))
+    #'jj-view-output)
+   (jj--call-each
+    (if verbose-error
+        (jj-post-message
+         #'jj-format-simple-fail
+         #'jj-format-stderr)
+      (jj-post-message
+       (jj-format-trimmed
+           #'jj-format-see-log
+         #'jj-format-simple-fail
+         #'jj-format-stderr)))
+    #'jj-print-crash
+    #'jj-kill-output)
+   (jj--call-each
+    (unless no-revert
+      #'jj-revert-silently)
+    #'jj-kill-error)))
+
+(defun jj-cmd-async-message (cmd &optional no-revert verbose-error)
+  "Run jj command CMD asynchronously, and message the combined stdout and stderr output in the echo area."
+  (jj--peek
+   (jj-cmd-async cmd)
+   (jj-post-message
+    (jj-format-trimmed
+        #'jj-format-see-log
+      #'jj-format-simple-ok
+      #'jj-format-stdout
+      #'jj-format-stderr))
+   (jj--call-each
+    (if verbose-error
+        (jj-post-message
+         #'jj-format-simple-fail
+         #'jj-format-stderr)
+      (jj-post-message
+       (jj-format-trimmed
+           #'jj-format-see-log
+         #'jj-format-simple-fail
+         #'jj-format-stderr)))
+    #'jj-print-crash)
+   (jj--call-each
+    (unless no-revert
+      #'jj-revert-silently)
+    #'jj-kill-error
+    #'jj-kill-output)))
+;; primary command invokers:1 ends here
 
 ;; entry
 
