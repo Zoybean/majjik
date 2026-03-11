@@ -2610,6 +2610,7 @@ This is concatenated with an identifier for the repository to define the buffer 
   :parent jj-inspect-mode-map
   "Q" #'jj-cmd
   "H" #'jj-help
+  "G" #'jj-git-prefix
   "C-/" #'jj-undo
   "C-?" #'jj-redo
   "C-_" #'jj-undo
@@ -5190,32 +5191,54 @@ Will likely fail for any interactive command."
         "-r" ,revset)))
 ;; jj drop:1 ends here
 
-;; jj git init
+;; simple
 
-;; [[file:majjik.org::*jj git init][jj git init:1]]
+;; [[file:majjik.org::*simple][simple:1]]
+(defun jj--git-init (dir args)
+  (let* ((cmd `("git" "init"
+               ,(expand-file-name dir)
+               ,@args)))
+    (promise-then
+     (jj-cmd-async-view cmd :no-rev :verbose-error)
+     (lambda (proc)
+       (jj-dash--async dir)))))
+
 ;;;###autoload
 (defun jj-git-init (root-dir colocate)
   (interactive (list (expand-file-name (read-directory-name "repository root: "))
                      (yes-or-no-p "colocated repository?")))
-  (jj-cmd-async
-      `("git" "init"
-        ,@(jj--if-arg colocate nil "--colocate")
-        "--" ,root-dir)
-    (lambda (ok _dir)
-      (when ok
-        (jj-dash--async root-dir))
-      (unless ok
-        (message "jj init failed")))))
+  (jj--git-init root-dir
+                    `(,@(jj--if-arg colocate nil "--colocate")
+                      ,@(jj--if-arg (not colocate) nil "--no-colocate"))))
 
 (defun jj-git--init-sync (root-dir colocate)
   (interactive (list (expand-file-name (read-directory-name "repository root: "))
                      (yes-or-no-p "colocated repository?")))
   (jj-cmd-sync
-      `("git" "init"
-        ,@(jj--if-arg colocate nil "--colocate")
-        "--" ,root-dir)
-      :no-revert))
-;; jj git init:1 ends here
+   `("git" "init"
+     ,@(jj--if-arg colocate nil "--colocate")
+     ,@(jj--if-arg (not colocate) nil "--no-colocate")
+     "--" ,root-dir)
+   :no-revert))
+;; simple:1 ends here
+
+;; transient
+
+;; [[file:majjik.org::*transient][transient:1]]
+(transient-define-prefix jj-git-init-prefix ()
+  :refresh-suffixes t
+  :incompatible (prod-cartes '("--colocate") '("--git-repo=" "--no-colocate"))
+  ["targets"
+   ("-c" "colocate" "--colocate")
+   ("-n" "no-colocate" "--no-colocate")
+   ("-g" "git-repo" "--git-repo="
+    :reader transient-read-existing-directory)]
+  ["go"
+   ("i" "init" (lambda (path args)
+                 (interactive (list (read-directory-name "init in: ")
+                                    (jj--transient-args)))
+                 (jj--git-init path args)))])
+;; transient:1 ends here
 
 ;; new
 
@@ -5417,7 +5440,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 (defun jj-git-push (&rest args)
   "Push to git in the background."
   (interactive)
-  (jj-cmd-async `("git" "push" ,@args)))
+  (jj-cmd-async-view `("git" "push" ,@args) nil :verbose-error))
 ;; simple:1 ends here
 
 ;; transient
@@ -5600,7 +5623,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
 (defun jj-git-fetch (&rest args)
   "Fetch from git in the background."
   (interactive)
-  (jj-cmd-async `("git" "fetch" ,@args)))
+  (jj-cmd-async-view `("git" "fetch" ,@args) nil :verbose-error))
 ;; simple:1 ends here
 
 ;; transient
@@ -5690,6 +5713,168 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
                     (transient--any-on-p "--user" "--repo" "--workspace")))
    ])
 ;; edit:1 ends here
+
+;; entry
+
+;; [[file:majjik.org::*entry][entry:1]]
+(transient-define-prefix jj-git-prefix ()
+  :refresh-suffixes t
+  [["remote"
+    ("p" "push" jj-git-push-prefix)
+    ("f" "fetch" jj-git-fetch-prefix)
+    ("m" "remote" jj-git-remote-prefix)
+    ]
+   ["manage"
+    ("l" "colocation" jj-git-colocation-prefix)
+    ("r" "root" (lambda ()
+                  (interactive)
+                  (jj-cmd-async-view `("git" "root")))
+     :transient t)
+    ("ge" "export"
+     (lambda ()
+       (interactive)
+       (jj-cmd-async-view '("git" "export"))))
+    ("gi" "import"
+     (lambda ()
+       (interactive)
+       (jj-cmd-async-view '("git" "import"))))
+    ]
+   ["misc"
+    ("G" "magit" magit-status)
+    ("i" "init" jj-git-init-prefix)
+    ("C" "clone" jj-git-clone-prefix)]])
+;; entry:1 ends here
+
+;; colocation
+
+;; [[file:majjik.org::*colocation][colocation:1]]
+(transient-define-prefix jj-git-colocation-prefix ()
+  ["go"
+   ("d" "disable"
+    (lambda ()
+      (interactive)
+      (jj-cmd-async-view '("git" "colocation" "disable"))))
+   ("e" "enable"
+    (lambda ()
+      (interactive)
+      (jj-cmd-async-view '("git" "colocation" "enable"))))
+   ("s" "status"
+    (lambda ()
+      (interactive)
+      (jj-cmd-async-message '("git" "colocation" "status")))
+    :transient t)
+   ])
+;; colocation:1 ends here
+
+;; remote
+
+;; [[file:majjik.org::*remote][remote:1]]
+(transient-define-prefix jj-git-remote-prefix ()
+  :refresh-suffixes t
+  ["go"
+   ("a" "add" jj-git-remote-add-prefix)
+   ("l" "list" (lambda ()
+                 (interactive)
+                 (jj-cmd-async-message `("git" "remote" "list")))
+    :transient t)
+   ("k" "remove" (lambda (name)
+                   (interactive (list (completing-read "Remove remote: " (jj-list-git-remotes) nil t)))
+                   (jj-cmd-async-view `("git" "remote" "remove" ,name))))
+   ("r" "rename" (lambda (old-name new-name)
+                   (interactive (list (completing-read "Rename remote: " (jj-list-git-remotes) nil t)
+                                      (read-string "New name: ")))
+                   (jj-cmd-async-view `("git" "remote" "rename" ,old-name ,new-name))))
+   ("u" "set-url" jj-git-remote-set-url-prefix)
+   ])
+;; remote:1 ends here
+
+;; git remote add
+
+;; [[file:majjik.org::*git remote add][git remote add:1]]
+(transient-define-prefix jj-git-remote-add-prefix ()
+  ["arguments"
+   ("-p" "push-url" "--push-url=")
+   ("-f" "fetch-tags" "--fetch-tags="
+    :class transient-switches
+    :argument-format "--fetch-tags=%s"
+    :argument-regexp "\\(--fetch-tags=\\(all\\|included\\|none\\)\\)"
+    :choices ("all" "included" "none"))]
+  ["go"
+   ("a" "add" (lambda (args name url)
+                (interactive (list (jj--transient-args)
+                                   (read-string "New name: ")
+                                   (read-string "New url: ")))
+                (jj-cmd-async-view `("git" "remote" "add" ,@args ,name ,url)))
+    )])
+;; git remote add:1 ends here
+
+;; git remote set-url
+
+;; [[file:majjik.org::*git remote set-url][git remote set-url:1]]
+(transient-define-prefix jj-git-remote-set-url-prefix ()
+  ["arguments"
+   ("-p" "push" "--push=")
+   ("-f" "fetch" "--fetch=")
+   ]
+  ["go"
+   ("u" "set-url"
+    (lambda (args name)
+      (interactive (list (jj--transient-args)
+                         (completing-read "Update remote: "
+                                          (jj-list-git-remotes) nil t)
+                         ))
+      (jj-git-remote-set-url args name nil))
+    )
+   ("U" "set-url (prompt for url)"
+    (lambda (args name url)
+      (interactive (list (jj--transient-args)
+                         (completing-read "Update remote: "
+                                          (jj-list-git-remotes) nil t)
+                         (read-string "New url: ")))
+      (jj-git-remote-set-url nil name url))
+    )
+   ])
+
+(defun jj-git-remote-set-url (args name url)
+  (jj-cmd-async-view `("git" "remote" "set-url" ,@args ,name ,@(opt url))))
+;; git remote set-url:1 ends here
+
+;; clone
+
+;; [[file:majjik.org::*clone][clone:1]]
+(defun jj--git-clone (url dir args)
+  (let* ((cmd `("git" "clone"
+                ,url
+                ,(expand-file-name dir)
+                ,@args)))
+    (promise-then
+     (jj-cmd-async-view cmd :no-rev :verbose-error)
+     (lambda (proc)
+       (jj-dash--async dir)))))
+
+(transient-define-prefix jj-git-clone-prefix ()
+  :refresh-suffixes t
+  :incompatible (prod-cartes '("--colocate") '("--git-repo=" "--no-colocate"))
+  ["targets"
+   ("-m" "remote" "--remote=")
+   ("-c" "colocate" "--colocate")
+   ("-n" "no-colocate" "--no-colocate")
+   ("-d" "depth" "--depth="
+    :reader transient-read-number-N+)
+   ("-f" "fetch-tags" "--fetch-tags="
+    :class transient-switches
+    :argument-format "--fetch-tags=%s"
+    :argument-regexp "\\(--fetch-tags=\\(all\\|included\\|none\\)\\)"
+    :choices ("all" "included" "none"))
+   ("-b" "branch" "--branch=")
+   ]
+  ["go"
+   ("c" "clone" (lambda (url path args)
+                  (interactive (list (read-string "clone url: ")
+                                     (read-directory-name "clone into: ")
+                                     (jj--transient-args)))
+                  (jj--git-clone url path args)))])
+;; clone:1 ends here
 
 ;; Provide
 

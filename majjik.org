@@ -2629,6 +2629,7 @@ this might not actually work. I'm big sus actually.
     :parent jj-inspect-mode-map
     "Q" #'jj-cmd
     "H" #'jj-help
+    "G" #'jj-git-prefix
     "C-/" #'jj-undo
     "C-?" #'jj-redo
     "C-_" #'jj-undo
@@ -5401,29 +5402,50 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
           "-r" ,revset)))
 #+end_src
 ***** jj git init
+****** simple
 #+begin_src elisp
+  (defun jj--git-init (dir args)
+    (let* ((cmd `("git" "init"
+                 ,(expand-file-name dir)
+                 ,@args)))
+      (promise-then
+       (jj-cmd-async-view cmd :no-rev :verbose-error)
+       (lambda (proc)
+         (jj-dash--async dir)))))
+
   ;;;###autoload
   (defun jj-git-init (root-dir colocate)
     (interactive (list (expand-file-name (read-directory-name "repository root: "))
                        (yes-or-no-p "colocated repository?")))
-    (jj-cmd-async
-        `("git" "init"
-          ,@(jj--if-arg colocate nil "--colocate")
-          "--" ,root-dir)
-      (lambda (ok _dir)
-        (when ok
-          (jj-dash--async root-dir))
-        (unless ok
-          (message "jj init failed")))))
+    (jj--git-init root-dir
+                      `(,@(jj--if-arg colocate nil "--colocate")
+                        ,@(jj--if-arg (not colocate) nil "--no-colocate"))))
 
   (defun jj-git--init-sync (root-dir colocate)
     (interactive (list (expand-file-name (read-directory-name "repository root: "))
                        (yes-or-no-p "colocated repository?")))
     (jj-cmd-sync
-        `("git" "init"
-          ,@(jj--if-arg colocate nil "--colocate")
-          "--" ,root-dir)
-        :no-revert))
+     `("git" "init"
+       ,@(jj--if-arg colocate nil "--colocate")
+       ,@(jj--if-arg (not colocate) nil "--no-colocate")
+       "--" ,root-dir)
+     :no-revert))
+#+end_src
+****** transient
+#+begin_src elisp
+  (transient-define-prefix jj-git-init-prefix ()
+    :refresh-suffixes t
+    :incompatible (prod-cartes '("--colocate") '("--git-repo=" "--no-colocate"))
+    ["targets"
+     ("-c" "colocate" "--colocate")
+     ("-n" "no-colocate" "--no-colocate")
+     ("-g" "git-repo" "--git-repo="
+      :reader transient-read-existing-directory)]
+    ["go"
+     ("i" "init" (lambda (path args)
+                   (interactive (list (read-directory-name "init in: ")
+                                      (jj--transient-args)))
+                   (jj--git-init path args)))])
 #+end_src
 ***** jj bookmark
 ****** new
@@ -5672,7 +5694,7 @@ for push and fetch
   (defun jj-git-push (&rest args)
     "Push to git in the background."
     (interactive)
-    (jj-cmd-async `("git" "push" ,@args)))
+    (jj-cmd-async-view `("git" "push" ,@args) nil :verbose-error))
 #+end_src
 ****** transient
 #+begin_src elisp
@@ -5852,7 +5874,7 @@ for push and fetch
   (defun jj-git-fetch (&rest args)
     "Fetch from git in the background."
     (interactive)
-    (jj-cmd-async `("git" "fetch" ,@args)))
+    (jj-cmd-async-view `("git" "fetch" ,@args) nil :verbose-error))
 #+end_src
 
 ****** transient
@@ -5937,6 +5959,157 @@ for push and fetch
       :inapt-if-not (lambda ()
                       (transient--any-on-p "--user" "--repo" "--workspace")))
      ])
+#+end_src
+***** jj transient git
+****** entry
+#+begin_src elisp
+  (transient-define-prefix jj-git-prefix ()
+    :refresh-suffixes t
+    [["remote"
+      ("p" "push" jj-git-push-prefix)
+      ("f" "fetch" jj-git-fetch-prefix)
+      ("m" "remote" jj-git-remote-prefix)
+      ]
+     ["manage"
+      ("l" "colocation" jj-git-colocation-prefix)
+      ("r" "root" (lambda ()
+                    (interactive)
+                    (jj-cmd-async-view `("git" "root")))
+       :transient t)
+      ("ge" "export"
+       (lambda ()
+         (interactive)
+         (jj-cmd-async-view '("git" "export"))))
+      ("gi" "import"
+       (lambda ()
+         (interactive)
+         (jj-cmd-async-view '("git" "import"))))
+      ]
+     ["misc"
+      ("G" "magit" magit-status)
+      ("i" "init" jj-git-init-prefix)
+      ("C" "clone" jj-git-clone-prefix)]])
+#+end_src
+****** colocation
+#+begin_src elisp
+  (transient-define-prefix jj-git-colocation-prefix ()
+    ["go"
+     ("d" "disable"
+      (lambda ()
+        (interactive)
+        (jj-cmd-async-view '("git" "colocation" "disable"))))
+     ("e" "enable"
+      (lambda ()
+        (interactive)
+        (jj-cmd-async-view '("git" "colocation" "enable"))))
+     ("s" "status"
+      (lambda ()
+        (interactive)
+        (jj-cmd-async-message '("git" "colocation" "status")))
+      :transient t)
+     ])
+#+end_src
+****** remote
+#+begin_src elisp
+  (transient-define-prefix jj-git-remote-prefix ()
+    :refresh-suffixes t
+    ["go"
+     ("a" "add" jj-git-remote-add-prefix)
+     ("l" "list" (lambda ()
+                   (interactive)
+                   (jj-cmd-async-message `("git" "remote" "list")))
+      :transient t)
+     ("k" "remove" (lambda (name)
+                     (interactive (list (completing-read "Remove remote: " (jj-list-git-remotes) nil t)))
+                     (jj-cmd-async-view `("git" "remote" "remove" ,name))))
+     ("r" "rename" (lambda (old-name new-name)
+                     (interactive (list (completing-read "Rename remote: " (jj-list-git-remotes) nil t)
+                                        (read-string "New name: ")))
+                     (jj-cmd-async-view `("git" "remote" "rename" ,old-name ,new-name))))
+     ("u" "set-url" jj-git-remote-set-url-prefix)
+     ])
+#+end_src
+******* git remote add
+#+begin_src elisp
+  (transient-define-prefix jj-git-remote-add-prefix ()
+    ["arguments"
+     ("-p" "push-url" "--push-url=")
+     ("-f" "fetch-tags" "--fetch-tags="
+      :class transient-switches
+      :argument-format "--fetch-tags=%s"
+      :argument-regexp "\\(--fetch-tags=\\(all\\|included\\|none\\)\\)"
+      :choices ("all" "included" "none"))]
+    ["go"
+     ("a" "add" (lambda (args name url)
+                  (interactive (list (jj--transient-args)
+                                     (read-string "New name: ")
+                                     (read-string "New url: ")))
+                  (jj-cmd-async-view `("git" "remote" "add" ,@args ,name ,url)))
+      )])
+#+end_src
+******* git remote set-url
+#+begin_src elisp
+  (transient-define-prefix jj-git-remote-set-url-prefix ()
+    ["arguments"
+     ("-p" "push" "--push=")
+     ("-f" "fetch" "--fetch=")
+     ]
+    ["go"
+     ("u" "set-url"
+      (lambda (args name)
+        (interactive (list (jj--transient-args)
+                           (completing-read "Update remote: "
+                                            (jj-list-git-remotes) nil t)
+                           ))
+        (jj-git-remote-set-url args name nil))
+      )
+     ("U" "set-url (prompt for url)"
+      (lambda (args name url)
+        (interactive (list (jj--transient-args)
+                           (completing-read "Update remote: "
+                                            (jj-list-git-remotes) nil t)
+                           (read-string "New url: ")))
+        (jj-git-remote-set-url nil name url))
+      )
+     ])
+
+  (defun jj-git-remote-set-url (args name url)
+    (jj-cmd-async-view `("git" "remote" "set-url" ,@args ,name ,@(opt url))))
+#+end_src
+****** clone
+#+begin_src elisp
+  (defun jj--git-clone (url dir args)
+    (let* ((cmd `("git" "clone"
+                  ,url
+                  ,(expand-file-name dir)
+                  ,@args)))
+      (promise-then
+       (jj-cmd-async-view cmd :no-rev :verbose-error)
+       (lambda (proc)
+         (jj-dash--async dir)))))
+
+  (transient-define-prefix jj-git-clone-prefix ()
+    :refresh-suffixes t
+    :incompatible (prod-cartes '("--colocate") '("--git-repo=" "--no-colocate"))
+    ["targets"
+     ("-m" "remote" "--remote=")
+     ("-c" "colocate" "--colocate")
+     ("-n" "no-colocate" "--no-colocate")
+     ("-d" "depth" "--depth="
+      :reader transient-read-number-N+)
+     ("-f" "fetch-tags" "--fetch-tags="
+      :class transient-switches
+      :argument-format "--fetch-tags=%s"
+      :argument-regexp "\\(--fetch-tags=\\(all\\|included\\|none\\)\\)"
+      :choices ("all" "included" "none"))
+     ("-b" "branch" "--branch=")
+     ]
+    ["go"
+     ("c" "clone" (lambda (url path args)
+                    (interactive (list (read-string "clone url: ")
+                                       (read-directory-name "clone into: ")
+                                       (jj--transient-args)))
+                    (jj--git-clone url path args)))])
 #+end_src
 *** TODO COMMENT Interactive commands
 **** emacsclient as diffeditor
