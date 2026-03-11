@@ -4337,7 +4337,7 @@ PROC-PROMISE must be a promise which, on completion, returns a process with a li
      ,@(jj--if-arg to #'identity "--to")
      "--"
      ,@(jj--if-arg fileset #'identity nil))
-   :no-revert :silent-ok))
+   :no-revert))
 
 (defun jj-diff-at (revset &optional fileset)
   "View the diff for REVISION, optionally limited to files in FILESET."
@@ -4358,7 +4358,7 @@ PROC-PROMISE must be a promise which, on completion, returns a process with a li
      "--git"
      "-r" ,commit
      ,@(jj--if-arg fileset #'identity "--"))
-   :no-revert :silent-ok))
+   :no-revert))
 ;; jj show:1 ends here
 
 ;; anything
@@ -4394,7 +4394,8 @@ Will likely fail for any interactive command."
   (interactive (list
                 (split-string-shell-command
                  (read-from-minibuffer "jj help " nil nil nil 'jj-help-hist))))
-  (jj-cmd-async-view `("help" ,@args)))
+  (jj-cmd-async-view `("help" ,@args)
+                     :no-revert))
 ;; jj help:1 ends here
 
 ;; jj undo
@@ -4402,7 +4403,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*jj undo][jj undo:1]]
 (cl-defun jj-undo ()
   (interactive)
-  (jj-cmd-async `("undo")))
+  (jj-cmd-async-view `("undo")))
 ;; jj undo:1 ends here
 
 ;; jj redo
@@ -4410,7 +4411,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*jj redo][jj redo:1]]
 (cl-defun jj-redo ()
   (interactive)
-  (jj-cmd-async `("redo")))
+  (jj-cmd-async-view `("redo")))
 ;; jj redo:1 ends here
 
 ;; common
@@ -4509,18 +4510,18 @@ Will likely fail for any interactive command."
    ("s" "squash" (lambda (args)
                    (interactive (list (jj--transient-args)))
                    (jj-with-editor
-                    (jj-cmd-async `("squash" ,@args))))
+                    (jj-cmd-async-message `("squash" ,@args))))
     :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))
    ("d" "squash down" (lambda (args)
                         (interactive (list (jj--transient-args)))
                         (jj-with-editor
-                         (jj-cmd-async `("squash" ,@args))))
+                         (jj-cmd-async-message `("squash" ,@args))))
     :inapt-if-not (lambda () (and (transient--any-on-p "-r")
                                   (not (transient--any-on-p "-t" "-f")))))
    ("a" "amend @ into" (lambda (args)
                          (interactive (list (jj--transient-args)))
                          (jj-with-editor
-                          (jj-cmd-async `("squash" ,@args))))
+                          (jj-cmd-async-message `("squash" ,@args))))
     :inapt-if-not (lambda () (and (transient--any-on-p "-r" "-t")
                                   (not (transient--any-on-p "-f")))))])
 ;; squash:1 ends here
@@ -4538,7 +4539,7 @@ Will likely fail for any interactive command."
   ["go"
    ("a" "absorb" (lambda (args)
                    (interactive (list (jj--transient-args)))
-                   (jj-cmd-async `("absorb" ,@args)))
+                   (jj-cmd-async-view `("absorb" ,@args)))
     :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))])
 ;; absorb:1 ends here
 
@@ -4553,7 +4554,7 @@ Will likely fail for any interactive command."
   ["go"
    ("k" "abandon" (lambda (args)
                     (interactive (list (jj--transient-args)))
-                    (jj-cmd-async `("abandon" ,@args)))
+                    (jj-cmd-async-view `("abandon" ,@args)))
     :inapt-if-not (lambda () (transient--any-on-p "-r")))])
 ;; abandon:1 ends here
 
@@ -4580,12 +4581,12 @@ Will likely fail for any interactive command."
    ("w" "describe" (lambda (args)
                      (interactive (list (jj--ensure-message
                                          (jj--transient-args))))
-                     (jj-cmd-async `("describe" ,@args)))
+                     (jj-cmd-async-view `("describe" ,@args)))
     :inapt-if-not (lambda () (transient--any-on-p "-r")))
    ("c" "commit" (lambda (args)
                    (interactive (list (jj--ensure-message
                                        (jj--transient-args))))
-                   (jj-cmd-async `("commit" ,@args)))
+                   (jj-cmd-async-view `("commit" ,@args)))
     :inapt-if (lambda () (transient--any-on-p "-r")))])
 ;; describe:1 ends here
 
@@ -4620,7 +4621,7 @@ Will likely fail for any interactive command."
     ("m" "metaedit"
      (lambda (args)
        (interactive (list (jj--transient-args)))
-       (jj-cmd-async `("metaedit" ,@args)))
+       (jj-cmd-async-view `("metaedit" ,@args)))
      :inapt-if-not (lambda ()
                      (transient--any-on-p "-r")))]])
 ;; metaedit:1 ends here
@@ -4646,17 +4647,17 @@ Will likely fail for any interactive command."
   ["go"
    ("n" "new" (lambda (args)
                 (interactive (list (jj--transient-args)))
-                (jj-cmd-async `("new" ,@args)))
+                (jj-cmd-async-view `("new" ,@args)))
     :inapt-if-not (lambda ()
                     (jj-any-destination-provided)))
    ("N" "next" (lambda ()
                  (interactive)
-                 (jj-cmd-async `("next")))
+                 (jj-cmd-async-view `("next")))
     :inapt-if (lambda ()
                 (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))
    ("P" "prev" (lambda ()
                  (interactive)
-                 (jj-cmd-async `("prev")))
+                 (jj-cmd-async-view `("prev")))
     :inapt-if (lambda ()
                 (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))])
 ;; new:1 ends here
@@ -4673,16 +4674,16 @@ Will likely fail for any interactive command."
   ["go"
    ("e" "edit" (lambda (args)
                  (interactive (list (jj--transient-args)))
-                 (jj-cmd-async `("edit" ,@args)))
+                 (jj-cmd-async-view `("edit" ,@args)))
     :inapt-if-not (lambda () (transient--any-on-p "-r")))
    ("N" "next --edit" (lambda ()
                         (interactive)
-                        (jj-cmd-async `("next" "--edit")))
+                        (jj-cmd-async-view `("next" "--edit")))
     :inapt-if (lambda ()
                 (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))
    ("P" "prev --edit" (lambda ()
                         (interactive)
-                        (jj-cmd-async `("prev" "--edit")))
+                        (jj-cmd-async-view `("prev" "--edit")))
     :inapt-if (lambda ()
                 (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))])
 ;; edit:1 ends here
@@ -4702,7 +4703,7 @@ Will likely fail for any interactive command."
   ["go"
    ("r" "rebase" (lambda (args)
                    (interactive (list (jj--transient-args)))
-                   (jj-cmd-async `("rebase" ,@args)))
+                   (jj-cmd-async-view `("rebase" ,@args)))
     :inapt-if-not (lambda ()
                     (and (jj-any-destination-provided)
                          (jj-any-source-provided))))
@@ -4731,7 +4732,7 @@ Will likely fail for any interactive command."
   ["go"
    ("x" "restore" (lambda (args)
                     (interactive (list (jj--transient-args)))
-                    (jj-cmd-async `("restore" ,@args)))
+                    (jj-cmd-async-view `("restore" ,@args)))
     :inapt-if-not (lambda () (or
                               (transient--all-on-p "-f" "-t")
                               (transient--any-on-p "-c"))))
@@ -4751,13 +4752,13 @@ Will likely fail for any interactive command."
   ["go"
    ("c" "duplicate" (lambda (args)
                       (interactive (list (jj--transient-args)))
-                      (jj-cmd-async `("duplicate" ,@args)))
+                      (jj-cmd-async-view `("duplicate" ,@args)))
     :inapt-if-not (lambda ()
                     (and (jj-any-destination-provided)
                          (transient--any-on-p "-r"))))
    ("v" "revert" (lambda (args)
                    (interactive (list (jj--transient-args)))
-                   (jj-cmd-async `("revert" ,@args)))
+                   (jj-cmd-async-view `("revert" ,@args)))
     :inapt-if-not (lambda ()
                     (and (jj-any-destination-provided)
                          (transient--any-on-p "-r"))))])
@@ -4775,7 +4776,7 @@ Will likely fail for any interactive command."
    ("p" "parallelize"
     (lambda (args)
       (interactive (list (jj--transient-args)))
-      (jj-cmd-async `("parallelize" ,@args)))
+      (jj-cmd-async-view `("parallelize" ,@args)))
     :inapt-if-not (lambda ()
                     (transient--any-on-p "-r")))])
 ;; parallelize:1 ends here
@@ -4794,7 +4795,7 @@ Will likely fail for any interactive command."
    ("p" "simplify-parents"
     (lambda (args)
       (interactive (list (jj--transient-args)))
-      (jj-cmd-async `("simplify-parents" ,@args)))
+      (jj-cmd-async-view `("simplify-parents" ,@args)))
     :inapt-if-not (lambda ()
                     (transient--any-on-p "-r" "-s")))])
 ;; simplify-parents:1 ends here
@@ -4807,7 +4808,7 @@ Will likely fail for any interactive command."
     (user-error "cannot supply REV with BEFORE or AFTER"))
   (unless (or rev before after)
     (user-error "must supply at least one of REV, BEFORE, or AFTER"))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("new"
         ,@(jj--if-arg rev #'identity "-r")
         ,@(jj--if-arg before #'identity "--before")
@@ -4847,7 +4848,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*jj edit][jj edit:1]]
 (cl-defun jj-edit-dwim (rev &optional ignore-immutable)
   (interactive (list (jj-get-revset-dwim "edit: ")))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("edit"
         "-r" ,rev
         ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))))
@@ -4859,7 +4860,7 @@ Will likely fail for any interactive command."
 (defun jj-desc-dwim (revset message)
   (interactive (list (jj-get-revset-dwim "revs to describe: ")
                      (read-string "message: ")))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("describe"
         "-r" ,revset
         "-m" ,message)))
@@ -4872,7 +4873,7 @@ Will likely fail for any interactive command."
   (interactive (list (jj-get-revset-dwim "revs to abandon: ")))
   (unless (or noconfirm (yes-or-no-p (format "abandon %s?" revset)))
     (user-error "cancelled"))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("abandon"
         "-r" ,revset)))
 ;; jj drop:1 ends here
@@ -4911,7 +4912,7 @@ Will likely fail for any interactive command."
   "Create new BOOKMARK pointing at revision REV."
   (interactive (list (read-string "New bookmark: ")
                      (jj-get-revision-dwim "At rev: ")))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "create" ,bookmark
         "-r" ,rev)))
 ;; new:1 ends here
@@ -4924,7 +4925,7 @@ Will likely fail for any interactive command."
   (interactive (list (completing-read "Move bookmark: " (jj-list-local-bookmarks))
                      (jj-get-revision-dwim "move to: ")
                      current-prefix-arg))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "move" ,bookmark
         "--to" ,to-rev
         ,@(jj--if-arg allow-backwards nil "--allow-backwards"))))
@@ -4940,7 +4941,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (interactive (list (completing-read "Set bookmark: " (jj-list-local-bookmarks))
                      (jj-get-revision-dwim "Set to: ")
                      current-prefix-arg))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "set" ,bookmark
         "-r" ,rev
         ,@(jj--if-arg allow-backwards nil "--allow-backwards"))))
@@ -4953,7 +4954,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   "Create new BOOKMARK pointing at revision REV."
   (interactive (list (completing-read "Rename bookmark: " (jj-list-bookmarks))
                      (read-string "New name: ")))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "rename" ,bookmark ,new-name)))
 ;; rename:1 ends here
 
@@ -4966,7 +4967,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "delete bookmark %s?" bookmark)))
     (user-error "cancelled"))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "delete" ,bookmark)))
 ;; delete:1 ends here
 
@@ -4979,7 +4980,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "forget bookmark %s?" bookmark)))
     (user-error "cancelled"))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "forget" ,bookmark)))
 ;; forget:1 ends here
 
@@ -4991,7 +4992,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (interactive (let ((bookmark (completing-read "Bookmark to track: " (jj-list-bookmarks)))
                      (remote (completing-read "From remote: " (jj-list-git-remotes))))
                  (list remote bookmark)))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "track" ,bookmark
         "--remote" ,remote)))
 
@@ -5001,7 +5002,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (interactive (let ((remote (completing-read "From remote: " (jj-list-git-remotes)))
                      (bookmark (completing-read "Bookmark to track: " (jj-list-untracked-remote-bookmarks nil :not-git))))
                  (list remote bookmark)))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "track" ,bookmark
         "--remote" ,remote)))
 
@@ -5011,7 +5012,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (interactive (let ((bookmark (completing-read "Bookmark to track: " (jj-list-local-bookmarks)))
                      (remote (completing-read "To remote: " (jj-list-git-remotes))))
                  (list remote bookmark)))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "track" ,bookmark
         "--remote" ,remote)))
 ;; track:1 ends here
@@ -5030,7 +5031,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                                          collect r)
                                 nil t)))
                  (list bookmark remotes)))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("bookmark" "untrack" ,bookmark
         ,@(jj--if-arg remotes (apply-partially #'apply #'jj-revs-as-revset) "--remote"))))
 ;; untrack:1 ends here
@@ -5041,7 +5042,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 (defun jj-file-track-dwim (file)
   "Track FILE."
   (interactive (list (jj-get-untracked-file-dwim "File to track")))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("file" "track" ,(jj-paths-as-fileset file))))
 ;; track:1 ends here
 
@@ -5051,7 +5052,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 (defun jj-file-untrack-dwim (file)
   "Untrack FILE."
   (interactive (list (jj-get-tracked-file-dwim "File to untrack")))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("file" "untrack" ,(jj-paths-as-fileset file))))
 ;; untrack:1 ends here
 
@@ -5064,7 +5065,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "delete file %s?" file)))
     (user-error "cancelled"))
-  (jj-cmd-async
+  (jj-cmd-async-view
       `("util" "exec" "rm" ,file)))
 ;; delete:1 ends here
 
@@ -5079,7 +5080,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (unless (or noconfirm (yes-or-no-p (format "squash %s into its parent?" rev)))
     (user-error "cancelled"))
   (jj-with-editor
-    (jj-cmd-async
+    (jj-cmd-async-message
         `("squash"
           "-r" ,rev
           ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
@@ -5092,7 +5093,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   (unless (or noconfirm (yes-or-no-p (format "squash @ into %s?" rev)))
     (user-error "cancelled"))
   (jj-with-editor
-    (jj-cmd-async
+    (jj-cmd-async-message
         `("squash"
           "--into" ,rev
           ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
@@ -5372,7 +5373,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
    ("e" "edit" (lambda (args)
                  (interactive (list (jj--transient-args)))
                  (jj-with-editor
-                  (jj-cmd-async `("config" "edit" ,@args))))
+                  (jj-cmd-async-view `("config" "edit" ,@args))))
     :inapt-if-not (lambda ()
                     (transient--any-on-p "--user" "--repo" "--workspace")))
    ])

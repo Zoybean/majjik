@@ -4559,7 +4559,7 @@ lists of unimplemented commands and their approximate groupings
        ,@(jj--if-arg to #'identity "--to")
        "--"
        ,@(jj--if-arg fileset #'identity nil))
-     :no-revert :silent-ok))
+     :no-revert))
 
   (defun jj-diff-at (revset &optional fileset)
     "View the diff for REVISION, optionally limited to files in FILESET."
@@ -4578,7 +4578,7 @@ lists of unimplemented commands and their approximate groupings
        "--git"
        "-r" ,commit
        ,@(jj--if-arg fileset #'identity "--"))
-     :no-revert :silent-ok))
+     :no-revert))
 #+end_src
 **** do
 ***** anything
@@ -4612,19 +4612,20 @@ after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
     (interactive (list
                   (split-string-shell-command
                    (read-from-minibuffer "jj help " nil nil nil 'jj-help-hist))))
-    (jj-cmd-async-view `("help" ,@args)))
+    (jj-cmd-async-view `("help" ,@args)
+                       :no-revert))
 #+end_src
 ***** jj undo
 #+begin_src elisp
   (cl-defun jj-undo ()
     (interactive)
-    (jj-cmd-async `("undo")))
+    (jj-cmd-async-view `("undo")))
 #+end_src
 ***** jj redo
 #+begin_src elisp
   (cl-defun jj-redo ()
     (interactive)
-    (jj-cmd-async `("redo")))
+    (jj-cmd-async-view `("redo")))
 #+end_src
 ***** jj transient commit
 TODOs:
@@ -4726,18 +4727,18 @@ TODOs:
      ("s" "squash" (lambda (args)
                      (interactive (list (jj--transient-args)))
                      (jj-with-editor
-                      (jj-cmd-async `("squash" ,@args))))
+                      (jj-cmd-async-message `("squash" ,@args))))
       :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))
      ("d" "squash down" (lambda (args)
                           (interactive (list (jj--transient-args)))
                           (jj-with-editor
-                           (jj-cmd-async `("squash" ,@args))))
+                           (jj-cmd-async-message `("squash" ,@args))))
       :inapt-if-not (lambda () (and (transient--any-on-p "-r")
                                     (not (transient--any-on-p "-t" "-f")))))
      ("a" "amend @ into" (lambda (args)
                            (interactive (list (jj--transient-args)))
                            (jj-with-editor
-                            (jj-cmd-async `("squash" ,@args))))
+                            (jj-cmd-async-message `("squash" ,@args))))
       :inapt-if-not (lambda () (and (transient--any-on-p "-r" "-t")
                                     (not (transient--any-on-p "-f")))))])
 #+end_src
@@ -4753,7 +4754,7 @@ TODOs:
     ["go"
      ("a" "absorb" (lambda (args)
                      (interactive (list (jj--transient-args)))
-                     (jj-cmd-async `("absorb" ,@args)))
+                     (jj-cmd-async-view `("absorb" ,@args)))
       :inapt-if-not (lambda () (transient--all-on-p "-f" "-t")))])
 #+end_src
 ****** abandon
@@ -4767,7 +4768,7 @@ TODOs:
     ["go"
      ("k" "abandon" (lambda (args)
                       (interactive (list (jj--transient-args)))
-                      (jj-cmd-async `("abandon" ,@args)))
+                      (jj-cmd-async-view `("abandon" ,@args)))
       :inapt-if-not (lambda () (transient--any-on-p "-r")))])
 #+end_src
 ****** describe
@@ -4792,12 +4793,12 @@ TODOs:
      ("w" "describe" (lambda (args)
                        (interactive (list (jj--ensure-message
                                            (jj--transient-args))))
-                       (jj-cmd-async `("describe" ,@args)))
+                       (jj-cmd-async-view `("describe" ,@args)))
       :inapt-if-not (lambda () (transient--any-on-p "-r")))
      ("c" "commit" (lambda (args)
                      (interactive (list (jj--ensure-message
                                          (jj--transient-args))))
-                     (jj-cmd-async `("commit" ,@args)))
+                     (jj-cmd-async-view `("commit" ,@args)))
       :inapt-if (lambda () (transient--any-on-p "-r")))])
 #+end_src
 ****** metaedit
@@ -4830,7 +4831,7 @@ TODOs:
       ("m" "metaedit"
        (lambda (args)
          (interactive (list (jj--transient-args)))
-         (jj-cmd-async `("metaedit" ,@args)))
+         (jj-cmd-async-view `("metaedit" ,@args)))
        :inapt-if-not (lambda ()
                        (transient--any-on-p "-r")))]])
      #+end_src
@@ -4855,17 +4856,17 @@ TODOs:
     ["go"
      ("n" "new" (lambda (args)
                   (interactive (list (jj--transient-args)))
-                  (jj-cmd-async `("new" ,@args)))
+                  (jj-cmd-async-view `("new" ,@args)))
       :inapt-if-not (lambda ()
                       (jj-any-destination-provided)))
      ("N" "next" (lambda ()
                    (interactive)
-                   (jj-cmd-async `("next")))
+                   (jj-cmd-async-view `("next")))
       :inapt-if (lambda ()
                   (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))
      ("P" "prev" (lambda ()
                    (interactive)
-                   (jj-cmd-async `("prev")))
+                   (jj-cmd-async-view `("prev")))
       :inapt-if (lambda ()
                   (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))])
 #+end_src
@@ -4882,16 +4883,16 @@ TODOs:
     ["go"
      ("e" "edit" (lambda (args)
                    (interactive (list (jj--transient-args)))
-                   (jj-cmd-async `("edit" ,@args)))
+                   (jj-cmd-async-view `("edit" ,@args)))
       :inapt-if-not (lambda () (transient--any-on-p "-r")))
      ("N" "next --edit" (lambda ()
                           (interactive)
-                          (jj-cmd-async `("next" "--edit")))
+                          (jj-cmd-async-view `("next" "--edit")))
       :inapt-if (lambda ()
                   (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))
      ("P" "prev --edit" (lambda ()
                           (interactive)
-                          (jj-cmd-async `("prev" "--edit")))
+                          (jj-cmd-async-view `("prev" "--edit")))
       :inapt-if (lambda ()
                   (transient--any-on-p "-B" "-A" "-r" "-N" "-m")))])
 #+end_src
@@ -4911,7 +4912,7 @@ TODOs:
     ["go"
      ("r" "rebase" (lambda (args)
                      (interactive (list (jj--transient-args)))
-                     (jj-cmd-async `("rebase" ,@args)))
+                     (jj-cmd-async-view `("rebase" ,@args)))
       :inapt-if-not (lambda ()
                       (and (jj-any-destination-provided)
                            (jj-any-source-provided))))
@@ -4939,7 +4940,7 @@ TODOs:
     ["go"
      ("x" "restore" (lambda (args)
                       (interactive (list (jj--transient-args)))
-                      (jj-cmd-async `("restore" ,@args)))
+                      (jj-cmd-async-view `("restore" ,@args)))
       :inapt-if-not (lambda () (or
                                 (transient--all-on-p "-f" "-t")
                                 (transient--any-on-p "-c"))))
@@ -4958,13 +4959,13 @@ TODOs:
     ["go"
      ("c" "duplicate" (lambda (args)
                         (interactive (list (jj--transient-args)))
-                        (jj-cmd-async `("duplicate" ,@args)))
+                        (jj-cmd-async-view `("duplicate" ,@args)))
       :inapt-if-not (lambda ()
                       (and (jj-any-destination-provided)
                            (transient--any-on-p "-r"))))
      ("v" "revert" (lambda (args)
                      (interactive (list (jj--transient-args)))
-                     (jj-cmd-async `("revert" ,@args)))
+                     (jj-cmd-async-view `("revert" ,@args)))
       :inapt-if-not (lambda ()
                       (and (jj-any-destination-provided)
                            (transient--any-on-p "-r"))))])
@@ -4980,7 +4981,7 @@ TODOs:
      ("p" "parallelize"
       (lambda (args)
         (interactive (list (jj--transient-args)))
-        (jj-cmd-async `("parallelize" ,@args)))
+        (jj-cmd-async-view `("parallelize" ,@args)))
       :inapt-if-not (lambda ()
                       (transient--any-on-p "-r")))])
 #+end_src
@@ -4998,7 +4999,7 @@ TODOs:
      ("p" "simplify-parents"
       (lambda (args)
         (interactive (list (jj--transient-args)))
-        (jj-cmd-async `("simplify-parents" ,@args)))
+        (jj-cmd-async-view `("simplify-parents" ,@args)))
       :inapt-if-not (lambda ()
                       (transient--any-on-p "-r" "-s")))])
 #+end_src
@@ -5024,7 +5025,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
       (user-error "cannot supply REV with BEFORE or AFTER"))
     (unless (or rev before after)
       (user-error "must supply at least one of REV, BEFORE, or AFTER"))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("new"
           ,@(jj--if-arg rev #'identity "-r")
           ,@(jj--if-arg before #'identity "--before")
@@ -5062,7 +5063,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
 #+begin_src elisp
   (cl-defun jj-edit-dwim (rev &optional ignore-immutable)
     (interactive (list (jj-get-revset-dwim "edit: ")))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("edit"
           "-r" ,rev
           ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))))
@@ -5072,7 +5073,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
   (defun jj-desc-dwim (revset message)
     (interactive (list (jj-get-revset-dwim "revs to describe: ")
                        (read-string "message: ")))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("describe"
           "-r" ,revset
           "-m" ,message)))
@@ -5083,7 +5084,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     (interactive (list (jj-get-revset-dwim "revs to abandon: ")))
     (unless (or noconfirm (yes-or-no-p (format "abandon %s?" revset)))
       (user-error "cancelled"))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("abandon"
           "-r" ,revset)))
 #+end_src
@@ -5119,7 +5120,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     "Create new BOOKMARK pointing at revision REV."
     (interactive (list (read-string "New bookmark: ")
                        (jj-get-revision-dwim "At rev: ")))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "create" ,bookmark
           "-r" ,rev)))
 #+end_src
@@ -5130,7 +5131,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     (interactive (list (completing-read "Move bookmark: " (jj-list-local-bookmarks))
                        (jj-get-revision-dwim "move to: ")
                        current-prefix-arg))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "move" ,bookmark
           "--to" ,to-rev
           ,@(jj--if-arg allow-backwards nil "--allow-backwards"))))
@@ -5144,7 +5145,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     (interactive (list (completing-read "Set bookmark: " (jj-list-local-bookmarks))
                        (jj-get-revision-dwim "Set to: ")
                        current-prefix-arg))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "set" ,bookmark
           "-r" ,rev
           ,@(jj--if-arg allow-backwards nil "--allow-backwards"))))
@@ -5155,7 +5156,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     "Create new BOOKMARK pointing at revision REV."
     (interactive (list (completing-read "Rename bookmark: " (jj-list-bookmarks))
                        (read-string "New name: ")))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "rename" ,bookmark ,new-name)))
 #+end_src
 ****** delete
@@ -5166,7 +5167,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
                        current-prefix-arg))
     (unless (or noconfirm (yes-or-no-p (format "delete bookmark %s?" bookmark)))
       (user-error "cancelled"))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "delete" ,bookmark)))
 #+end_src
 ****** forget
@@ -5177,7 +5178,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
                        current-prefix-arg))
     (unless (or noconfirm (yes-or-no-p (format "forget bookmark %s?" bookmark)))
       (user-error "cancelled"))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "forget" ,bookmark)))
 #+end_src
 ****** track
@@ -5187,7 +5188,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     (interactive (let ((bookmark (completing-read "Bookmark to track: " (jj-list-bookmarks)))
                        (remote (completing-read "From remote: " (jj-list-git-remotes))))
                    (list remote bookmark)))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "track" ,bookmark
           "--remote" ,remote)))
 
@@ -5197,7 +5198,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     (interactive (let ((remote (completing-read "From remote: " (jj-list-git-remotes)))
                        (bookmark (completing-read "Bookmark to track: " (jj-list-untracked-remote-bookmarks nil :not-git))))
                    (list remote bookmark)))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "track" ,bookmark
           "--remote" ,remote)))
 
@@ -5207,7 +5208,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     (interactive (let ((bookmark (completing-read "Bookmark to track: " (jj-list-local-bookmarks)))
                        (remote (completing-read "To remote: " (jj-list-git-remotes))))
                    (list remote bookmark)))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "track" ,bookmark
           "--remote" ,remote)))
 
@@ -5226,7 +5227,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
                                            collect r)
                                   nil t)))
                    (list bookmark remotes)))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("bookmark" "untrack" ,bookmark
           ,@(jj--if-arg remotes (apply-partially #'apply #'jj-revs-as-revset) "--remote"))))
 #+end_src
@@ -5269,7 +5270,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     ["go"
      ("x" "set" (lambda (args)
                   (interactive (list (jj--transient-args)))
-                  (jj-cmd-async
+                  (jj-cmd-async-view
                       `("bookmark" "set" ,@args))))])
 
   ;; TODO needs positional argument: bookmarks to move.
@@ -5288,7 +5289,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     ["go"
      ("m" "move" (lambda (args)
                   (interactive (list (jj--transient-args)))
-                  (jj-cmd-async
+                  (jj-cmd-async-view
                       `("bookmark" "move" ,@args))))])
 #+end_src
 ***** jj file
@@ -5297,7 +5298,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
   (defun jj-file-track-dwim (file)
     "Track FILE."
     (interactive (list (jj-get-untracked-file-dwim "File to track")))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("file" "track" ,(jj-paths-as-fileset file))))
 #+end_src
 ****** untrack
@@ -5305,7 +5306,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
   (defun jj-file-untrack-dwim (file)
     "Untrack FILE."
     (interactive (list (jj-get-tracked-file-dwim "File to untrack")))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("file" "untrack" ,(jj-paths-as-fileset file))))
 #+end_src
 ****** delete
@@ -5316,7 +5317,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
                        current-prefix-arg))
     (unless (or noconfirm (yes-or-no-p (format "delete file %s?" file)))
       (user-error "cancelled"))
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("util" "exec" "rm" ,file)))
 #+end_src
 ****** TODO transient
@@ -5330,7 +5331,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     (unless (or noconfirm (yes-or-no-p (format "squash %s into its parent?" rev)))
       (user-error "cancelled"))
     (jj-with-editor
-      (jj-cmd-async
+      (jj-cmd-async-message
           `("squash"
             "-r" ,rev
             ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
@@ -5343,7 +5344,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
     (unless (or noconfirm (yes-or-no-p (format "squash @ into %s?" rev)))
       (user-error "cancelled"))
     (jj-with-editor
-      (jj-cmd-async
+      (jj-cmd-async-message
           `("squash"
             "--into" ,rev
             ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
@@ -5620,7 +5621,7 @@ for push and fetch
      ("e" "edit" (lambda (args)
                    (interactive (list (jj--transient-args)))
                    (jj-with-editor
-                    (jj-cmd-async `("config" "edit" ,@args))))
+                    (jj-cmd-async-view `("config" "edit" ,@args))))
       :inapt-if-not (lambda ()
                       (transient--any-on-p "--user" "--repo" "--workspace")))
      ])
@@ -5691,7 +5692,7 @@ for push and fetch
                (setq server-eval-args-left nil)))))
 
   (defun jj-split (rev)
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("split" "-r" ,rev "-i"
           "--debug"
           ,@(jj--merge-tool-args
@@ -5837,7 +5838,7 @@ could I have the server call the (plugin) startup function, which returns a list
     `((,(ediff-directories left right (rx (* anychar))) . t)))
 
   (defun jj-split (rev)
-    (jj-cmd-async
+    (jj-cmd-async-view
         `("split" "-r" ,rev "-i"
           "--debug"
           ,@(jj--merge-tool-args
