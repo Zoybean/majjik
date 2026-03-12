@@ -4811,6 +4811,7 @@ lists of unimplemented commands and their approximate groupings
     :refresh-suffixes t
     :incompatible `(,@(prod-cartes '("-r") '("-f" "-t"))
                     ,@jj-diff-format-incompatibilities)
+    jj-global-group
     [["targets"
       ("-r" "revisions" jj-multi-revision-argument
        :argument "-r")
@@ -4833,6 +4834,7 @@ lists of unimplemented commands and their approximate groupings
   (transient-define-prefix jj-interdiff-prefix ()
     :refresh-suffixes t
     :incompatible jj-diff-format-incompatibilities
+    jj-global-group
     [["targets"
       ("-f" "from" jj-single-revision-argument
        :argument "-f")
@@ -4852,6 +4854,7 @@ lists of unimplemented commands and their approximate groupings
   (transient-define-prefix jj-show-prefix ()
     :refresh-suffixes t
     :incompatible jj-diff-format-incompatibilities
+    jj-global-group
     [["targets"
       ("-r" "revision" jj-single-revision-argument
        :argument "-r")]
@@ -5019,6 +5022,7 @@ TODOs:
     :refresh-suffixes t
     :incompatible `(,@(prod-cartes '("-r") '("-f" "-t"))
                     ("-m" "-u"))
+    jj-global-group
     [["targets"
       ("-r" "revision" jj-single-revision-argument
        :argument "-r")
@@ -5061,6 +5065,7 @@ TODOs:
 #+begin_src elisp
   (transient-define-prefix jj-commit-absorb-prefix ()
     :refresh-suffixes t
+    jj-global-group
     [["targets"
       ("-f" "from" jj-single-revision-argument
        :argument "-f")
@@ -5077,6 +5082,7 @@ TODOs:
 
   (transient-define-prefix jj-commit-abandon-prefix ()
     :refresh-suffixes t
+    jj-global-group
     ["targets"
      ("-r" "revisions" jj-multi-revision-argument
       :argument "-r")]
@@ -5090,6 +5096,7 @@ TODOs:
 #+begin_src elisp
   (transient-define-prefix jj-commit-describe-prefix ()
     :refresh-suffixes t
+    jj-global-group
     [["targets"
       ("-r" "revision" jj-single-revision-argument
        :argument "-r")]
@@ -5120,6 +5127,7 @@ TODOs:
 #+begin_src elisp
   (transient-define-prefix jj-commit-metaedit-prefix ()
     :refresh-suffixes t
+    jj-global-group
     [["targets"
       ("-r" "revisions" jj-multi-revision-argument
        :argument "-r")]
@@ -5156,6 +5164,7 @@ TODOs:
   (transient-define-prefix jj-commit-new-prefix ()
     :refresh-suffixes t
     :incompatible jj-revision-destination-incompatibilities
+    jj-global-group
     [jj-revision-destination-multi-group
      ["meta"
       ("-m" "message" "--message="
@@ -5191,6 +5200,7 @@ TODOs:
 
   (transient-define-prefix jj-commit-edit-prefix ()
     :refresh-suffixes t
+    jj-global-group
     ["targets"
      ("-r" "revision" jj-single-revision-argument
       :argument "-r")
@@ -5219,6 +5229,7 @@ TODOs:
     :refresh-suffixes t
     :incompatible `(,@jj-revision-source-incompatibilities
                     ,@jj-revision-destination-incompatibilities)
+    jj-global-group
     [jj-revision-source-multi-group
      jj-revision-destination-multi-group
      ["meta"
@@ -5239,6 +5250,7 @@ TODOs:
   (transient-define-prefix jj-commit-restore-prefix ()
     :refresh-suffixes t
     :incompatible (prod-cartes '("-c") '("-f" "-t"))
+    jj-global-group
     [["targets"
       ("-c" "changes in" jj-single-revision-argument
        :argument "-c")
@@ -5267,6 +5279,7 @@ TODOs:
   (transient-define-prefix jj-commit-copy-prefix ()
     :refresh-suffixes t
     :incompatible (prod-cartes '("-o") '("-B" "-A"))
+    jj-global-group
     [["sources"
       ("-r" "revisions" jj-multi-revision-argument
        :argument "-r")]
@@ -5289,6 +5302,7 @@ TODOs:
 #+begin_src elisp
   (transient-define-prefix jj-commit-parallelize-prefix ()
     :refresh-suffixes t
+    jj-global-group
     [["targets"
       ("-r" "revisions" jj-multi-revision-argument
        :argument "-r")]]
@@ -5305,6 +5319,7 @@ TODOs:
 #+begin_src elisp
   (transient-define-prefix jj-commit-simplify-parents-prefix ()
     :refresh-suffixes t
+    jj-global-group
     [["targets"
       ("-s" "sources" jj-multi-revision-argument
        :argument "-s")
@@ -5319,18 +5334,34 @@ TODOs:
                       (transient--any-on-p "-r" "-s")))])
 #+end_src
 
-****** TODO COMMENT global
-I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any prefix, the same way C-x opens a hidden menu.
+****** global
+I just need a way to optionally persist this now, so arguments are set once for a repo and stay until unset.
 #+begin_src elisp
+  (defvar jj-global-argument-prefix "!")
+  (defvar jj-show-global-arguments nil
+    "Whether to always show the common global jj arguments")
+
   (transient-define-group jj-global-group
-    ["global"
-     ("!R" "repository" "--repository=")
-     ("!iw" "ignore working copy" "--ignore-working-copy")
-     ("!im" "ignore immutable" "--ignore-immutable")
-     ("!o" "at op" "--at-operation=")
-     ("!d" "debug" "--debug")
-     ("!cs" "config" "--config=")
-     ("!cf" "config file" "--config-file=")])
+    [:hide (lambda ()
+             (defvar transient--redisplay-key)
+             (and (not (equal (vconcat transient--redisplay-key)
+                              (read-kbd-macro jj-global-argument-prefix)))
+                  (not jj-show-global-arguments)
+                  (not (transient--any-on-p "--repository="
+                                            "--ignore-working-copy"
+                                            "--ignore-immutable"
+                                            "--at-operation="
+                                            "--debug"
+                                            "--config="
+                                            "--config-file="))))
+           ["Global arguments"
+            ("!R" "repository" "--repository=")
+            ("!iw" "ignore working copy" "--ignore-working-copy")
+            ("!im" "ignore immutable" "--ignore-immutable")
+            ("!o" "at op" "--at-operation=")
+            ("!d" "debug" "--debug")
+            ("!cs" "config" "--config=")
+            ("!cf" "config file" "--config-file=")]])
 #+end_src
 
 ***** jj new
@@ -5438,6 +5469,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
   (transient-define-prefix jj-git-init-prefix ()
     :refresh-suffixes t
     :incompatible (prod-cartes '("--colocate") '("--git-repo=" "--no-colocate"))
+    jj-global-group
     ["targets"
      ("-c" "colocate" "--colocate")
      ("-n" "no-colocate" "--no-colocate")
@@ -5596,6 +5628,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
   (transient-define-prefix jj-bookmark-set-prefix ()
     :refresh-suffixes t
     :incompatible ()
+    jj-global-group
     [["targets"
       ("-b" "bookmarks" "")
       ("-r" "revision" jj-multi-revision-argument
@@ -5613,6 +5646,7 @@ I'd love a way to use e.g. a ! key to open up jj-global infixes in almost any pr
   (transient-define-prefix jj-bookmark-move-prefix ()
     :refresh-suffixes t
     :incompatible ()
+    jj-global-group
     [["targets"
       ("-b" "bookmarks" "")
       ("-f" "from" jj-multi-revision-argument
@@ -5782,6 +5816,7 @@ for push and fetch
                     ;; but they are mostly compatible with each other.
                     `(("--all" "--tracked")
                       ,@(prod-cartes coarse-flags fine-flags)))
+    jj-global-group
     [["coarse"
       ;; just a layout option
       :pad-keys t
@@ -5890,6 +5925,7 @@ for push and fetch
     ;; these flags unset one-another
     :incompatible `(("--remote=" "--all-remotes")
                     ("--bookmark=" "--tracked"))
+    jj-global-group
     [["bookmarks"
       ;; just a layout option
       :pad-keys t
@@ -5949,6 +5985,7 @@ for push and fetch
   (transient-define-prefix jj-config-edit-prefix ()
     :refresh-suffixes t
     :incompatible '(("--user" "--repo" "--workspace"))
+    jj-global-group
     ["targets"
      ("-u" "user" "--user")
      ("-r" "repo" "--repo")
@@ -5967,6 +6004,7 @@ for push and fetch
 #+begin_src elisp
   (transient-define-prefix jj-git-prefix ()
     :refresh-suffixes t
+    jj-global-group
     [["remote"
       ("p" "push" jj-git-push-prefix)
       ("f" "fetch" jj-git-fetch-prefix)
@@ -5995,6 +6033,7 @@ for push and fetch
 ****** colocation
 #+begin_src elisp
   (transient-define-prefix jj-git-colocation-prefix ()
+    jj-global-group
     ["go"
      ("d" "disable"
       (lambda ()
@@ -6015,6 +6054,7 @@ for push and fetch
 #+begin_src elisp
   (transient-define-prefix jj-git-remote-prefix ()
     :refresh-suffixes t
+    jj-global-group
     ["go"
      ("a" "add" jj-git-remote-add-prefix)
      ("l" "list" (lambda ()
@@ -6034,6 +6074,7 @@ for push and fetch
 ******* git remote add
 #+begin_src elisp
   (transient-define-prefix jj-git-remote-add-prefix ()
+    jj-global-group
     ["arguments"
      ("-p" "push-url" "--push-url=")
      ("-f" "fetch-tags" "--fetch-tags="
@@ -6052,6 +6093,7 @@ for push and fetch
 ******* git remote set-url
 #+begin_src elisp
   (transient-define-prefix jj-git-remote-set-url-prefix ()
+    jj-global-group
     ["arguments"
      ("-p" "push" "--push=")
      ("-f" "fetch" "--fetch=")
@@ -6093,6 +6135,7 @@ for push and fetch
   (transient-define-prefix jj-git-clone-prefix ()
     :refresh-suffixes t
     :incompatible (prod-cartes '("--colocate") '("--git-repo=" "--no-colocate"))
+    jj-global-group
     ["targets"
      ("-m" "remote" "--remote=")
      ("-c" "colocate" "--colocate")

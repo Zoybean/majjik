@@ -4585,6 +4585,7 @@ Returns the raw process, not the combined handler."
   :refresh-suffixes t
   :incompatible `(,@(prod-cartes '("-r") '("-f" "-t"))
                   ,@jj-diff-format-incompatibilities)
+  jj-global-group
   [["targets"
     ("-r" "revisions" jj-multi-revision-argument
      :argument "-r")
@@ -4608,6 +4609,7 @@ Returns the raw process, not the combined handler."
 (transient-define-prefix jj-interdiff-prefix ()
   :refresh-suffixes t
   :incompatible jj-diff-format-incompatibilities
+  jj-global-group
   [["targets"
     ("-f" "from" jj-single-revision-argument
      :argument "-f")
@@ -4628,6 +4630,7 @@ Returns the raw process, not the combined handler."
 (transient-define-prefix jj-show-prefix ()
   :refresh-suffixes t
   :incompatible jj-diff-format-incompatibilities
+  jj-global-group
   [["targets"
     ("-r" "revision" jj-single-revision-argument
      :argument "-r")]
@@ -4802,6 +4805,7 @@ Will likely fail for any interactive command."
   :refresh-suffixes t
   :incompatible `(,@(prod-cartes '("-r") '("-f" "-t"))
                   ("-m" "-u"))
+  jj-global-group
   [["targets"
     ("-r" "revision" jj-single-revision-argument
      :argument "-r")
@@ -4846,6 +4850,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*absorb][absorb:1]]
 (transient-define-prefix jj-commit-absorb-prefix ()
   :refresh-suffixes t
+  jj-global-group
   [["targets"
     ("-f" "from" jj-single-revision-argument
      :argument "-f")
@@ -4863,6 +4868,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*abandon][abandon:1]]
 (transient-define-prefix jj-commit-abandon-prefix ()
   :refresh-suffixes t
+  jj-global-group
   ["targets"
    ("-r" "revisions" jj-multi-revision-argument
     :argument "-r")]
@@ -4878,6 +4884,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*describe][describe:1]]
 (transient-define-prefix jj-commit-describe-prefix ()
   :refresh-suffixes t
+  jj-global-group
   [["targets"
     ("-r" "revision" jj-single-revision-argument
      :argument "-r")]
@@ -4910,6 +4917,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*metaedit][metaedit:1]]
 (transient-define-prefix jj-commit-metaedit-prefix ()
   :refresh-suffixes t
+  jj-global-group
   [["targets"
     ("-r" "revisions" jj-multi-revision-argument
      :argument "-r")]
@@ -4947,6 +4955,7 @@ Will likely fail for any interactive command."
 (transient-define-prefix jj-commit-new-prefix ()
   :refresh-suffixes t
   :incompatible jj-revision-destination-incompatibilities
+  jj-global-group
   [jj-revision-destination-multi-group
    ["meta"
     ("-m" "message" "--message="
@@ -4982,6 +4991,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*edit][edit:1]]
 (transient-define-prefix jj-commit-edit-prefix ()
   :refresh-suffixes t
+  jj-global-group
   ["targets"
    ("-r" "revision" jj-single-revision-argument
     :argument "-r")
@@ -5010,6 +5020,7 @@ Will likely fail for any interactive command."
   :refresh-suffixes t
   :incompatible `(,@jj-revision-source-incompatibilities
                   ,@jj-revision-destination-incompatibilities)
+  jj-global-group
   [jj-revision-source-multi-group
    jj-revision-destination-multi-group
    ["meta"
@@ -5031,6 +5042,7 @@ Will likely fail for any interactive command."
 (transient-define-prefix jj-commit-restore-prefix ()
   :refresh-suffixes t
   :incompatible (prod-cartes '("-c") '("-f" "-t"))
+  jj-global-group
   [["targets"
     ("-c" "changes in" jj-single-revision-argument
      :argument "-c")
@@ -5060,6 +5072,7 @@ Will likely fail for any interactive command."
 (transient-define-prefix jj-commit-copy-prefix ()
   :refresh-suffixes t
   :incompatible (prod-cartes '("-o") '("-B" "-A"))
+  jj-global-group
   [["sources"
     ("-r" "revisions" jj-multi-revision-argument
      :argument "-r")]
@@ -5084,6 +5097,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*parallelize][parallelize:1]]
 (transient-define-prefix jj-commit-parallelize-prefix ()
   :refresh-suffixes t
+  jj-global-group
   [["targets"
     ("-r" "revisions" jj-multi-revision-argument
      :argument "-r")]]
@@ -5101,6 +5115,7 @@ Will likely fail for any interactive command."
 ;; [[file:majjik.org::*simplify-parents][simplify-parents:1]]
 (transient-define-prefix jj-commit-simplify-parents-prefix ()
   :refresh-suffixes t
+  jj-global-group
   [["targets"
     ("-s" "sources" jj-multi-revision-argument
      :argument "-s")
@@ -5114,6 +5129,37 @@ Will likely fail for any interactive command."
     :inapt-if-not (lambda ()
                     (transient--any-on-p "-r" "-s")))])
 ;; simplify-parents:1 ends here
+
+;; global
+;; I just need a way to optionally persist this now, so arguments are set once for a repo and stay until unset.
+
+;; [[file:majjik.org::*global][global:1]]
+(defvar jj-global-argument-prefix "!")
+(defvar jj-show-global-arguments nil
+  "Whether to always show the common global jj arguments")
+
+(transient-define-group jj-global-group
+  [:hide (lambda ()
+           (defvar transient--redisplay-key)
+           (and (not (equal (vconcat transient--redisplay-key)
+                            (read-kbd-macro jj-global-argument-prefix)))
+                (not jj-show-global-arguments)
+                (not (transient--any-on-p "--repository="
+                                          "--ignore-working-copy"
+                                          "--ignore-immutable"
+                                          "--at-operation="
+                                          "--debug"
+                                          "--config="
+                                          "--config-file="))))
+         ["Global arguments"
+          ("!R" "repository" "--repository=")
+          ("!iw" "ignore working copy" "--ignore-working-copy")
+          ("!im" "ignore immutable" "--ignore-immutable")
+          ("!o" "at op" "--at-operation=")
+          ("!d" "debug" "--debug")
+          ("!cs" "config" "--config=")
+          ("!cf" "config file" "--config-file=")]])
+;; global:1 ends here
 
 ;; jj new
 
@@ -5230,6 +5276,7 @@ Will likely fail for any interactive command."
 (transient-define-prefix jj-git-init-prefix ()
   :refresh-suffixes t
   :incompatible (prod-cartes '("--colocate") '("--git-repo=" "--no-colocate"))
+  jj-global-group
   ["targets"
    ("-c" "colocate" "--colocate")
    ("-n" "no-colocate" "--no-colocate")
@@ -5530,6 +5577,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
                   ;; but they are mostly compatible with each other.
                   `(("--all" "--tracked")
                     ,@(prod-cartes coarse-flags fine-flags)))
+  jj-global-group
   [["coarse"
     ;; just a layout option
     :pad-keys t
@@ -5640,6 +5688,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
   ;; these flags unset one-another
   :incompatible `(("--remote=" "--all-remotes")
                   ("--bookmark=" "--tracked"))
+  jj-global-group
   [["bookmarks"
     ;; just a layout option
     :pad-keys t
@@ -5702,6 +5751,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
 (transient-define-prefix jj-config-edit-prefix ()
   :refresh-suffixes t
   :incompatible '(("--user" "--repo" "--workspace"))
+  jj-global-group
   ["targets"
    ("-u" "user" "--user")
    ("-r" "repo" "--repo")
@@ -5721,6 +5771,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
 ;; [[file:majjik.org::*entry][entry:1]]
 (transient-define-prefix jj-git-prefix ()
   :refresh-suffixes t
+  jj-global-group
   [["remote"
     ("p" "push" jj-git-push-prefix)
     ("f" "fetch" jj-git-fetch-prefix)
@@ -5751,6 +5802,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
 
 ;; [[file:majjik.org::*colocation][colocation:1]]
 (transient-define-prefix jj-git-colocation-prefix ()
+  jj-global-group
   ["go"
    ("d" "disable"
     (lambda ()
@@ -5773,6 +5825,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
 ;; [[file:majjik.org::*remote][remote:1]]
 (transient-define-prefix jj-git-remote-prefix ()
   :refresh-suffixes t
+  jj-global-group
   ["go"
    ("a" "add" jj-git-remote-add-prefix)
    ("l" "list" (lambda ()
@@ -5794,6 +5847,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
 
 ;; [[file:majjik.org::*git remote add][git remote add:1]]
 (transient-define-prefix jj-git-remote-add-prefix ()
+  jj-global-group
   ["arguments"
    ("-p" "push-url" "--push-url=")
    ("-f" "fetch-tags" "--fetch-tags="
@@ -5814,6 +5868,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
 
 ;; [[file:majjik.org::*git remote set-url][git remote set-url:1]]
 (transient-define-prefix jj-git-remote-set-url-prefix ()
+  jj-global-group
   ["arguments"
    ("-p" "push" "--push=")
    ("-f" "fetch" "--fetch=")
@@ -5857,6 +5912,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
 (transient-define-prefix jj-git-clone-prefix ()
   :refresh-suffixes t
   :incompatible (prod-cartes '("--colocate") '("--git-repo=" "--no-colocate"))
+  jj-global-group
   ["targets"
    ("-m" "remote" "--remote=")
    ("-c" "colocate" "--colocate")
