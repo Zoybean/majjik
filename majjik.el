@@ -934,9 +934,8 @@ Also see `read-string-from-buffer'."
                             'read-only t 'rear-nonsticky t))
         (add-text-properties (point-min) (point)
                              (list 'string-edit--prompt t))))
-    (let ((start (point)))
-      (insert string)
-      (goto-char start))
+    (save-excursion
+      (insert string))
 
     ;; Use `fit-window-to-buffer' after the buffer is filled with text.
     (pop-to-buffer (current-buffer)
