@@ -206,13 +206,17 @@ Use me with comma-at!"
 
 ;; [[file:majjik.org::*promise debugging][promise debugging:1]]
 (defmacro pdbg (px)
-  (cl-labels ((debug (name arrow)
-                `(lambda (,name)
-                   (message ,(concat "%s " arrow " %S") ',px ,name)
-                   ,name)))
+  (cl-labels ((debug (arrow)
+                `(lambda (val)
+                   (message ,(concat "%s " arrow " %S") ',px val)
+                   val))
+              (debug-err (arrow)
+                `(lambda (err)
+                   (message ,(concat "%s " arrow " %S") ',px err)
+                   (promise-reject err))))
     `(promise-then ,px
-                   ,(debug 'val "=>")
-                   ,(debug 'err "=/>"))))
+                   ,(debug "=>")
+                   ,(debug-err "=/>"))))
 ;; promise debugging:1 ends here
 
 ;; cartesian product
