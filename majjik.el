@@ -4277,11 +4277,6 @@ Note: this returns possibly-unexpected results for nonexistent switches - they a
   :always-read nil
   :reader #'jj-read-multi-revision)
 
-(defun jj--ensure-message (args)
-  "If --message= is not present in ARGS, prompt the user with `read-string' and add it."
-  (jj--ensure-arg args "--message="
-                  (apply-partially #'read-string "message: ")
-                  #'concat))
 (defun jj--ensure-arg (args arg reader formatter)
   "If ARG is not present in ARGS, push the result of calling READER and FORMATTER.
 READER should be a function of no args.
@@ -4892,14 +4887,12 @@ Will likely fail for any interactive command."
                             s))))))]]
   ["go"
    ("w" "describe" (lambda (args)
-                     (interactive (list (jj--ensure-message
-                                         (jj--transient-args))))
-                     (jj-cmd-async-view `("describe" ,@args)))
+                     (interactive (list (jj--transient-args)))
+                     (jj-with-editor (jj-cmd-async-view `("describe" ,@args))))
     :inapt-if-not (lambda () (transient--any-on-p "-r")))
    ("c" "commit" (lambda (args)
-                   (interactive (list (jj--ensure-message
-                                       (jj--transient-args))))
-                   (jj-cmd-async-view `("commit" ,@args)))
+                   (interactive (list (jj--transient-args)))
+                   (jj-with-editor (jj-cmd-async-view `("commit" ,@args))))
     :inapt-if (lambda () (transient--any-on-p "-r")))])
 ;; describe:1 ends here
 
