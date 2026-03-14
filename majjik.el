@@ -2638,7 +2638,7 @@ This is concatenated with an identifier for the repository to define the buffer 
   "b r" #'jj-bookmark-rename
   "b k" #'jj-bookmark-delete
   "b f" #'jj-bookmark-forget
-  "b t" #'jj-bookmark-track
+  "b t" #'jj-bookmark-track-for-remote
   "b u" #'jj-bookmark-untrack
   "b l" #'jj-bookmark-list
   "b b" #'jj-new-on-bookmark
@@ -5364,22 +5364,30 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 ;; [[file:majjik.org::*track][track:1]]
 (defun jj-bookmark-track (remote bookmark)
   "Track BOOKMARK at REMOTE."
-  (interactive (let ((bookmark (completing-read "Bookmark to track: " (jj-list-bookmarks)))
-                     (remote (completing-read "From remote: " (jj-list-git-remotes))))
+  (interactive (let* ((candidates (or `(,@(jj-list-untracked-remote-bookmarks nil :not-git)
+                                        ,@(jj-list-local-bookmarks))
+                                      (user-error "All bookmarks tracked.")))
+                      (bookmark (completing-read "Bookmark to track: " candidates))
+                      (remote (completing-read "From remote: " (jj-list-git-remotes))))
                  (list remote bookmark)))
   (jj-cmd-async-view
-      `("bookmark" "track" ,bookmark
-        "--remote" ,remote)))
+   `("bookmark" "track"
+        "--remote" ,remote
+        "--" ,bookmark)))
 
-(defun jj-bookmark-track-remote (remote bookmark)
-  "Track BOOKMARK which is from REMOTE. Only prompts for untracked bookmarks at the given REMOTE."
+(defun jj-bookmark-track-for-remote (remote bookmark)
+  "Track BOOKMARK which is from REMOTE. Only prompts for untracked bookmarks at the given REMOTE, and local bookmarks that aren't tracking the given REMOTE."
   (declare (interactive-only jj-bookmark-track))
-  (interactive (let ((remote (completing-read "From remote: " (jj-list-git-remotes)))
-                     (bookmark (completing-read "Bookmark to track: " (jj-list-untracked-remote-bookmarks nil :not-git))))
+  (interactive (let* ((remote (completing-read "From remote: " (jj-list-git-remotes)))
+                      (candidates (or `(,@(jj-list-untracked-remote-bookmarks remote :not-git)
+                                        ,@(jj-list-non-tracking-local-bookmarks remote))
+                                      (user-error "All bookmarks tracked for this remote.")))
+                      (bookmark (completing-read "Bookmark to track: " candidates)))
                  (list remote bookmark)))
   (jj-cmd-async-view
-      `("bookmark" "track" ,bookmark
-        "--remote" ,remote)))
+   `("bookmark" "track"
+     "--remote" ,remote
+     "--" ,bookmark)))
 
 (defun jj-bookmark-track-local (remote bookmark)
   "Track local BOOKMARK on REMOTE. Only prompts for local bookmarks."
@@ -5388,8 +5396,9 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                      (remote (completing-read "To remote: " (jj-list-git-remotes))))
                  (list remote bookmark)))
   (jj-cmd-async-view
-      `("bookmark" "track" ,bookmark
-        "--remote" ,remote)))
+      `("bookmark" "track"
+        "--remote" ,remote
+        "--" ,bookmark)))
 ;; track:1 ends here
 
 ;; untrack
