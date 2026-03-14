@@ -2617,13 +2617,7 @@ This is concatenated with an identifier for the repository to define the buffer 
   "C-x u" #'jj-undo
   "C" #'jj-commit-entry-prefix
   "c e" #'jj-edit-dwim
-  "c n e" #'jj-edit-dwim
-  "c n n" #'jj-new-on-dwim
-  "c n -" #'jj-new-before-dwim
-  "c n +" #'jj-new-after-dwim
-  "c n b" #'jj-new-before-dwim
-  "c n a" #'jj-new-after-dwim
-  "c n i" #'jj-new-insert
+  "c n" #'jj-new-on-dwim
   "c k" #'jj-drop-dwim
   "c w" #'jj-desc-dwim
   "c a" #'jj-amend-into-dwim
@@ -2637,7 +2631,7 @@ This is concatenated with an identifier for the repository to define the buffer 
   "b !" #'jj-bookmark-set-dwim
   "b r" #'jj-bookmark-rename
   "b k" #'jj-bookmark-delete
-  "b f" #'jj-bookmark-forget
+  "b DEL" #'jj-bookmark-forget
   "b t" #'jj-bookmark-track-for-remote
   "b u" #'jj-bookmark-untrack
   "b l" #'jj-bookmark-list
@@ -2646,7 +2640,6 @@ This is concatenated with an identifier for the repository to define the buffer 
   "f u" #'jj-file-untrack-dwim
   "f k" #'jj-file-delete-dwim
   "$" #'jj-pop-to-command-log)
-
 
 (keymap-global-set "C-x j" #'jj-dash--async)
 ;; Keymaps:1 ends here
@@ -3929,10 +3922,12 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
       (concat "\n" (s-chomp out-str)))))
 
 (defun jj-kill-output (proc)
-  (kill-buffer (process-buffer (jj-process-process proc))))
+  (let* ((buf (process-buffer (jj-process-process proc))))
+    (kill-buffer buf)))
 
 (defun jj-kill-error (proc)
-  (kill-buffer (jj-process-stderr proc)))
+  (let* ((buf (jj-process-stderr proc)))
+    (kill-buffer buf)))
 
 (defun jj-print-crash (proc)
   (jj--insert-crash-event (jj-process-stderr proc) (jj-process-event proc)))
@@ -4447,15 +4442,13 @@ Sometimes this does not actually succeed at killing the process."
 ;;   - errors direct user to check secret buffer
 ;;   - stderr is killed always
 ;; - for showing in the echo area
-;;   - verbose ok message
-;;   - variable verbosity error message
+;;   - verbose ok message, showing stdout and stderr
 ;;   - stdout is killed always
 ;;   - stderr is killed always
 ;; - for showing in own buffer
-;;   - simple ok message
+;;   - simple ok message, showing stderr only
 ;;   - show output in buffer, which is killed on close
-;;   - stdout is only killed on error - the command is run for its output
-;;   - variable verbosity error message
+;;   - stdout is only killed on error, unless empty
 ;;   - stderr is killed always
 
 ;; [[file:majjik.org::*primary command invokers][primary command invokers:1]]

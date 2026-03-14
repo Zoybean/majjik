@@ -2636,13 +2636,7 @@ this might not actually work. I'm big sus actually.
     "C-x u" #'jj-undo
     "C" #'jj-commit-entry-prefix
     "c e" #'jj-edit-dwim
-    "c n e" #'jj-edit-dwim
-    "c n n" #'jj-new-on-dwim
-    "c n -" #'jj-new-before-dwim
-    "c n +" #'jj-new-after-dwim
-    "c n b" #'jj-new-before-dwim
-    "c n a" #'jj-new-after-dwim
-    "c n i" #'jj-new-insert
+    "c n" #'jj-new-on-dwim
     "c k" #'jj-drop-dwim
     "c w" #'jj-desc-dwim
     "c a" #'jj-amend-into-dwim
@@ -2656,7 +2650,7 @@ this might not actually work. I'm big sus actually.
     "b !" #'jj-bookmark-set-dwim
     "b r" #'jj-bookmark-rename
     "b k" #'jj-bookmark-delete
-    "b f" #'jj-bookmark-forget
+    "b DEL" #'jj-bookmark-forget
     "b t" #'jj-bookmark-track-for-remote
     "b u" #'jj-bookmark-untrack
     "b l" #'jj-bookmark-list
@@ -2665,7 +2659,6 @@ this might not actually work. I'm big sus actually.
     "f u" #'jj-file-untrack-dwim
     "f k" #'jj-file-delete-dwim
     "$" #'jj-pop-to-command-log)
-
 
   (keymap-global-set "C-x j" #'jj-dash--async)
 #+end_src
