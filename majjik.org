@@ -2063,7 +2063,8 @@ this might not actually work. I'm big sus actually.
                       ,@(cl-loop for n upfrom 1 below tail-lines
                                  append `("\n" ,edge-delim)))))
 
-  (defvar jj-parseable-template (jj-augment-template-for-graph jj--major-delim jj--count-graph-lines (jj-log-header-template 'self)))
+  (defun jj-parseable-template (self)
+    (jj-augment-template-for-graph jj--major-delim jj--count-graph-lines (jj-log-header-template self)))
 #+end_src
 *** tests
 #+begin_src elisp
@@ -2404,7 +2405,7 @@ this might not actually work. I'm big sus actually.
      :filter filter
      :noquery t
      :command `("jj" "log"
-                "-T" ,jj-parseable-template
+                "-T" ,(jj-parseable-template 'self)
                 ,@jj-global-default-args
                 ,@(and jj-do-debug jj-global-debug-args)
                 ,@jj-parsing-default-args
@@ -3347,7 +3348,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                         :sentinel sentinel
                         :noquery t
                         :command `("jj" "log"
-                                   "-T" ,jj-parseable-template
+                                   "-T" ,(jj-parseable-template 'self)
                                    ,@(jj--if-arg revset #'identity "-r")
                                    ,@(jj--if-arg fileset #'identity "--")
                                    ,@jj-global-default-args

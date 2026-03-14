@@ -2065,7 +2065,8 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                     ,@(cl-loop for n upfrom 1 below tail-lines
                                append `("\n" ,edge-delim)))))
 
-(defvar jj-parseable-template (jj-augment-template-for-graph jj--major-delim jj--count-graph-lines (jj-log-header-template 'self)))
+(defun jj-parseable-template (self)
+  (jj-augment-template-for-graph jj--major-delim jj--count-graph-lines (jj-log-header-template self)))
 ;; formats:1 ends here
 
 ;; tests
@@ -3306,7 +3307,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                       :sentinel sentinel
                       :noquery t
                       :command `("jj" "log"
-                                 "-T" ,jj-parseable-template
+                                 "-T" ,(jj-parseable-template 'self)
                                  ,@(jj--if-arg revset #'identity "-r")
                                  ,@(jj--if-arg fileset #'identity "--")
                                  ,@jj-global-default-args
