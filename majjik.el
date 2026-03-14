@@ -2030,23 +2030,35 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                     collect field-name)))))
 
 (define-jj-format log-header
-  (change-id
-   :face '(:foreground "magenta")
-   :form (:chain self (format_short_change_id_with_change_offset)))
+  (change-id-min
+   :face '(ansi-color-bold (:foreground "light pink"))
+   :form (:chain self (.change_id) (.shortest 8) (.prefix)))
+  (change-id-tail
+   :separator ""
+   :face '(:foreground "dim gray")
+   :form (:chain self (.change_id) (.shortest 8) (.rest)))
+  (change-offset
+   :printer (lambda (off _ent)
+              (unless (string= "0" off)
+                off))
+   :form (:chain self (.change_offset)))
+  (change-id-internal
+   :printer (cl-constantly nil)
+   :form (:chain self (.change_id) (.short 16)))
   (author
-   :face '(:foreground "yellow")
+   :face '(:foreground "gold")
    :parser #'json-parse-string
    :form (:chain self (.author) (.email) (stringify) (.escape_json)))
   (timestamp
-   :face '(:foreground "cyan")
+   :face '(:foreground "dark turquoise")
    :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
   (bookmarks
-   :face '(:foreground "magenta")
+   :face '(:foreground "medium orchid")
    :parser (jj--make-list-parser " ")
    :printer (jj--make-list-printer " ")
    :form (:chain self (.bookmarks)))
   (tags
-   :face '(:foreground "yellow")
+   :face '(:foreground "goldenrod")
    :parser (jj--make-list-parser " ")
    :printer (jj--make-list-printer " ")
    :form (:chain self (.tags)))
@@ -2055,30 +2067,52 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
    :parser (jj--make-list-parser " ")
    :printer (jj--make-list-printer " ")
    :form (:chain self (.working_copies)))
+  (commit-id-min
+   :face '(ansi-color-bold (:foreground "dodger blue"))
+   :form (:chain self (.commit_id) (.shortest 8) (.prefix)))
+  (commit-id-tail
+   :separator ""
+   :face '(:foreground "dim gray")
+   :form (:chain self (.commit_id) (.shortest 8) (.rest)))
   (commit-id
-   :face '(:foreground "light blue")
-   :form (:chain self (.commit_id) (format_short_commit_id)))
+   :printer (cl-constantly nil)
+   :form (:chain self (.commit_id) (.short 16)))
   (conflict
    :face '(:foreground "red")
    :parser #'s-presence
-   ;; :printer (jj--make-opt-printer "conflict")
+   ;; :printer (jj--make-opt-resolver "conflict")
    :form (if (:chain self (.conflict)) "conflict"))
+  (current-working-copy
+   ;; not sure why, but for now adding this entry seems to break everything.
+   :parser (-compose (jj--make-opt-resolver :current-wc) #'s-presence)
+   :printer (cl-constantly nil)
+   :form (if (:chain self (.empty)) "empty"))
   (nil
    ;; empty non-field element for splitting the header from the desc and empty markers
    :parser #'s-presence
    :printer (cl-constantly "\n"))
   (empty
-   :face '(:foreground "green")
-   :parser #'s-presence
-   :printer (jj--make-opt-printer "(empty)")
    :first t
+   :face '(ansi-color-bold (:foreground "medium sea green"))
+   :parser (-compose (jj--make-opt-resolver :empty) #'s-presence)
+   :printer (jj--make-opt-resolver "(empty)")
    :form (if (:chain self (.empty)) "empty"))
   (description
    :parser (lambda (s)
              (s-presence (json-parse-string s)))
-   :printer (jj--make-opt-printer
+   :face (lambda (desc ent)
+           (cond (desc
+                  ;; present description is unformatted
+                  nil)
+                 ((jj-log-header-empty ent)
+                  ;; if both commit and desc are empty, they're both green
+                  '(ansi-color-bold (:foreground "medium sea green")))
+                 (:else
+                  ;; if just desc is empty, it's gold
+                  '(:foreground "gold"))))
+   :printer (jj--make-opt-resolver
              nil
-             (propertize "(no description)" 'face '(:foreground "orange")))
+             "(no description)")
    :form (:chain self (.description) (.escape_json))))
 
 
