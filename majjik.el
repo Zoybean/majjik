@@ -3771,14 +3771,22 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
             (expand-file-name server-name
                               server-socket-dir))))
 
-(cl-defgeneric jj--config-arg (key value))
-(cl-defmethod jj--config-arg ((key string) (value string))
-  (format "--config=%S=%S" key value))
-(cl-defmethod jj--config-arg ((key string) (value list))
-  (format "--config=%S=%s" key
-          (jj--toml-list
-           (mapcar #'prin1-to-string
-                   value))))
+(defun jj--config-arg (key value)
+  "Format a KEY VALUE pair as a config argument for jj.
+Both KEY and VALUE can be strings or lists. If KEY is a list, it is formatted as a dotted path, with path elements quoted if needed. If VALUE is a list, it is formatted as a toml list of strings."
+  (format "--config=%s=%s"
+          (jj--config-key key)
+          (jj--config-value value)))
+(cl-defmethod jj--config-key ((key string))
+  key)
+(cl-defmethod jj--config-key ((key list))
+  (mapconcat #'jj--maybe-quote-argument key "."))
+
+(cl-defmethod jj--config-value ((value string))
+  (prin1-to-string value))
+(cl-defmethod jj--config-value ((value list))
+  (jj--toml-list
+   (mapcar #'prin1-to-string value)))
 
 (defun jj--merge-tool-args (entry-point-exp)
   "Returns the arguments needed to register emacs as the merge tool for a JJ command.
@@ -5205,13 +5213,20 @@ Will likely fail for any interactive command."
 ;; jj desc
 
 ;; [[file:majjik.org::*jj desc][jj desc:1]]
-(defun jj-desc-dwim (revset message)
+(defun jj-desc-dwim-oneline (revset message)
   (interactive (list (jj-get-revset-dwim "revs to describe: ")
                      (read-string "message: ")))
   (jj-cmd-async-view
-      `("describe"
-        "-r" ,revset
-        "-m" ,message)))
+   `("describe"
+     "-r" ,revset
+     ,(concat "--message=" message))))
+
+(defun jj-desc-dwim (revset)
+  (interactive (list (jj-get-revset-dwim "revs to describe: ")))
+  (jj-with-editor
+   (jj-cmd-async-view
+    `("describe"
+      "-r" ,revset))))
 ;; jj desc:1 ends here
 
 ;; jj drop
