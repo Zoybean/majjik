@@ -540,7 +540,7 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
     (:documentation (format "This filter adds output to its intermediate buffer, then calls `%s' until it returns nil, then calls `%s' with the list of new non-nil values, and deletes the text before point (i.e. the text that was read)." read-next callback))
     (when (buffer-live-p (process-buffer proc))
       (with-current-buffer intermediate-buffer
-        (insert string)
+        (insert (ansi-color-apply string))
         ;; process any new entries
         (save-excursion
           (goto-char (point-min))
@@ -2495,9 +2495,7 @@ This is concatenated with an identifier for the repository to define the buffer 
     ;; never request a pager
     "--no-pager"))
 (defvar jj-parsing-default-args
-  '(;; never colourise output
-    "--color=never"
-    ;; omit extra output
+  '(;; omit extra output
     "--quiet"))
 (defvar jj-logging-default-args
   '("--color=always"))
@@ -2639,13 +2637,7 @@ This is concatenated with an identifier for the repository to define the buffer 
   "C-x u" #'jj-undo
   "C" #'jj-commit-entry-prefix
   "c e" #'jj-edit-dwim
-  "c n e" #'jj-edit-dwim
-  "c n n" #'jj-new-on-dwim
-  "c n -" #'jj-new-before-dwim
-  "c n +" #'jj-new-after-dwim
-  "c n b" #'jj-new-before-dwim
-  "c n a" #'jj-new-after-dwim
-  "c n i" #'jj-new-insert
+  "c n" #'jj-new-on-dwim
   "c k" #'jj-drop-dwim
   "c w" #'jj-desc-dwim
   "c a" #'jj-amend-into-dwim
@@ -2659,8 +2651,8 @@ This is concatenated with an identifier for the repository to define the buffer 
   "b !" #'jj-bookmark-set-dwim
   "b r" #'jj-bookmark-rename
   "b k" #'jj-bookmark-delete
-  "b f" #'jj-bookmark-forget
-  "b t" #'jj-bookmark-track
+  "b DEL" #'jj-bookmark-forget
+  "b t" #'jj-bookmark-track-for-remote
   "b u" #'jj-bookmark-untrack
   "b l" #'jj-bookmark-list
   "b b" #'jj-new-on-bookmark
@@ -2668,7 +2660,6 @@ This is concatenated with an identifier for the repository to define the buffer 
   "f u" #'jj-file-untrack-dwim
   "f k" #'jj-file-delete-dwim
   "$" #'jj-pop-to-command-log)
-
 
 (keymap-global-set "C-x j" #'jj-dash--async)
 ;; Keymaps:1 ends here
@@ -3824,6 +3815,23 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
             (expand-file-name server-name
                               server-socket-dir))))
 
+(defun jj--config-arg (key value)
+  "Format a KEY VALUE pair as a config argument for jj.
+Both KEY and VALUE can be strings or lists. If KEY is a list, it is formatted as a dotted path, with path elements quoted if needed. If VALUE is a list, it is formatted as a toml list of strings."
+  (format "--config=%s=%s"
+          (jj--config-key key)
+          (jj--config-value value)))
+(cl-defmethod jj--config-key ((key string))
+  key)
+(cl-defmethod jj--config-key ((key list))
+  (mapconcat #'jj--maybe-quote-argument key "."))
+
+(cl-defmethod jj--config-value ((value string))
+  (prin1-to-string value))
+(cl-defmethod jj--config-value ((value list))
+  (jj--toml-list
+   (mapcar #'prin1-to-string value)))
+
 (defun jj--merge-tool-args (entry-point-exp)
   "Returns the arguments needed to register emacs as the merge tool for a JJ command.
 ENTRY-POINT-EXP must be a quoted sexpression that can handle the file arguments for emacs to run as a mergetool. `jj--call-from-cli' is designed for this purpose.
@@ -3839,11 +3847,8 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
                    entry-point-exp)
             ;; always pass the files as the last arguments
             "--" "$left" "$right")))
-    `("--config" ,(concat "merge-tools.emacs.program=" program)
-      "--config" ,(concat "merge-tools.emacs.edit-args="
-                          (jj--toml-list
-                           (mapcar #'prin1-to-string
-                                   edit-args)))
+    `(,(jj--config-arg "merge-tools.emacs.program" program)
+      ,(jj--config-arg "merge-tools.emacs.edit-args" edit-args)
       "--tool" "emacs")))
 
 (defmacro jj-with-editor (&rest body)
@@ -3858,10 +3863,7 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
   (let* ((program (jj--editor-path))
          (server (jj--editor-server-path-arg))
          (editor `(,program ,server)))
-    `("--config" ,(concat "ui.editor="
-                          (jj--toml-list
-                           (mapcar #'prin1-to-string
-                                   editor))))))
+    `(,(jj--config-arg "ui.editor" editor))))
 
 (defun jj--toml-list (list)
   (format "[%s]"
@@ -3971,10 +3973,12 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
       (concat "\n" (s-chomp out-str)))))
 
 (defun jj-kill-output (proc)
-  (kill-buffer (process-buffer (jj-process-process proc))))
+  (let* ((buf (process-buffer (jj-process-process proc))))
+    (kill-buffer buf)))
 
 (defun jj-kill-error (proc)
-  (kill-buffer (jj-process-stderr proc)))
+  (let* ((buf (jj-process-stderr proc)))
+    (kill-buffer buf)))
 
 (defun jj-print-crash (proc)
   (jj--insert-crash-event (jj-process-stderr proc) (jj-process-event proc)))
@@ -4330,11 +4334,6 @@ Note: this returns possibly-unexpected results for nonexistent switches - they a
   :always-read nil
   :reader #'jj-read-multi-revision)
 
-(defun jj--ensure-message (args)
-  "If --message= is not present in ARGS, prompt the user with `read-string' and add it."
-  (jj--ensure-arg args "--message="
-                  (apply-partially #'read-string "message: ")
-                  #'concat))
 (defun jj--ensure-arg (args arg reader formatter)
   "If ARG is not present in ARGS, push the result of calling READER and FORMATTER.
 READER should be a function of no args.
@@ -4494,15 +4493,13 @@ Sometimes this does not actually succeed at killing the process."
 ;;   - errors direct user to check secret buffer
 ;;   - stderr is killed always
 ;; - for showing in the echo area
-;;   - verbose ok message
-;;   - variable verbosity error message
+;;   - verbose ok message, showing stdout and stderr
 ;;   - stdout is killed always
 ;;   - stderr is killed always
 ;; - for showing in own buffer
-;;   - simple ok message
+;;   - simple ok message, showing stderr only
 ;;   - show output in buffer, which is killed on close
-;;   - stdout is only killed on error - the command is run for its output
-;;   - variable verbosity error message
+;;   - stdout is only killed on error, unless empty
 ;;   - stderr is killed always
 
 ;; [[file:majjik.org::*primary command invokers][primary command invokers:1]]
@@ -4945,14 +4942,12 @@ Will likely fail for any interactive command."
                             s))))))]]
   ["go"
    ("w" "describe" (lambda (args)
-                     (interactive (list (jj--ensure-message
-                                         (jj--transient-args))))
-                     (jj-cmd-async-view `("describe" ,@args)))
+                     (interactive (list (jj--transient-args)))
+                     (jj-with-editor (jj-cmd-async-view `("describe" ,@args))))
     :inapt-if-not (lambda () (transient--any-on-p "-r")))
    ("c" "commit" (lambda (args)
-                   (interactive (list (jj--ensure-message
-                                       (jj--transient-args))))
-                   (jj-cmd-async-view `("commit" ,@args)))
+                   (interactive (list (jj--transient-args)))
+                   (jj-with-editor (jj-cmd-async-view `("commit" ,@args))))
     :inapt-if (lambda () (transient--any-on-p "-r")))])
 ;; describe:1 ends here
 
@@ -5262,13 +5257,20 @@ Will likely fail for any interactive command."
 ;; jj desc
 
 ;; [[file:majjik.org::*jj desc][jj desc:1]]
-(defun jj-desc-dwim (revset message)
+(defun jj-desc-dwim-oneline (revset message)
   (interactive (list (jj-get-revset-dwim "revs to describe: ")
                      (read-string "message: ")))
   (jj-cmd-async-view
-      `("describe"
-        "-r" ,revset
-        "-m" ,message)))
+   `("describe"
+     "-r" ,revset
+     ,(concat "--message=" message))))
+
+(defun jj-desc-dwim (revset)
+  (interactive (list (jj-get-revset-dwim "revs to describe: ")))
+  (jj-with-editor
+   (jj-cmd-async-view
+    `("describe"
+      "-r" ,revset))))
 ;; jj desc:1 ends here
 
 ;; jj drop
@@ -5417,22 +5419,30 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 ;; [[file:majjik.org::*track][track:1]]
 (defun jj-bookmark-track (remote bookmark)
   "Track BOOKMARK at REMOTE."
-  (interactive (let ((bookmark (completing-read "Bookmark to track: " (jj-list-bookmarks)))
-                     (remote (completing-read "From remote: " (jj-list-git-remotes))))
+  (interactive (let* ((candidates (or `(,@(jj-list-untracked-remote-bookmarks nil :not-git)
+                                        ,@(jj-list-local-bookmarks))
+                                      (user-error "All bookmarks tracked.")))
+                      (bookmark (completing-read "Bookmark to track: " candidates))
+                      (remote (completing-read "From remote: " (jj-list-git-remotes))))
                  (list remote bookmark)))
   (jj-cmd-async-view
-      `("bookmark" "track" ,bookmark
-        "--remote" ,remote)))
+   `("bookmark" "track"
+        "--remote" ,remote
+        "--" ,bookmark)))
 
-(defun jj-bookmark-track-remote (remote bookmark)
-  "Track BOOKMARK which is from REMOTE. Only prompts for untracked bookmarks at the given REMOTE."
+(defun jj-bookmark-track-for-remote (remote bookmark)
+  "Track BOOKMARK which is from REMOTE. Only prompts for untracked bookmarks at the given REMOTE, and local bookmarks that aren't tracking the given REMOTE."
   (declare (interactive-only jj-bookmark-track))
-  (interactive (let ((remote (completing-read "From remote: " (jj-list-git-remotes)))
-                     (bookmark (completing-read "Bookmark to track: " (jj-list-untracked-remote-bookmarks nil :not-git))))
+  (interactive (let* ((remote (completing-read "From remote: " (jj-list-git-remotes)))
+                      (candidates (or `(,@(jj-list-untracked-remote-bookmarks remote :not-git)
+                                        ,@(jj-list-non-tracking-local-bookmarks remote))
+                                      (user-error "All bookmarks tracked for this remote.")))
+                      (bookmark (completing-read "Bookmark to track: " candidates)))
                  (list remote bookmark)))
   (jj-cmd-async-view
-      `("bookmark" "track" ,bookmark
-        "--remote" ,remote)))
+   `("bookmark" "track"
+     "--remote" ,remote
+     "--" ,bookmark)))
 
 (defun jj-bookmark-track-local (remote bookmark)
   "Track local BOOKMARK on REMOTE. Only prompts for local bookmarks."
@@ -5441,8 +5451,9 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
                      (remote (completing-read "To remote: " (jj-list-git-remotes))))
                  (list remote bookmark)))
   (jj-cmd-async-view
-      `("bookmark" "track" ,bookmark
-        "--remote" ,remote)))
+      `("bookmark" "track"
+        "--remote" ,remote
+        "--" ,bookmark)))
 ;; track:1 ends here
 
 ;; untrack
