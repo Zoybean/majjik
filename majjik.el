@@ -2695,23 +2695,17 @@ This is concatenated with an identifier for the repository to define the buffer 
   "Asynchronously get the new status, and reverts the buffer contents when those processes complete.
 Reverted buffer is the one that was active when this function was called."
   (let ((silent jj--silent-revert)
-        (dash-buf (current-buffer))
-        (temp-buf (generate-new-buffer "*jj-dash-replacement*")))
+        (dash-buf (current-buffer)))
     (cl-labels ((end-ok (_ok)
                   (unless silent
-                    (message "`jj status' ok"))
-                  (cleanup))
+                    (message "`jj status' ok")))
                 (end-err (errs)
-                  (message "jj status update failed: %s" errs)
-                  (cleanup))
-                (cleanup ()
-                  (kill-buffer temp-buf)))
+                  (message "jj status update failed: %s" errs)))
       (unless silent
         (message "`jj status'..."))
       (promise-then
        (with-current-buffer dash-buf
-         (let ((inhibit-read-only t))
-           (start-jj-dash-async)))
+         (start-jj-dash-async))
        #'end-ok
        #'end-err))))
 
@@ -3244,37 +3238,47 @@ Untracked files:
 (defun start-jj-dash-async ()
   "Start the jj dashboard in the current buffer
 Also sets `jj--current-status' in the initial buffer when the status process completes."
+  (let ((buf (current-buffer)))
+    (promise-then
+     (jj--get-dash-data)
+     (lambda (results)
+       (unless (buffer-live-p buf)
+         (error (format "dash output buffer %s deleted" buf)))
+       (with-current-buffer buf
+         (-let (([log-entries stat] results)
+                (line (line-number-at-pos))
+                (col (- (point) (pos-bol))))
+           (jj-dash--insert stat log-entries)
+           (goto-char (point-min))
+           (forward-line (1- line))
+           (forward-char (min col (- (pos-eol) (pos-bol))))
+           (magit-section-update-highlight t)))))))
+
+(defun jj--get-dash-data ()
   (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-    (let ((inhibit-read-only t))
-      (erase-accessible-buffer))
-    (let ((buf (current-buffer)))
-      (promise-then
-       (promise-all
-        `[,(jj-log-entries-async)
-          ,(jj-get-status-async)])
-       (lambda (results)
-         (unless (buffer-live-p buf)
-           (error (format "dash output buffer %s deleted" buf)))
-         (with-current-buffer buf
-           (-let (([log-entries stat] results))
-             (setq-local jj--current-status stat)
-             (let ((inhibit-read-only t))
-               (erase-accessible-buffer)
-               (magit-insert-section (root)
-                 (magit-insert-section-body
-                   (magit-insert-section sec
-                     (jj-status-section stat)
-                     (magit-insert-heading "Status:\n")
-                     (magit-insert-section-body
-                       (insert-jj-status stat)))
-                   (magit-insert-section sec
-                     (jj-log-section log-entries)
-                     (magit-insert-heading "Log:\n")
-                     (when log-entries
-                       (magit-insert-section-body
-                         (dolist (entry log-entries)
-                           (insert-jj-graph-log-maybe-elided entry)))))))
-               ))))))))
+    (promise-all
+     `[,(jj-log-entries-async)
+       ,(jj-get-status-async)])))
+
+(defun jj-dash--insert (stat log)
+  (setq-local jj--current-status stat)
+  (let ((inhibit-read-only t))
+    (erase-accessible-buffer)
+    (setq-local jj--current-status stat)
+    (magit-insert-section (root)
+      (magit-insert-section-body
+        (magit-insert-section sec
+          (jj-status-section stat)
+          (magit-insert-heading "Status:\n")
+          (magit-insert-section-body
+            (insert-jj-status stat)))
+        (magit-insert-section sec
+          (jj-log-section log)
+          (magit-insert-heading "Log:\n")
+          (when log
+            (magit-insert-section-body
+              (dolist (entry log)
+                (insert-jj-graph-log-maybe-elided entry)))))))))
 ;; status piping fns:1 ends here
 
 ;; section
@@ -3282,8 +3286,6 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; [[file:majjik.org::*section][section:1]]
 (defun jj-log-entries-async (&optional revset fileset)
   "Make a jj log in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer. Ignores `jj--last-revs' and `jj--last-files'."
-  (let ((inhibit-read-only t))
-    (erase-accessible-buffer))
   (let ((entries nil))
     (promise-new
      (lambda (resolve reject)
