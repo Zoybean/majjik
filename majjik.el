@@ -3771,6 +3771,15 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
             (expand-file-name server-name
                               server-socket-dir))))
 
+(cl-defgeneric jj--config-arg (key value))
+(cl-defmethod jj--config-arg ((key string) (value string))
+  (format "--config=%S=%S" key value))
+(cl-defmethod jj--config-arg ((key string) (value list))
+  (format "--config=%S=%s" key
+          (jj--toml-list
+           (mapcar #'prin1-to-string
+                   value))))
+
 (defun jj--merge-tool-args (entry-point-exp)
   "Returns the arguments needed to register emacs as the merge tool for a JJ command.
 ENTRY-POINT-EXP must be a quoted sexpression that can handle the file arguments for emacs to run as a mergetool. `jj--call-from-cli' is designed for this purpose.
@@ -3786,11 +3795,8 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
                    entry-point-exp)
             ;; always pass the files as the last arguments
             "--" "$left" "$right")))
-    `("--config" ,(concat "merge-tools.emacs.program=" program)
-      "--config" ,(concat "merge-tools.emacs.edit-args="
-                          (jj--toml-list
-                           (mapcar #'prin1-to-string
-                                   edit-args)))
+    `(,(jj--config-arg "merge-tools.emacs.program" program)
+      ,(jj--config-arg "merge-tools.emacs.edit-args" edit-args)
       "--tool" "emacs")))
 
 (defmacro jj-with-editor (&rest body)
@@ -3805,10 +3811,7 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
   (let* ((program (jj--editor-path))
          (server (jj--editor-server-path-arg))
          (editor `(,program ,server)))
-    `("--config" ,(concat "ui.editor="
-                          (jj--toml-list
-                           (mapcar #'prin1-to-string
-                                   editor))))))
+    `(,(jj--config-arg "ui.editor" editor))))
 
 (defun jj--toml-list (list)
   (format "[%s]"
