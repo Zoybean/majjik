@@ -3400,7 +3400,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; [[file:majjik.org::*single revision][single revision:1]]
 (defun jj-get-revision-dwim (&optional prompt mutable)
   "Get a revision based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT. If MUTABLE, only include mutable commits in the completion options."
-  (or (jj--get-revision (jj-thing-at-point))
+  (or (jj--get-change (jj-thing-at-point))
       (jj-read-revision prompt (when mutable "~immutable()"))))
 ;; single revision:1 ends here
 
