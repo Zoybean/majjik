@@ -375,7 +375,7 @@ When returning both a string result and an exit code, they are returned as a con
   (ovl-control nil :type overlay
                :documentation "Overlay for the area through which the user may interact with the process.")
   (min-cmd nil :type string
-                :documentation "Abbreviated command string.")
+           :documentation "Abbreviated command string.")
   (ovl-cmd nil :type overlay
            :documentation "Overlay for the command string, which should be replaced with the min command string when collapsed.")
   (ovl-collapse nil :type overlay
@@ -395,11 +395,10 @@ When returning both a string result and an exit code, they are returned as a con
              (inhibit-read-only t)
              (mark-control-start (point-marker))
              (code-buf (jj-make-section-buffer (jj--replace-newlines name) inv inv))
-             (header (propertize (jj--replace-newlines
-                                  (mapconcat #'shell-quote-argument cmd " "))
-                                 'face 'magit-section-heading))
+             (header (jj--replace-newlines
+                      (mapconcat #'shell-quote-argument cmd " ")))
              (mark-header-start (progn (insert "> ")
-                                  (point-marker)))
+                                       (point-marker)))
              (mark-header-end (progn
                                 (insert header)
                                 (point-marker)))
@@ -435,7 +434,7 @@ When returning both a string result and an exit code, they are returned as a con
     (let ((inhibit-read-only t))
       (replace-region-contents
        (point-min) (point-max)
-       (lambda () (propertize "run" 'face '(:foreground "yellow")))))))
+       (lambda () (propertize "run" 'font-lock-face '(:foreground "yellow")))))))
 
 (defun jj--make-update-exit-code-sentinel (code-buf)
   "Process sentinel to update the contents of CODE-BUF (a buffer) with the exit status of the process."
@@ -450,17 +449,17 @@ When returning both a string result and an exit code, they are returned as a con
                   ;; what's it doing?
                   (propertize
                    (format "%s" (process-status proc))
-                   'face `(:foreground
-                           "yellow")))
+                   'font-lock-face `(:foreground
+                                     "yellow")))
                  (t
                   ;; process is done. how'd it exit?
                   (let ((code (process-exit-status proc)))
                     (propertize
                      (format "%3d" code)
-                     'face `(:foreground
-                             ,(pcase code
-                                (0 "green")
-                                (_ "red")))))))))))))
+                     'font-lock-face `(:foreground
+                                       ,(pcase code
+                                          (0 "green")
+                                          (_ "red")))))))))))))
 ;; command-log management:1 ends here
 
 ;; sentinels and filters
@@ -498,7 +497,7 @@ If INITIALLY-STAY is non-nil, point stays in place if it is at `bobp' even if th
       (unless (bolp)
         (insert "\n"))
       (insert
-       (propertize (s-chomp event) 'face '(:foreground "red"))
+       (propertize (s-chomp event) 'font-lock-face '(:foreground "red"))
        "\n"))))
 
 (defun jj--make-print-status-sentinel (buffer)
@@ -760,7 +759,8 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
        (let ((rep (s--aget replacements it)))
          (propertize it
                      'display rep
-                     'face 'escape-glyph)))
+                     'face 'escape-glyph
+                     'font-lock-face 'escape-glyph)))
      string t t)))
 
 (defun jj--replace-newlines (string)
@@ -771,7 +771,8 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
      (regexp-opt (mapcar 'car replacements))
      (lambda (it)
        (propertize (s--aget replacements it)
-                   'face 'escape-glyph))
+                   'face 'escape-glyph
+                   'font-lock-face 'escape-glyph))
      string t t)))
 
 (ert-deftest jj-test-entitize-newlines ()
@@ -1815,14 +1816,14 @@ If the line is an elided entry, returns a single string, which is the prefix bef
 (defun insert-jj-log-elided (graph)
   "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
   (with-insert-temp-buffer
-   (insert (propertize "(elided revisions)\n" 'face '(:foreground "grey")))
+   (insert (propertize "(elided revisions)\n" 'font-lock-face '(:foreground "grey")))
    ;; insert the mandatory graph segments
    ;; these will add new lines if there arent enough already
    (cl-loop initially (progn
                         (goto-char (point-min))
                         (insert (jj-log-graph-first-line-prefix graph)
                                 (propertize (jj-log-graph-first-line-node graph)
-                                            'face '(:foreground "grey"))
+                                            'font-lock-face '(:foreground "grey"))
                                 (jj-log-graph-first-line-suffix graph))
                         (forward-line 1))
             for prefix in (jj-log-graph-mandatory-segments graph)
@@ -1840,7 +1841,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
   (cl-loop initially (progn
                        (insert (jj-log-graph-first-line-prefix graph)
                                (propertize (jj-log-graph-first-line-node graph)
-                                           'face '(:foreground "cyan"))
+                                           'font-lock-face '(:foreground "cyan"))
                                (jj-log-graph-first-line-suffix graph))
                        (forward-line 1))
            for (prefix . rest) on (jj-log-graph-mandatory-segments graph)
@@ -1851,7 +1852,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
                         (not (string= "" (string-trim prefix)))
                         ;; no repeatable segments
                         (not (jj-log-graph-repeatable-segment graph)))
-                       (insert (propertize prefix 'face '(:foreground "grey"))))
+                       (insert (propertize prefix 'font-lock-face '(:foreground "grey"))))
                       (t
                        (insert prefix)))
                 (forward-line 1)
@@ -3173,7 +3174,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                files-conflict
                bookmarks-conflict)
       status
-    (let ((list-prefix (propertize "- " 'face '(:foreground "grey"))))
+    (let ((list-prefix (propertize "- " 'font-lock-face '(:foreground "grey"))))
       (magit-insert-section sec
         (jj-status-files-changed files-changed)
         (cond (files-changed
@@ -3194,7 +3195,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                  (propertize (concat list-prefix
                                                      (mapconcat #'identity elems " ")
                                                      "\n")
-                                             'face `(:foreground ,(format "%s" color))
+                                             'font-lock-face `(:foreground ,(format "%s" color))
                                              'jj-object change))
                                ))))
               (t (magit-insert-heading "Working copy unchanged\n"))))
@@ -4267,7 +4268,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
              (setf (jj--process-log-entry-process proc-entry) proc)
              (overlay-put ovl-control 'jj-object proc-entry)
              (jj--set-collapse-process proc-entry t)
-             ;; (overlay-put ovl-err 'face '(:foreground "grey"))
+             ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
              (jj--set-initial-run-status buf-code)
 
              (let ((stderr (get-buffer-process buf-stderr)))
@@ -4326,7 +4327,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
              (setf (jj--process-log-entry-process proc-entry) proc)
              (overlay-put ovl-control 'jj-object proc-entry)
              (jj--set-collapse-process proc-entry t)
-             ;; (overlay-put ovl-err 'face '(:foreground "grey"))
+             ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
              (jj--set-initial-run-status buf-code)
 
              (when output-buffer

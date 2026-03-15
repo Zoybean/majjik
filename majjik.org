@@ -385,7 +385,7 @@
     (ovl-control nil :type overlay
                  :documentation "Overlay for the area through which the user may interact with the process.")
     (min-cmd nil :type string
-                  :documentation "Abbreviated command string.")
+             :documentation "Abbreviated command string.")
     (ovl-cmd nil :type overlay
              :documentation "Overlay for the command string, which should be replaced with the min command string when collapsed.")
     (ovl-collapse nil :type overlay
@@ -405,11 +405,10 @@
                (inhibit-read-only t)
                (mark-control-start (point-marker))
                (code-buf (jj-make-section-buffer (jj--replace-newlines name) inv inv))
-               (header (propertize (jj--replace-newlines
-                                    (mapconcat #'shell-quote-argument cmd " "))
-                                   'face 'magit-section-heading))
+               (header (jj--replace-newlines
+                        (mapconcat #'shell-quote-argument cmd " ")))
                (mark-header-start (progn (insert "> ")
-                                    (point-marker)))
+                                         (point-marker)))
                (mark-header-end (progn
                                   (insert header)
                                   (point-marker)))
@@ -445,7 +444,7 @@
       (let ((inhibit-read-only t))
         (replace-region-contents
          (point-min) (point-max)
-         (lambda () (propertize "run" 'face '(:foreground "yellow")))))))
+         (lambda () (propertize "run" 'font-lock-face '(:foreground "yellow")))))))
 
   (defun jj--make-update-exit-code-sentinel (code-buf)
     "Process sentinel to update the contents of CODE-BUF (a buffer) with the exit status of the process."
@@ -460,17 +459,17 @@
                     ;; what's it doing?
                     (propertize
                      (format "%s" (process-status proc))
-                     'face `(:foreground
-                             "yellow")))
+                     'font-lock-face `(:foreground
+                                       "yellow")))
                    (t
                     ;; process is done. how'd it exit?
                     (let ((code (process-exit-status proc)))
                       (propertize
                        (format "%3d" code)
-                       'face `(:foreground
-                               ,(pcase code
-                                  (0 "green")
-                                  (_ "red")))))))))))))
+                       'font-lock-face `(:foreground
+                                         ,(pcase code
+                                            (0 "green")
+                                            (_ "red")))))))))))))
 #+end_src
 ***** TODO mystery issue with jumping cursor
 likely due to all the overriding text properties happening in this buffer.
@@ -510,7 +509,7 @@ cursor appears to jump to top of screen when inside a collapsed section as it co
         (unless (bolp)
           (insert "\n"))
         (insert
-         (propertize (s-chomp event) 'face '(:foreground "red"))
+         (propertize (s-chomp event) 'font-lock-face '(:foreground "red"))
          "\n"))))
 
   (defun jj--make-print-status-sentinel (buffer)
@@ -767,7 +766,8 @@ this might not actually work. I'm big sus actually.
          (let ((rep (s--aget replacements it)))
            (propertize it
                        'display rep
-                       'face 'escape-glyph)))
+                       'face 'escape-glyph
+                       'font-lock-face 'escape-glyph)))
        string t t)))
 
   (defun jj--replace-newlines (string)
@@ -778,7 +778,8 @@ this might not actually work. I'm big sus actually.
        (regexp-opt (mapcar 'car replacements))
        (lambda (it)
          (propertize (s--aget replacements it)
-                     'face 'escape-glyph))
+                     'face 'escape-glyph
+                     'font-lock-face 'escape-glyph))
        string t t)))
 
   (ert-deftest jj-test-entitize-newlines ()
@@ -1815,14 +1816,14 @@ this might not actually work. I'm big sus actually.
   (defun insert-jj-log-elided (graph)
     "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
     (with-insert-temp-buffer
-     (insert (propertize "(elided revisions)\n" 'face '(:foreground "grey")))
+     (insert (propertize "(elided revisions)\n" 'font-lock-face '(:foreground "grey")))
      ;; insert the mandatory graph segments
      ;; these will add new lines if there arent enough already
      (cl-loop initially (progn
                           (goto-char (point-min))
                           (insert (jj-log-graph-first-line-prefix graph)
                                   (propertize (jj-log-graph-first-line-node graph)
-                                              'face '(:foreground "grey"))
+                                              'font-lock-face '(:foreground "grey"))
                                   (jj-log-graph-first-line-suffix graph))
                           (forward-line 1))
               for prefix in (jj-log-graph-mandatory-segments graph)
@@ -1840,7 +1841,7 @@ this might not actually work. I'm big sus actually.
     (cl-loop initially (progn
                          (insert (jj-log-graph-first-line-prefix graph)
                                  (propertize (jj-log-graph-first-line-node graph)
-                                             'face '(:foreground "cyan"))
+                                             'font-lock-face '(:foreground "cyan"))
                                  (jj-log-graph-first-line-suffix graph))
                          (forward-line 1))
              for (prefix . rest) on (jj-log-graph-mandatory-segments graph)
@@ -1851,7 +1852,7 @@ this might not actually work. I'm big sus actually.
                           (not (string= "" (string-trim prefix)))
                           ;; no repeatable segments
                           (not (jj-log-graph-repeatable-segment graph)))
-                         (insert (propertize prefix 'face '(:foreground "grey"))))
+                         (insert (propertize prefix 'font-lock-face '(:foreground "grey"))))
                         (t
                          (insert prefix)))
                   (forward-line 1)
@@ -2547,7 +2548,7 @@ this might not actually work. I'm big sus actually.
   (defvar jj--cmd-log-secret-buf-name-prefix "jj-command-secret-log"
     "Tag to use to identify jj's secret command-log buffers.
   This is concatenated with an identifier for the repository to define the buffer name for the secret command log.")
-  
+
   (defun jj-pop-to-command-log (repo-dir)
     "Open the command-log buffer for the current repo."
     (interactive (list default-directory))
@@ -2564,6 +2565,9 @@ this might not actually work. I'm big sus actually.
       (with-current-buffer buf
         (unless (derived-mode-p 'jj-process-mode)
           (jj-process-mode)
+          ;; for now this ruins colours in the process log buffer
+          ;; as my colours are not set via font-lock
+          ;; which is enabled in magit-section mode.
           (cursor-intangible-mode t)))
       buf))
 #+end_src
@@ -3214,7 +3218,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                  files-conflict
                  bookmarks-conflict)
         status
-      (let ((list-prefix (propertize "- " 'face '(:foreground "grey"))))
+      (let ((list-prefix (propertize "- " 'font-lock-face '(:foreground "grey"))))
         (magit-insert-section sec
           (jj-status-files-changed files-changed)
           (cond (files-changed
@@ -3235,7 +3239,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                                    (propertize (concat list-prefix
                                                        (mapconcat #'identity elems " ")
                                                        "\n")
-                                               'face `(:foreground ,(format "%s" color))
+                                               'font-lock-face `(:foreground ,(format "%s" color))
                                                'jj-object change))
                                  ))))
                 (t (magit-insert-heading "Working copy unchanged\n"))))
@@ -4374,7 +4378,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
                (setf (jj--process-log-entry-process proc-entry) proc)
                (overlay-put ovl-control 'jj-object proc-entry)
                (jj--set-collapse-process proc-entry t)
-               ;; (overlay-put ovl-err 'face '(:foreground "grey"))
+               ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
                (jj--set-initial-run-status buf-code)
 
                (let ((stderr (get-buffer-process buf-stderr)))
@@ -4433,7 +4437,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
                (setf (jj--process-log-entry-process proc-entry) proc)
                (overlay-put ovl-control 'jj-object proc-entry)
                (jj--set-collapse-process proc-entry t)
-               ;; (overlay-put ovl-err 'face '(:foreground "grey"))
+               ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
                (jj--set-initial-run-status buf-code)
 
                (when output-buffer
