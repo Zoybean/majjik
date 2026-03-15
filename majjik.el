@@ -3335,16 +3335,6 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (cl-defmethod jj--get-revset ((lin jj-status-lineage-entry) &optional default)
   (jj-status-lineage-entry-change-id lin))
 
-(cl-defgeneric jj--get-revision (thing &optional default)
-  "Get a revision from THING, or use DEFAULT if not available."
-  default)
-(cl-defmethod jj--get-revision ((cmt jj-log-entry) &optional default)
-  (jj-log-header-change-id (jj-log-entry-header cmt)))
-(cl-defmethod jj--get-revision ((cmt jj-log-header) &optional default)
-  (jj-log-header-change-id cmt))
-(cl-defmethod jj--get-revision ((lin jj-status-lineage-entry) &optional default)
-  (jj-status-lineage-entry-change-id lin))
-
 (cl-defgeneric jj--get-change (thing &optional default)
   "Get a change id from THING, or use DEFAULT if not available."
   default)
