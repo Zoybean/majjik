@@ -2042,7 +2042,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
               (unless (string= "0" off)
                 off))
    :form (:chain self (.change_offset)))
-  (change-id-internal
+  (change-id
    :printer (cl-constantly nil)
    :form (:chain self (.change_id) (.short 16)))
   (author
@@ -2086,7 +2086,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
    ;; not sure why, but for now adding this entry seems to break everything.
    :parser (-compose (jj--make-opt-resolver :current-wc) #'s-presence)
    :printer (cl-constantly nil)
-   :form (if (:chain self (.empty)) "empty"))
+   :form (if (:chain self (.current_working_copy)) "@"))
   (nil
    ;; empty non-field element for splitting the header from the desc and empty markers
    :parser #'s-presence
@@ -2542,6 +2542,9 @@ This is concatenated with an identifier for the repository to define the buffer 
     (with-current-buffer buf
       (unless (derived-mode-p 'jj-process-mode)
         (jj-process-mode)
+        ;; for now this ruins colours in the process log buffer
+        ;; as my colours are not set via font-lock
+        ;; which is enabled in magit-section mode.
         (cursor-intangible-mode t)))
     buf))
 ;; Command log:1 ends here
@@ -3186,7 +3189,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                                   ("copied" `(green "C" "{" ,from "=>" ,to "}"))
                                                   ("renamed" `(cyan "R" "{" ,from "=>" ,to "}")))
                           do (magit-insert-section sec
-                               (jj-status-wc-change)
+                               (jj-status-wc-change change)
                                (magit-insert-heading
                                  (propertize (concat list-prefix
                                                      (mapconcat #'identity elems " ")
@@ -3196,16 +3199,16 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                ))))
               (t (magit-insert-heading "Working copy unchanged\n"))))
       (magit-insert-section sec
-        (jj-status-lineage-entry `())
+        (jj-status-lineage-entry)
         (magit-insert-heading "Lineage:")
         (magit-insert-section-body
           (magit-insert-section sec
-            (jj-status-lineage-entry)
+            (jj-status-lineage-entry commit-working-copy)
             (insert "Working copy  (@) : ")
             (insert-jj-status-lineage-entry commit-working-copy))
           (cl-loop for parent in commits-parent
                    do (magit-insert-section sec
-                        (jj-status-lineage-entry)
+                        (jj-status-lineage-entry parent)
                         (insert "Parent commit (@-): ")
                         (insert-jj-status-lineage-entry parent)))))
       (when files-conflict
@@ -3751,7 +3754,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 
 ;; [[file:majjik.org::*thing at point][thing at point:1]]
 (defun jj-thing-at-point ()
-  (get-pos-property (point) 'jj-object))
+  (oref (magit-section-at (point)) value))
 
 (defun jj-field-at-point ()
   (get-pos-property (point) 'jj-field))
@@ -3803,6 +3806,10 @@ When it is additionally on a FIELD of the OBJECT, also print that FIELD's name a
 (cl-defmethod jj-inspect-thing ((thing jj-status-lineage-entry))
   "Show the change at point."
   (jj-show (jj-status-lineage-entry-commit-id thing)))
+
+(cl-defmethod jj-inspect-thing ((thing jj-log-entry))
+  "Show the change at point."
+  (jj-show (jj-log-header-commit-id (jj-log-entry-header thing))))
 
 (cl-defmethod jj-inspect-thing ((thing jj-log-header))
   "Show the change at point."
@@ -4268,7 +4275,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                (set-process-sentinel stderr
                                      (jj--make-print-status-sentinel buf-stderr))
                (set-process-filter stderr
-                                   #'jj--ansi-color-filter))
+                                   (jj--make-ansi-color-multi-filter `(,buf-stderr))))
              ;; this always runs before the subsequent promise callbacks,
              ;; which means `resolve' and `reject' are not themselves callbacks
              (add-function :after (process-sentinel proc)

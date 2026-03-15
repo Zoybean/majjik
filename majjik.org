@@ -2040,7 +2040,7 @@ this might not actually work. I'm big sus actually.
                 (unless (string= "0" off)
                   off))
      :form (:chain self (.change_offset)))
-    (change-id-internal
+    (change-id
      :printer (cl-constantly nil)
      :form (:chain self (.change_id) (.short 16)))
     (author
@@ -2084,7 +2084,7 @@ this might not actually work. I'm big sus actually.
      ;; not sure why, but for now adding this entry seems to break everything.
      :parser (-compose (jj--make-opt-resolver :current-wc) #'s-presence)
      :printer (cl-constantly nil)
-     :form (if (:chain self (.empty)) "empty"))
+     :form (if (:chain self (.current_working_copy)) "@"))
     (nil
      ;; empty non-field element for splitting the header from the desc and empty markers
      :parser #'s-presence
@@ -3230,7 +3230,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                                                     ("copied" `(green "C" "{" ,from "=>" ,to "}"))
                                                     ("renamed" `(cyan "R" "{" ,from "=>" ,to "}")))
                             do (magit-insert-section sec
-                                 (jj-status-wc-change)
+                                 (jj-status-wc-change change)
                                  (magit-insert-heading
                                    (propertize (concat list-prefix
                                                        (mapconcat #'identity elems " ")
@@ -3240,16 +3240,16 @@ but, they should also be able to rely on the same underlying machinery, if possi
                                  ))))
                 (t (magit-insert-heading "Working copy unchanged\n"))))
         (magit-insert-section sec
-          (jj-status-lineage-entry `())
+          (jj-status-lineage-entry)
           (magit-insert-heading "Lineage:")
           (magit-insert-section-body
             (magit-insert-section sec
-              (jj-status-lineage-entry)
+              (jj-status-lineage-entry commit-working-copy)
               (insert "Working copy  (@) : ")
               (insert-jj-status-lineage-entry commit-working-copy))
             (cl-loop for parent in commits-parent
                      do (magit-insert-section sec
-                          (jj-status-lineage-entry)
+                          (jj-status-lineage-entry parent)
                           (insert "Parent commit (@-): ")
                           (insert-jj-status-lineage-entry parent)))))
         (when files-conflict
@@ -3818,7 +3818,7 @@ need error handling in these. but I do like them being synchronous i think.
 **** thing at point
 #+begin_src elisp
   (defun jj-thing-at-point ()
-    (get-pos-property (point) 'jj-object))
+    (oref (magit-section-at (point)) value))
 
   (defun jj-field-at-point ()
     (get-pos-property (point) 'jj-field))
@@ -3871,6 +3871,10 @@ need error handling in these. but I do like them being synchronous i think.
     "Show the change at point."
     (jj-show (jj-status-lineage-entry-commit-id thing)))
 
+  (cl-defmethod jj-inspect-thing ((thing jj-log-entry))
+    "Show the change at point."
+    (jj-show (jj-log-header-commit-id (jj-log-entry-header thing))))
+  
   (cl-defmethod jj-inspect-thing ((thing jj-log-header))
     "Show the change at point."
     (jj-show (jj-log-header-commit-id thing)))
@@ -4378,7 +4382,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
                  (set-process-sentinel stderr
                                        (jj--make-print-status-sentinel buf-stderr))
                  (set-process-filter stderr
-                                     #'jj--ansi-color-filter))
+                                     (jj--make-ansi-color-multi-filter `(,buf-stderr))))
                ;; this always runs before the subsequent promise callbacks,
                ;; which means `resolve' and `reject' are not themselves callbacks
                (add-function :after (process-sentinel proc)
