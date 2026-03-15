@@ -2463,11 +2463,79 @@ this might not actually work. I'm big sus actually.
     (when-let ((sexp (read-from-minibuffer (or prompt "revset sexp: ") nil nil nil 'jj-revset-history)))
       (unless (string= "" sexp)
         (jj-revset (read sexp)))))
+
+  (defun jj--rev-at-point-option (thing)
+    (when-let ((revs (jj--point-revision thing)))
+      `("^" ,@revs)))
+
+  (defun jj--point-revision (thing)
+    (when-let ((chg (jj--get-change thing))
+               (cmt (jj--get-commit thing)))
+      (list chg cmt (jj--get-bookmarks thing))))
+
+  (defun jj--list-relevant-revisions (&optional rev-at-pt)
+    "List all revisions, as well as all bookmarks. if REV-AT-PT is provided, it should be a list of a change id and commit id for the commit at point."
+    `(,@(opt rev-at-pt)
+      ("@" ,@(jj-wc-revision))
+      ,@(cl-loop for (cm ci . bms) in (jj-match-revisions-annotated)
+                 collect `(,cm ,cm ,ci ,bms)
+                 collect `(,ci ,cm ,ci ,bms)
+                 nconc (cl-loop for bm in bms
+                                collect `(,bm ,cm ,ci ,bms)))
+      ))
+
+  (defun jj--annotated-ref-table (options)
+    "Return an annotated completion table for OPTIONS"
+    (completion-table-with-annotation
+     (completion-table-dynamic (cl-constantly options))
+     (jj--annotate-refs options)))
+
+  (defun jj--annotate-refs (options)
+    "return an annotator for the given OPTIONS alist"
+    (lambda (c)
+      (-let (((chg cmt bmks) (alist-get c options nil nil #'string=)))
+        (format "\t%s\t%s\t%s"
+                (propertize chg 'face '(:foreground "magenta"))
+                (propertize cmt 'face '(:foreground "light blue"))
+                (propertize (s-join " " bmks) 'face '(:foreground "magenta"))))))
+
+  (defun jj-read-single-revision (prompt initial-input history)
+    (let* ((thing (jj-thing-at-point))
+           (rev-pt (jj--get-change thing))
+           (pt-ann (jj--rev-at-point-option thing))
+           (answer (completing-read
+                    prompt (jj--annotated-ref-table
+                            (jj--list-relevant-revisions pt-ann))
+                    nil nil initial-input history)))
+      (pcase answer
+        ("^" rev-pt)
+        (_ answer))))
+
+  (defun jj-read-multi-revision (prompt initial-input history)
+    (let ((crm-separator (rx (* blank)
+                             (any ",| ")
+                             (* blank))))
+      (let* ((thing (jj-thing-at-point))
+             (rev-pt (jj--get-change thing))
+             (pt-ann (jj--rev-at-point-option thing))
+             (answers (completing-read-multiple
+                       prompt (jj--annotated-ref-table
+                               (jj--list-relevant-revisions pt-ann))
+                       nil nil initial-input history)))
+        (mapcar (lambda (ans)
+                  (pcase ans
+                    ("^" rev-pt)
+                    (_ ans)))
+                answers))))
+
   (defun jj-read-revset (&optional prompt)
     (when-let ((str (read-from-minibuffer (or prompt "revset: ") nil nil nil 'jj-revset-history)))
       (unless (string= "" str) str)))
+
+  (defvar jj-revision-history nil "History for jj revisions")
+
   (defun jj-read-revision (&optional prompt revset)
-    (when-let ((str (completing-read (or prompt "revision: ") (jj-match-revisions revset) nil nil nil 'jj-revset-history)))
+    (when-let ((str (completing-read (or prompt "revision: ") (jj-match-revisions revset) nil nil nil 'jj-revision-history)))
       (unless (string= "" str) str)))
 
   (defvar jj-fileset-history nil "History for jj filesets")
@@ -3244,6 +3312,15 @@ need error handling in these. but I do like them being synchronous i think.
                `(++ (:chain self (.change_id))
                     "\n"))))
 
+  (defun jj-rev-list-verbose-template (self)
+    (jj-template
+     (cl-subst self 'self
+               `(++ (join " "
+                              (:chain self (.change_id))
+                              (:chain self (.commit_id))
+                              (:chain self (.bookmarks) (.join " ")))
+                    "\n"))))
+
   (defun jj-name-list-template (self)
     (jj-template
      (cl-subst self 'self
@@ -3380,6 +3457,15 @@ need error handling in these. but I do like them being synchronous i think.
                                :no-revert)
                   :omit))
 
+  (defun jj-match-revisions-annotated (&optional revset)
+    "List all revisions matching REVSET, or all visible by default, as a list of (CHG-ID CMT-ID . BOOKMARKS)."
+    (mapcar (lambda (s) (s-split " " s :omit))
+            (string-lines (jj-cmd-sync `("log" "--no-graph"
+                                         "-r" ,(or revset "all()")
+                                         "-T" ,(jj-rev-list-verbose-template 'self))
+                                       :no-revert)
+                          :omit)))
+
   (defun jj--workspace-root-process (&optional dir)
     "Return the root of the jj repository containing DIR, or `default-directory' if not provided. Uses jj to locate the root, rather than traversing in lisp code."
     (let ((default-directory (or dir default-directory)))
@@ -3466,6 +3552,13 @@ need error handling in these. but I do like them being synchronous i think.
 #+end_src
 ***** single revision
 #+begin_src elisp
+  (defun jj-wc-revision ()
+    "Returns the current working copy commit, as a list (CHG-ID CMT-ID . BMKS)."
+    (let ((stat (jj-status-commit-working-copy jj--current-status)))
+      `(,(jj-status-lineage-entry-change-id stat)
+        ,(jj-status-lineage-entry-commit-id stat)
+        ,@(jj-status-lineage-entry-bookmarks stat))))
+
   (defun jj-get-revision-dwim (&optional prompt mutable)
     "Get a revision based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT. If MUTABLE, only include mutable commits in the completion options."
     (or (jj--get-change (jj-thing-at-point))
