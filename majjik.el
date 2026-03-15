@@ -2474,7 +2474,7 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    :form (if (:chain self (.conflict)) "conflict"))
   (description
    :parser #'json-parse-string
-   :form (:chain self (.description) (.trim) (.escape_json))))
+   :form (:chain self (.description) (.first_line) (.trim) (.escape_json))))
 
 (define-jj-format status-wc-change
   (status
