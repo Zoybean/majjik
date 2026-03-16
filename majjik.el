@@ -388,50 +388,56 @@ When returning both a string result and an exit code, they are returned as a con
   "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, MIN-CMD is a shorter version of CMD, e.g. omitting majjik's default arguments."
   (let ((repo-dir default-directory))
     (with-current-buffer (jj--get-command-log-buf repo-dir)
-      (goto-char (point-max))
-      (let* (;; pretending to be a zero-width-space
-             (inv (propertize " " 'display ""))
-             ;; real zero-width-space
-             (zws "\u200B")
-             (inhibit-read-only t)
-             (mark-control-start (point-marker))
-             (code-buf (jj-make-section-buffer (jj--replace-newlines name) inv inv))
-             (args (jj--replace-newlines
-                    (mapconcat #'shell-quote-argument hide-args " ")))
-             (cmd (jj--replace-newlines
-                   (mapconcat #'shell-quote-argument cmd " ")))
-             (mark-args-start (progn (insert "> jj ")
-                                     (point-marker)))
-             (mark-args-end (progn
-                              (insert (propertize args 'font-lock-face 'shadow) " ")
-                              (point-marker)))
-             (mark-header-end (progn
-                                (insert cmd)
-                                (point-marker)
-                                ))
-             (stdout (jj-make-section-buffer (jj--replace-newlines name) "\n" zws))
-             (mark-err-start (point-marker))
-             (stderr (jj-make-section-buffer (jj--replace-newlines name) zws "\n"))
-             (mark-collapse-end (point-marker))
-             (mark-control-end (point-marker))
-             ;; this needs to be an overlay,
-             ;; so we can toggle its properties as a unit
-             (ovl-args (make-overlay mark-args-start mark-args-end))
-             (ovl-collapse (make-overlay mark-header-end mark-collapse-end))
-             ;; these all also need to be overlays,
-             ;; so they keep applying as text is added
-             (ovl-err (make-overlay mark-err-start mark-collapse-end))
-             (ovl-control (make-overlay mark-control-start mark-control-end))
-             )
-        (make-jj--process-log-entry
-         :name name
-         :buf-code code-buf
-         :buf-stdout stdout
-         :buf-stderr stderr
-         :ovl-control ovl-control
-         :ovl-collapse ovl-collapse
-         :ovl-args ovl-args
-         :ovl-err ovl-err)))))
+      (let ((inhibit-read-only t)
+            (display-name (jj--replace-newlines name))
+            ;; pretending to be a zero-width-space
+            (inv (propertize " " 'display ""))
+            ;; real zero-width-space
+            (zws "\u200B"))
+        (goto-char (point-max))
+        (map-let (:start
+                  :code 
+                  :args
+                  :cmd
+                  :content
+                  :stdout
+                  :stderr
+                  :end)
+            (jj--insert-sectioned
+             `(:start
+               (:code . "   ")
+               "> jj "
+               (:args . ,(propertize (jj--replace-newlines
+                                      (mapconcat #'shell-quote-argument hide-args " "))
+                                     'font-lock-face 'shadow))
+               " "
+               (:cmd . ,(jj--replace-newlines
+                         (mapconcat #'shell-quote-argument cmd " ")))
+               :content
+               "\n"
+               :stdout
+               ,inv
+               :stderr
+               "\n"
+               :end))
+          (let* ((buf-code (jj--make-narrowed-indirect (format "*code-section %s*" display-name) (car code) (cdr code)))
+                 (stdout (jj--make-narrowed-indirect (format "*stdout-section %s*" display-name) stdout stdout))
+                 (stderr (jj--make-narrowed-indirect (format "*stderr-section %s*" display-name) stderr stderr))
+                 ;; these need to be overlays,
+                 ;; so we can toggle their properties as a unit
+                 (ovl-args (make-overlay (car args) (cdr args)))
+                 (ovl-collapse (make-overlay content end))
+                 ;; these all also need to be overlays,
+                 ;; so they keep applying as text is added
+                 (ovl-control (make-overlay start end)))
+            (make-jj--process-log-entry
+             :name name
+             :buf-code buf-code
+             :buf-stdout stdout
+             :buf-stderr stderr
+             :ovl-control ovl-control
+             :ovl-collapse ovl-collapse
+             :ovl-args ovl-args)))))))
 
 (defun jj--set-initial-run-status (code-buf)
   (with-current-buffer code-buf
@@ -808,6 +814,54 @@ this defaults to the current buffer."
       ;; update the property
       (put-text-property sub-start sub-end prop prop-list object)
       (setq sub-start sub-end))))
+
+(defun jj--insert-sectioned (parts &optional insert-func)
+  "Insert all of PARTS, which are either strings, pairs (LABEL . STRING), or symbols to label without inserting.
+Returns an alist of buffer regions. For each LABEL on a string, the returned alist contains an
+entry (LABEL START . END) where START and END are markers to where the
+corresponding labeled string starts and ends. For each LABEL on its own, the returned alist contains an
+entry (LABEL . POS) where POS is a marker."
+  (let ((regions))
+    (cl-loop for part in parts
+             for ix upfrom 0
+             for str = (or (cdr-safe part)
+                           (and (stringp part)
+                                part))
+             for label = (or (car-safe part)
+                             (and (symbolp part)
+                                  part))
+             collect (length str) into lengths
+             concat str into combined
+             when label
+             collect `(,ix  ,str . ,label) into pointers
+             finally do
+             (progn
+               (let ((end))
+                 (save-excursion
+                   (funcall (or insert-func #'insert) combined)
+                   (setq end (point-marker)))
+                 (setq regions
+                       (cl-loop for len in lengths
+                                for ix upfrom 0
+                                for (str . name) = (alist-get ix pointers)
+                                for r-start = (point-marker)
+                                for r-end = (progn
+                                              (forward-char len)
+                                              (point-marker))
+                                when name
+                                collect (if str
+                                            `(,name ,r-start . ,r-end)
+                                          `(,name . ,r-start))))
+                 (goto-char end))))
+    regions))
+
+(defun jj--make-narrowed-indirect (name start end)
+  "Make an indirect buffer named NAME, narrowed to START and END."
+  (let ((buf (clone-indirect-buffer
+              name nil :norecord)))
+    (prog1 buf
+      (with-current-buffer buf
+        (narrow-to-region start end)))))
 ;; rendering utils:1 ends here
 
 ;; string-edit
