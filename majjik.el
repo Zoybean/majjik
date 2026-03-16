@@ -7,7 +7,7 @@
 ;; Version: 0.1.0
 ;; Keywords: vc
 ;; URL: https://github.com/Zoybean/majjik
-;; Package-Requires: (dash s eieio with-editor promise transient llama)
+;; Package-Requires: (dash s eieio with-editor magit-section promise transient llama)
 
 ;;; Commentary:
 
@@ -24,6 +24,7 @@
 (require 'transient)
 (require 'llama)
 (require 'string-edit)
+(require 'magit-section)
 ;; Require:1 ends here
 
 ;; collect-repeat
@@ -373,10 +374,6 @@ When returning both a string result and an exit code, they are returned as a con
               :documentation "Buffer for process standard error.")
   (ovl-control nil :type overlay
                :documentation "Overlay for the area through which the user may interact with the process.")
-   (min-cmd nil :type string
-           :documentation "Abbreviated command string.")
-   (ovl-cmd nil :type overlay
-            :documentation "Overlay for the command string, which should be replaced with the min command string when collapsed.")
   (ovl-args nil :type overlay
             :documentation "Overlay for the default args string, which should be hidden when collapsed.")
   (ovl-collapse nil :type overlay
@@ -444,7 +441,7 @@ When returning both a string result and an exit code, they are returned as a con
     (let ((inhibit-read-only t))
       (replace-region-contents
        (point-min) (point-max)
-       (lambda () (propertize "run" 'face '(:foreground "yellow")))))))
+       (lambda () (propertize "run" 'font-lock-face '(:foreground "yellow")))))))
 
 (defun jj--make-update-exit-code-sentinel (code-buf)
   "Process sentinel to update the contents of CODE-BUF (a buffer) with the exit status of the process."
@@ -459,17 +456,17 @@ When returning both a string result and an exit code, they are returned as a con
                   ;; what's it doing?
                   (propertize
                    (format "%s" (process-status proc))
-                   'face `(:foreground
-                           "yellow")))
+                   'font-lock-face `(:foreground
+                                     "yellow")))
                  (t
                   ;; process is done. how'd it exit?
                   (let ((code (process-exit-status proc)))
                     (propertize
                      (format "%3d" code)
-                     'face `(:foreground
-                             ,(pcase code
-                                (0 "green")
-                                (_ "red")))))))))))))
+                     'font-lock-face `(:foreground
+                                       ,(pcase code
+                                          (0 "green")
+                                          (_ "red")))))))))))))
 ;; command-log management:1 ends here
 
 ;; sentinels and filters
@@ -507,7 +504,7 @@ If INITIALLY-STAY is non-nil, point stays in place if it is at `bobp' even if th
       (unless (bolp)
         (insert "\n"))
       (insert
-       (propertize (s-chomp event) 'face '(:foreground "red"))
+       (propertize (s-chomp event) 'font-lock-face '(:foreground "red"))
        "\n"))))
 
 (defun jj--make-print-status-sentinel (buffer)
@@ -549,7 +546,7 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
     (:documentation (format "This filter adds output to its intermediate buffer, then calls `%s' until it returns nil, then calls `%s' with the list of new non-nil values, and deletes the text before point (i.e. the text that was read)." read-next callback))
     (when (buffer-live-p (process-buffer proc))
       (with-current-buffer intermediate-buffer
-        (insert string)
+        (insert (ansi-color-apply string))
         ;; process any new entries
         (save-excursion
           (goto-char (point-min))
@@ -769,7 +766,8 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
        (let ((rep (s--aget replacements it)))
          (propertize it
                      'display rep
-                     'face 'escape-glyph)))
+                     'face 'escape-glyph
+                     'font-lock-face 'escape-glyph)))
      string t t)))
 
 (defun jj--replace-newlines (string)
@@ -780,7 +778,8 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
      (regexp-opt (mapcar 'car replacements))
      (lambda (it)
        (propertize (s--aget replacements it)
-                   'face 'escape-glyph))
+                   'face 'escape-glyph
+                   'font-lock-face 'escape-glyph))
      string t t)))
 
 (ert-deftest jj-test-entitize-newlines ()
@@ -1626,12 +1625,12 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
   "Node format to ensure log nodes can be parsed.")
 
 (defun jj--make-list-parser (sep)
-  "Make a function to parse a list, separated by SEP"
+  "Make a function to parse a list, separated by SEP."
   (lambda (s)
     (s-split sep s :omit)))
 
 (defun jj--make-list-printer (sep)
-  "Make a function to format a list in the log, separated by SEP"
+  "Make a function to format a list in the log, separated by SEP."
   (lambda (vals _header)
     (s-join sep vals)))
 
@@ -1639,9 +1638,9 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
   "Parse a json-encoded boolean"
   (json-parse-string s :false-object nil))
 
-(defun jj--make-opt-printer (&optional present-override absent-override)
-  "Make a function to format an optional entry in the log. If PRESENT-OVERRIDE is non-nil, it is returned instead of a non-nil value. If ABSENT-OVERRIDE is non-nil, it is returned instead of nil."
-  (lambda (val _entry)
+(defun jj--make-opt-resolver (&optional present-override absent-override)
+  "Make a function to resolve an optional item in the log, for use in parsers, faces, or printers. If PRESENT-OVERRIDE is non-nil, it is returned instead of a non-nil value. If ABSENT-OVERRIDE is non-nil, it is returned instead of nil."
+  (lambda (val &optional _entry)
     (if val
         (or present-override val)
       absent-override)))
@@ -1872,14 +1871,14 @@ If the line is an elided entry, returns a single string, which is the prefix bef
 (defun insert-jj-log-elided (graph)
   "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
   (with-insert-temp-buffer
-   (insert (propertize "(elided revisions)\n" 'face '(:foreground "grey")))
+   (insert (propertize "(elided revisions)\n" 'font-lock-face '(:foreground "grey")))
    ;; insert the mandatory graph segments
    ;; these will add new lines if there arent enough already
    (cl-loop initially (progn
                         (goto-char (point-min))
                         (insert (jj-log-graph-first-line-prefix graph)
                                 (propertize (jj-log-graph-first-line-node graph)
-                                            'face '(:foreground "grey"))
+                                            'font-lock-face '(:foreground "grey"))
                                 (jj-log-graph-first-line-suffix graph))
                         (forward-line 1))
             for prefix in (jj-log-graph-mandatory-segments graph)
@@ -1897,7 +1896,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
   (cl-loop initially (progn
                        (insert (jj-log-graph-first-line-prefix graph)
                                (propertize (jj-log-graph-first-line-node graph)
-                                           'face '(:foreground "cyan"))
+                                           'font-lock-face '(:foreground "cyan"))
                                (jj-log-graph-first-line-suffix graph))
                        (forward-line 1))
            for (prefix . rest) on (jj-log-graph-mandatory-segments graph)
@@ -1908,7 +1907,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
                         (not (string= "" (string-trim prefix)))
                         ;; no repeatable segments
                         (not (jj-log-graph-repeatable-segment graph)))
-                       (insert (propertize prefix 'face '(:foreground "grey"))))
+                       (insert (propertize prefix 'font-lock-face '(:foreground "grey"))))
                       (t
                        (insert prefix)))
                 (forward-line 1)
@@ -1924,22 +1923,43 @@ If the line is an elided entry, returns a single string, which is the prefix bef
            do (progn (insert tail)
                      (forward-line 1))))
 
+(defclass jj-log-entry-section (magit-section)
+  ((data :initarg :data)))
+
 (defun insert-jj-graph-log-maybe-elided (entry)
   (pcase entry
     ((pred jj-log-graph-p)
-     (insert-jj-log-elided entry))
+     (magit-insert-section sec
+       (elided)
+       (magit-insert-heading (with-temp-buffer
+                               (insert-jj-log-elided entry)
+                               (s-chomp (buffer-string))))))
     ((pred jj-log-entry-p)
      (let ((header (jj-log-entry-header entry)))
-       (with-insert-temp-buffer
-         (save-excursion (insert-jj-log-header header))
-         (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
-         (add-text-properties (point-min) (point-max) `(jj-object ,header)))))))
+       (-let (((line-0 line-1 . rest)
+               (s-split "\n" (with-temp-buffer
+                               (save-excursion (insert-jj-log-header header))
+                               (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
+                               (add-text-properties (point-min) (point-max) `(jj-object ,header))
+                               (s-chomp (buffer-string))))))
+         (jj-insert-log-entry-section entry line-0 line-1 rest))))))
+
+(defun jj-insert-log-entry-section (entry line-0 &optional line-1 rest)
+  (magit-insert-section sec
+    (jj-log-entry-section entry :collapsed)
+    (oset sec data entry)
+    (magit-insert-heading (concat (s-join "\n" `(,line-0 ,@(opt line-1)))
+                                  "\n"))
+    (when rest
+      (magit-insert-section-body
+        (dolist (line rest)
+          (insert line "\n"))))))
 ;; plumbing:1 ends here
 
 ;; formats
 
 ;; [[file:majjik.org::*formats][formats:1]]
-(defmacro define-jj-format (type-name &rest fields)
+(defmacro define-jj-format (type-name &rest field-specs)
   "Define the format to be used for parsing and formatting various jj output.
 Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
 - `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
@@ -1948,119 +1968,153 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 - `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
 - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
   (declare (indent 1))
-  `(progn
-     (require 'json)
-     (define-short-documentation-group ,(intern (format "jj-%s" type-name))
-       (define-jj-format
-           :no-manual t)
-       (,(intern (format "read-jj-%s" type-name))
-        :no-manual t)
-       (,(intern (format "insert-jj-%s" type-name))
-        :no-manual t)
-       (,(intern (format "jj-%s-template" type-name))
-        :no-manual t)
-       (,(intern (format "make-jj-%s" type-name))
-        :args (&key ,@(mapcar #'car fields))
-        :no-manual t))
-     ;; (defvar ,(intern (format "jj-%s-regex" type-name))
-     ;;   ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-     ;;      `(rx line-start
-     ;;           (seq
-     ;;            ,(format "%s" type-name)
-     ;;            ;; struct delimiter
-     ;;            ,jj--major-delim
-     ;;            ;; struct elements
-     ;;            (* ,content)
-     ;;            (= ,(1- (length fields))
-     ;;               ,jj--delim
-     ;;               (* ,content))
-     ;;            "\n")))
-     ;;   ,(format "Regex to match a full `jj-%1$s' entry. This *should* match exactly the same content that `read-jj-%1$s' will parse." type-name))
-     (defun ,(intern (format "jj-%s-template" type-name)) (self)
-       ,(format "Get a commit template to produce entries parseable by `read-jj-%s'. SELF is the symbol to use for the self-type; usually this will just be `self', but if using the template in a lambda you may want a different type-name." type-name)
-       (jj-template (cl-subst self 'self
-                              '(++ ,(format "%S" type-name)
-                                   ,jj--major-delim
-                                   (join ,jj--delim
-                                         ,@(cl-loop for (field-name . props) in fields
-                                                    for form = (plist-get props :form)
-                                                    collect form))
-                                   ))))
-     (defun ,(intern (format "read-jj-%s" type-name)) ()
-       ,(format "With point at the beginning of a `jj-%1$s' entry, parse the entry into a `jj-%1$s' struct." type-name)
-       ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-          `(cl-loop initially (with-error-label ,(format "read struct label %s" type-name)
-                                (jj--re-step-over (rx ,(format "%s" type-name) ,jj--major-delim)))
-                    for (field-name key parser) in (list ,@(cl-loop for (field-name . props) in fields
-                                                                    for key = (intern (format ":%s" field-name))
-                                                                    for parser = (plist-get props :parser)
-                                                                    collect `(list ',field-name ,key ,parser)))
-                    ;; no delimiter for first field
-                    for first = t then nil
-                    for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
-                    when (with-error-label (format "read field %s" field-name)
-                           (jj--re-step-over field-rx))
-                    for parsed = (if parser
-                                     (save-match-data
-                                       (funcall parser (match-string 1)))
-                                   (match-string 1))
-                    nconc `(,key ,parsed)
-                    into struct-props
-                    finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props))))
-     (defun ,(intern (format "insert-jj-%s" type-name)) (entry)
-       ,(format "Insert the ENTRY, formatted as a `jj-%s' entry." type-name)
-       ,(cl-labels ((field (name-sym)
-                      `(,(intern (format "jj-%s-%s" type-name name-sym))
-                        entry)))
-          `(with-insert-temp-buffer
-            (cl-loop for (field-name val printer face sep) in (list ,@(cl-loop  
-                                                                       for (field-name . props) in fields
-                                                                       for first = t then nil
-                                                                       for sep = (if-let ((sep (plist-get props :separator)))
-                                                                                     sep
-                                                                                   (cond
-                                                                                    (first "")
-                                                                                    (t " ")))
-                                                                       for face = (plist-get props :face)
-                                                                       for printer = (plist-get props :printer)
-                                                                       collect `(list ',field-name ,(field field-name) ,printer ,face ,sep)))
-                     do (when-let ((printed (s-presence
-                                             (if printer
-                                                 (funcall printer val entry)
-                                               val))))
-                          (insert sep (apply #'propertize
-                                             `(,printed
-                                               help-echo ,(symbol-name field-name)
-                                               ,@(jj--if-arg face #'identity 'face))))))
-            ;; ensure commit text ends on a newline
-            (unless (bolp)
-              (insert "\n"))
-            ;; add field to all the commit text (including newlines)
-            ;; pointing to the entry struct
-            (add-text-properties (point-min) (point-max) `(jj-object ,entry)))))
-     (cl-defstruct ,(intern (format "jj-%s" type-name))
-       ;; semantic fields
-       ,@(cl-loop for (field-name . props) in fields
-                  collect field-name))))
+  (let ((fields (-filter (-lambda ((name . rest)) name)
+                         field-specs)))
+    `(progn
+       (require 'json)
+       (define-short-documentation-group ,(intern (format "jj-%s" type-name))
+         (define-jj-format
+             :no-manual t)
+         (,(intern (format "read-jj-%s" type-name))
+          :no-manual t)
+         (,(intern (format "insert-jj-%s" type-name))
+          :no-manual t)
+         (,(intern (format "jj-%s-template" type-name))
+          :no-manual t)
+         (,(intern (format "make-jj-%s" type-name))
+          :args (&key ,@(mapcar #'car fields))
+          :no-manual t))
+       ;; (defvar ,(intern (format "jj-%s-regex" type-name))
+       ;;   ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
+       ;;      `(rx line-start
+       ;;           (seq
+       ;;            ,(format "%s" type-name)
+       ;;            ;; struct delimiter
+       ;;            ,jj--major-delim
+       ;;            ;; struct elements
+       ;;            (* ,content)
+       ;;            (= ,(1- (length fields))
+       ;;               ,jj--delim
+       ;;               (* ,content))
+       ;;            "\n")))
+       ;;   ,(format "Regex to match a full `jj-%1$s' entry. This *should* match exactly the same content that `read-jj-%1$s' will parse." type-name))
+       (defun ,(intern (format "jj-%s-template" type-name)) (self)
+         ,(format "Get a commit template to produce entries parseable by `read-jj-%s'. SELF is the symbol to use for the self-type; usually this will just be `self', but if using the template in a lambda you may want a different type-name." type-name)
+         (jj-template (cl-subst self 'self
+                                '(++ ,(format "%S" type-name)
+                                     ,jj--major-delim
+                                     (join ,jj--delim
+                                           ,@(cl-loop for (field-name . props) in fields
+                                                      for form = (plist-get props :form)
+                                                      collect form))
+                                     ))))
+       (defun ,(intern (format "read-jj-%s" type-name)) ()
+         ,(format "With point at the beginning of a `jj-%1$s' entry, parse the entry into a `jj-%1$s' struct." type-name)
+         ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
+            `(cl-loop initially (with-error-label ,(format "read struct label %s" type-name)
+                                  (jj--re-step-over (rx ,(format "%s" type-name) ,jj--major-delim)))
+                      for (field-name key parser) in (list ,@(cl-loop for (field-name . props) in fields
+                                                                      for key = (intern (format ":%s" field-name))
+                                                                      for parser = (plist-get props :parser)
+                                                                      collect `(list ',field-name ,key ,parser)))
+                      ;; no delimiter for first field
+                      for first = t then nil
+                      for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
+                      when (with-error-label (format "read field %s" field-name)
+                             (jj--re-step-over field-rx))
+                      for parsed = (if parser
+                                       (save-match-data
+                                         (funcall parser (match-string 1)))
+                                     (match-string 1))
+                      nconc `(,key ,parsed)
+                      into struct-props
+                      finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props))))
+       (defun ,(intern (format "insert-jj-%s" type-name)) (entry)
+         ,(format "Insert the ENTRY, formatted as a `jj-%s' entry." type-name)
+         ,(cl-labels ((field (name-sym)
+                        `(,(intern (format "jj-%s-%s" type-name name-sym))
+                          entry)))
+            `(with-insert-temp-buffer
+              (cl-loop for (field-name val printer face first sep) in (list ,@(cl-loop  
+                                                                               for (field-name . props) in field-specs
+                                                                               for first = (if-let ((c (plist-member props :first)))
+                                                                                               ;; if it's explicitly set (even nil), use that
+                                                                                               (car c)
+                                                                                             ;; otherwise, it's the first, so set it
+                                                                                             t)
+                                                                               ;; otherwise, it's not first, so unset it
+                                                                               then (plist-get props :first)
+                                                                               for sep = (plist-get props :separator)
+                                                                               for face = (plist-get props :face)
+                                                                               for printer = (plist-get props :printer)
+                                                                               collect `(list
+                                                                                         ',field-name
+                                                                                         ,(and field-name (field field-name))
+                                                                                         ,printer
+                                                                                         ,face
+                                                                                         ,first
+                                                                                         ,sep)))
+                       with effective-first
+                       do (when first
+                            (setq effective-first t))
+                       for sep = (or sep
+                                     (cond
+                                      (effective-first "")
+                                      (t " ")))
+                       for face = (cond ((functionp face)
+                                         (funcall face val entry))
+                                        (:else
+                                         face))
+                       do (when-let ((printed (s-presence
+                                               (if printer
+                                                   (funcall printer val entry)
+                                                 val))))
+                            (setq effective-first nil)
+                            (insert sep (apply #'propertize
+                                               `(,printed
+                                                 help-echo ,(symbol-name field-name)
+                                                 ,@(jj--if-arg face #'identity 'font-lock-face))))))
+              ;; ensure commit text ends on a newline
+              (unless (bolp)
+                (insert "\n"))
+              ;; add field to all the commit text (including newlines)
+              ;; pointing to the entry struct
+              (add-text-properties (point-min) (point-max) `(jj-object ,entry)))))
+       (cl-defstruct ,(intern (format "jj-%s" type-name))
+         ;; semantic fields
+         ,@(cl-loop for (field-name . props) in fields
+                    collect field-name)))))
 
 (define-jj-format log-header
+  (change-id-min
+   :face '(ansi-color-bold (:foreground "light pink"))
+   :form (:chain self (.change_id) (.shortest 8) (.prefix)))
+  (change-id-tail
+   :separator ""
+   :face '(:foreground "dim gray")
+   :form (:chain self (.change_id) (.shortest 8) (.rest)))
+  (change-offset
+   :printer (lambda (off _ent)
+              (unless (string= "0" off)
+                off))
+   :form (:chain self (.change_offset)))
   (change-id
-   :face '(:foreground "magenta")
-   :form (:chain self (format_short_change_id_with_change_offset)))
+   :printer (cl-constantly nil)
+   :form (:chain self (.change_id) (.short 16)))
   (author
-   :face '(:foreground "yellow")
+   :face '(:foreground "gold")
    :parser #'json-parse-string
    :form (:chain self (.author) (.email) (stringify) (.escape_json)))
   (timestamp
-   :face '(:foreground "cyan")
+   :face '(:foreground "dark turquoise")
    :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
   (bookmarks
-   :face '(:foreground "magenta")
+   :face '(:foreground "medium orchid")
    :parser (jj--make-list-parser " ")
    :printer (jj--make-list-printer " ")
    :form (:chain self (.bookmarks)))
   (tags
-   :face '(:foreground "yellow")
+   :face '(:foreground "goldenrod")
    :parser (jj--make-list-parser " ")
    :printer (jj--make-list-printer " ")
    :form (:chain self (.tags)))
@@ -2069,27 +2123,52 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
    :parser (jj--make-list-parser " ")
    :printer (jj--make-list-printer " ")
    :form (:chain self (.working_copies)))
+  (commit-id-min
+   :face '(ansi-color-bold (:foreground "dodger blue"))
+   :form (:chain self (.commit_id) (.shortest 8) (.prefix)))
+  (commit-id-tail
+   :separator ""
+   :face '(:foreground "dim gray")
+   :form (:chain self (.commit_id) (.shortest 8) (.rest)))
   (commit-id
-   :face '(:foreground "light blue")
-   :form (:chain self (.commit_id) (format_short_commit_id)))
+   :printer (cl-constantly nil)
+   :form (:chain self (.commit_id) (.short 16)))
   (conflict
    :face '(:foreground "red")
    :parser #'s-presence
-   ;; :printer (jj--make-opt-printer "conflict")
+   ;; :printer (jj--make-opt-resolver "conflict")
    :form (if (:chain self (.conflict)) "conflict"))
-  (empty
-   :face '(:foreground "green")
+  (current-working-copy
+   ;; not sure why, but for now adding this entry seems to break everything.
+   :parser (-compose (jj--make-opt-resolver :current-wc) #'s-presence)
+   :printer (cl-constantly nil)
+   :form (if (:chain self (.current_working_copy)) "@"))
+  (nil
+   ;; empty non-field element for splitting the header from the desc and empty markers
    :parser #'s-presence
-   :printer (jj--make-opt-printer "(empty)")
-   :separator "\n"
+   :printer (cl-constantly "\n"))
+  (empty
+   :first t
+   :face '(ansi-color-bold (:foreground "medium sea green"))
+   :parser (-compose (jj--make-opt-resolver :empty) #'s-presence)
+   :printer (jj--make-opt-resolver "(empty)")
    :form (if (:chain self (.empty)) "empty"))
   (description
    :parser (lambda (s)
              (s-presence (json-parse-string s)))
-   :separator "\n"
-   :printer (jj--make-opt-printer
+   :face (lambda (desc ent)
+           (cond (desc
+                  ;; present description is unformatted
+                  nil)
+                 ((jj-log-header-empty ent)
+                  ;; if both commit and desc are empty, they're both green
+                  '(ansi-color-bold (:foreground "medium sea green")))
+                 (:else
+                  ;; if just desc is empty, it's gold
+                  '(:foreground "gold"))))
+   :printer (jj--make-opt-resolver
              nil
-             (propertize "(no description)" 'face '(:foreground "orange")))
+             "(no description)")
    :form (:chain self (.description) (.escape_json))))
 
 
@@ -2101,7 +2180,8 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                     ,@(cl-loop for n upfrom 1 below tail-lines
                                append `("\n" ,edge-delim)))))
 
-(defvar jj-parseable-template (jj-augment-template-for-graph jj--major-delim jj--count-graph-lines (jj-log-header-template 'self)))
+(defun jj-parseable-template (self)
+  (jj-augment-template-for-graph jj--major-delim jj--count-graph-lines (jj-log-header-template self)))
 ;; formats:1 ends here
 
 ;; tests
@@ -2450,7 +2530,7 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    :form (if (:chain self (.conflict)) "conflict"))
   (description
    :parser #'json-parse-string
-   :form (:chain self (.description) (.trim) (.escape_json))))
+   :form (:chain self (.description) (.first_line) (.trim) (.escape_json))))
 
 (define-jj-format status-wc-change
   (status
@@ -2518,6 +2598,9 @@ This is concatenated with an identifier for the repository to define the buffer 
     (with-current-buffer buf
       (unless (derived-mode-p 'jj-process-mode)
         (jj-process-mode)
+        ;; for now this ruins colours in the process log buffer
+        ;; as my colours are not set via font-lock
+        ;; which is enabled in magit-section mode.
         (cursor-intangible-mode t)))
     buf))
 ;; Command log:1 ends here
@@ -2531,9 +2614,7 @@ This is concatenated with an identifier for the repository to define the buffer 
     ;; never request a pager
     "--no-pager"))
 (defvar jj-parsing-default-args
-  '(;; never colourise output
-    "--color=never"
-    ;; omit extra output
+  '(;; omit extra output
     "--quiet"))
 (defvar jj-logging-default-args
   '("--color=always"))
@@ -2659,7 +2740,7 @@ This is concatenated with an identifier for the repository to define the buffer 
 
 ;; [[file:majjik.org::*Keymaps][Keymaps:1]]
 (defvar-keymap jj-inspect-mode-map
-  :parent special-mode-map
+  :parent magit-section-mode-map
   "," #'jj-inspect-sexp-at-point
   "RET" #'jj-inspect-thing-at-point)
 
@@ -2717,7 +2798,7 @@ This is concatenated with an identifier for the repository to define the buffer 
 (defvar jj--silent-revert nil
   "If non-nil, don't display messages for reverting the status buffer unless there is an error.")
 
-(define-derived-mode jj-inspect-mode special-mode "jj-inspect"
+(define-derived-mode jj-inspect-mode magit-section-mode "jj-inspect"
   "Parent mode for most jj modes, defining basic operations")
 
 (define-derived-mode jj-dashboard-mode jj-inspect-mode "jj-dash"
@@ -2733,31 +2814,16 @@ This is concatenated with an identifier for the repository to define the buffer 
   "Asynchronously get the new status, and reverts the buffer contents when those processes complete.
 Reverted buffer is the one that was active when this function was called."
   (let ((silent jj--silent-revert)
-        (dash-buf (current-buffer))
-        (temp-buf (generate-new-buffer "*jj-dash-replacement*")))
+        (dash-buf (current-buffer)))
     (cl-labels ((end-ok (_ok)
-                  (unwind-protect
-                      (when (buffer-live-p dash-buf)
-                        (with-current-buffer dash-buf
-                          (let ((inhibit-read-only t)
-                                (bob (bobp)))
-                            (replace-buffer-contents-and-properties temp-buf 10)
-                            (when bob
-                              (goto-char (point-min))))
-                          (setq jj--current-status
-                                (buffer-local-value 'jj--current-status temp-buf))
-                          (unless silent
-                            (message "`jj status' ok"))))
-                    (cleanup)))
+                  (unless silent
+                    (message "`jj status' ok")))
                 (end-err (errs)
-                  (message "jj status update failed: %s" errs)
-                  (cleanup))
-                (cleanup ()
-                  (kill-buffer temp-buf)))
+                  (message "jj status update failed: %s" errs)))
       (unless silent
         (message "`jj status'..."))
       (promise-then
-       (with-current-buffer temp-buf
+       (with-current-buffer dash-buf
          (start-jj-dash-async))
        #'end-ok
        #'end-err))))
@@ -3163,44 +3229,74 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                files-conflict
                bookmarks-conflict)
       status
-    (let ((list-prefix (propertize "- " 'face '(:foreground "grey"))))
-      (cond (files-changed
-             (insert "Working copy changes:\n")
-             (cl-loop for change in files-changed
-                      for (type from to) = (slot-values change
-                                             (status path-source path-target))
-                      for (color . elems) = (pcase-exhaustive type
-                                              ("modified" `(cyan "M" ,to))
-                                              ("added" `(green "A" ,to))
-                                              ("removed" `(red "D" ,from))
-                                              ("copied" `(green "C" "{" ,from "=>" ,to "}"))
-                                              ("renamed" `(cyan "R" "{" ,from "=>" ,to "}")))
-                      do (insert list-prefix)
-                      (insert (propertize (mapconcat #'identity elems " ")
-                                          'face `(:foreground ,(format "%s" color))
-                                          'jj-object change)
-                              "\n")))
-            (t (insert "Working copy unchanged\n")))
-      (insert "Working copy  (@) : ")
-      (insert-jj-status-lineage-entry commit-working-copy)
-      (cl-loop for parent in commits-parent
-               do (insert "Parent commit (@-): ")
-               (insert-jj-status-lineage-entry parent))
+    (let ((list-prefix (propertize "- " 'font-lock-face '(:foreground "grey"))))
+      (magit-insert-section sec
+        (jj-status-files-changed files-changed)
+        (cond (files-changed
+               (magit-insert-heading "Working copy changes:\n")
+               (magit-insert-section-body
+                 (cl-loop for change in files-changed
+                          for (type from to) = (slot-values change
+                                                 (status path-source path-target))
+                          for (color . elems) = (pcase-exhaustive type
+                                                  ("modified" `(cyan "M" ,to))
+                                                  ("added" `(green "A" ,to))
+                                                  ("removed" `(red "D" ,from))
+                                                  ("copied" `(green "C" "{" ,from "=>" ,to "}"))
+                                                  ("renamed" `(cyan "R" "{" ,from "=>" ,to "}")))
+                          do (magit-insert-section sec
+                               (jj-status-wc-change change)
+                               (magit-insert-heading
+                                 (propertize (concat list-prefix
+                                                     (mapconcat #'identity elems " ")
+                                                     "\n")
+                                             'font-lock-face `(:foreground ,(format "%s" color))
+                                             'jj-object change))
+                               ))))
+              (t (magit-insert-heading "Working copy unchanged\n"))))
+      (magit-insert-section sec
+        (jj-status-lineage-entry)
+        (magit-insert-heading "Lineage:")
+        (magit-insert-section-body
+          (magit-insert-section sec
+            (jj-status-lineage-entry commit-working-copy)
+            (insert "Working copy  (@) : ")
+            (insert-jj-status-lineage-entry commit-working-copy))
+          (cl-loop for parent in commits-parent
+                   do (magit-insert-section sec
+                        (jj-status-lineage-entry parent)
+                        (insert "Parent commit (@-): ")
+                        (insert-jj-status-lineage-entry parent)))))
       (when files-conflict
-        (insert "Unresolved file conflicts:\n")
-        (cl-loop for conflict in files-conflict
-                 do (insert list-prefix)
-                 (insert-jj-status-file-conflict conflict)))
+        (magit-insert-section sec
+          (jj-status-files-conflict files-conflict)
+          (magit-insert-heading "Unresolved file conflicts:\n")
+          (magit-insert-section-body
+            (cl-loop for conflict in files-conflict
+                     do (magit-insert-section sec
+                          (jj-status-file-conflict conflict)
+                          (insert list-prefix)
+                          (insert-jj-status-file-conflict conflict))))))
       (when bookmarks-conflict
-        (insert "Unresolved bookmark conflicts:\n")
-        (cl-loop for conflict in bookmarks-conflict
-                 do (insert list-prefix)
-                 (insert-jj-status-bookmark-conflict conflict)))
+        (magit-insert-section sec
+          (jj-status-bookmarks-conflict bookmarks-conflict)
+          (magit-insert-heading "Unresolved bookmark conflicts:\n")
+          (magit-insert-section-body
+            (cl-loop for conflict in bookmarks-conflict
+                     do (magit-insert-section sec
+                          (jj-status-bookmark-conflict conflict)
+                          (insert list-prefix)
+                          (insert-jj-status-bookmark-conflict conflict))))))
       (when files-untracked
-        (insert "Untracked files:\n")
-        (cl-loop for file in files-untracked
-                 do (insert list-prefix)
-                 (insert-jj-status-file-untracked file))))))
+        (magit-insert-section sec
+          (jj-status-files-untracked files-untracked)
+          (magit-insert-heading "Untracked files:\n")
+          (magit-insert-section-body
+            (cl-loop for file in files-untracked
+                     do (magit-insert-section sec
+                          (jj-status-file-untracked file)
+                          (insert list-prefix)
+                          (insert-jj-status-file-untracked file)))))))))
 
 (ert-deftest jj-test-insert-status ()
   (with-temp-buffer
@@ -3261,71 +3357,89 @@ Untracked files:
 (defun start-jj-dash-async ()
   "Start the jj dashboard in the current buffer
 Also sets `jj--current-status' in the initial buffer when the status process completes."
+  (let ((buf (current-buffer)))
+    (promise-then
+     (jj--get-dash-data)
+     (lambda (results)
+       (unless (buffer-live-p buf)
+         (error (format "dash output buffer %s deleted" buf)))
+       (with-current-buffer buf
+         (-let (([log-entries stat] results)
+                (line (line-number-at-pos))
+                (col (- (point) (pos-bol))))
+           (jj-dash--insert stat log-entries)
+           (goto-char (point-min))
+           (forward-line (1- line))
+           (forward-char (min col (- (pos-eol) (pos-bol))))
+           (magit-section-update-highlight t)))))))
+
+(defun jj--get-dash-data ()
   (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-    (let ((inhibit-read-only t))
-      (erase-accessible-buffer))
-    (let ((buf (current-buffer)))
-      (promise-all
-       `[,(with-current-buffer
-              (jj-make-section-buffer "log" "Log:\n" "\n")
-            (start-jj-log-async))
-         ,(promise-then
-           (jj-get-status-async)
-           (lambda (stat)
-             (if (buffer-live-p buf)
-                 (with-current-buffer buf
-                   (setq-local jj--current-status stat)
-                   (goto-char (point-min))
-                   (let ((inhibit-read-only t))
-                     (insert-jj-status stat)))
-               (error (format "dash output buffer %s deleted" buf)))))]))))
+    (promise-all
+     `[,(jj-log-entries-async)
+       ,(jj-get-status-async)])))
+
+(defun jj-dash--insert (stat log)
+  (setq-local jj--current-status stat)
+  (let ((inhibit-read-only t))
+    (erase-accessible-buffer)
+    (setq-local jj--current-status stat)
+    (magit-insert-section (root)
+      (magit-insert-section-body
+        (magit-insert-section sec
+          (jj-status-section stat)
+          (magit-insert-heading "Status:\n")
+          (magit-insert-section-body
+            (insert-jj-status stat)))
+        (magit-insert-section sec
+          (jj-log-section log)
+          (magit-insert-heading "Log:\n")
+          (when log
+            (magit-insert-section-body
+              (dolist (entry log)
+                (insert-jj-graph-log-maybe-elided entry)))))))))
 ;; status piping fns:1 ends here
 
 ;; section
 
 ;; [[file:majjik.org::*section][section:1]]
-(defun start-jj-log-async (&optional revset fileset)
+(defun jj-log-entries-async (&optional revset fileset)
   "Make a jj log in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer. Ignores `jj--last-revs' and `jj--last-files'."
-  (let ((inhibit-read-only t))
-    (erase-accessible-buffer))
-  (promise-new
-   (lambda (resolve reject)
-     (let* ((buf (current-buffer))
-            (temp (generate-new-buffer "*jj-log-temp*"))
-            (err (generate-new-buffer "*jj-log-stderr*"))
-            (sentinel (make-jj-simple-sentinel err temp))
-            (filter (cl-labels ((read-next ()
-                                  (ignore-errors (jj-read-graph-and-maybe-elided)))
-                                (print-entries (news)
-                                  (with-current-buffer buf
-                                    (let ((inhibit-read-only t))
-                                      ;; (mapc #'insert-jj-graph-log-maybe-elided news)
-                                      (cl-loop for new in news
-                                               do (insert-jj-graph-log-maybe-elided new))))))
-                      (make-jj-generic-buffered-filter temp #'read-next #'print-entries))))
-       (let ((proc (make-process
-                    :name "jj-log"
-                    :buffer buf
-                    :stderr err
-                    :filter filter
-                    :sentinel sentinel
-                    :noquery t
-                    :command `("jj" "log"
-                               "-T" ,jj-parseable-template
-                               ,@(jj--if-arg revset #'identity "-r")
-                               ,@(jj--if-arg fileset #'identity "--")
-                               ,@jj-global-default-args
-                               ,@(and jj-do-debug jj-global-debug-args)
-                               ,@jj-parsing-default-args
-                               "--config" ,(format "templates.log_node='%s'"
-                                                   (jj--toml-quote-string jj-log-node-template))))))
-         ;; handle the promise state
-         (add-function :after (process-sentinel proc)
-                       (make-jj-callback-sentinel
-                        (lambda (exit-status event)
-                          (if (eq exit-status 0)
-                              (funcall resolve proc)
-                            (funcall reject (cons proc event)))))))))))
+  (let ((entries nil))
+    (promise-new
+     (lambda (resolve reject)
+       (let* ((buf (current-buffer))
+              (temp (generate-new-buffer "*jj-log-temp*"))
+              (err (generate-new-buffer "*jj-log-stderr*"))
+              (sentinel (make-jj-simple-sentinel err temp))
+              (filter (cl-labels ((read-next ()
+                                    (ignore-errors (jj-read-graph-and-maybe-elided)))
+                                  (push-entries (news)
+                                    (setf entries (nconc entries news))))
+                        (make-jj-generic-buffered-filter temp #'read-next #'push-entries))))
+         (let ((proc (make-process
+                      :name "jj-log"
+                      :buffer buf
+                      :stderr err
+                      :filter filter
+                      :sentinel sentinel
+                      :noquery t
+                      :command `("jj" "log"
+                                 "-T" ,(jj-parseable-template 'self)
+                                 ,@(jj--if-arg revset #'identity "-r")
+                                 ,@(jj--if-arg fileset #'identity "--")
+                                 ,@jj-global-default-args
+                                 ,@(and jj-do-debug jj-global-debug-args)
+                                 ,@jj-parsing-default-args
+                                 "--config" ,(format "templates.log_node='%s'"
+                                                     (jj--toml-quote-string jj-log-node-template))))))
+           ;; handle the promise state
+           (add-function :after (process-sentinel proc)
+                         (make-jj-callback-sentinel
+                          (lambda (exit-status event)
+                            (if (eq exit-status 0)
+                                (funcall resolve entries)
+                              (funcall reject (cons proc event))))))))))))
 ;; section:1 ends here
 
 ;; find and update dash buffer
@@ -3696,7 +3810,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 
 ;; [[file:majjik.org::*thing at point][thing at point:1]]
 (defun jj-thing-at-point ()
-  (get-pos-property (point) 'jj-object))
+  (oref (magit-section-at (point)) value))
 
 (defun jj-field-at-point ()
   (get-pos-property (point) 'jj-field))
@@ -3748,6 +3862,10 @@ When it is additionally on a FIELD of the OBJECT, also print that FIELD's name a
 (cl-defmethod jj-inspect-thing ((thing jj-status-lineage-entry))
   "Show the change at point."
   (jj-show (jj-status-lineage-entry-commit-id thing)))
+
+(cl-defmethod jj-inspect-thing ((thing jj-log-entry))
+  "Show the change at point."
+  (jj-show (jj-log-header-commit-id (jj-log-entry-header thing))))
 
 (cl-defmethod jj-inspect-thing ((thing jj-log-header))
   "Show the change at point."
@@ -4210,7 +4328,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
              (setf (jj--process-log-entry-process proc-entry) proc)
              (overlay-put ovl-control 'jj-object proc-entry)
              (jj--set-collapse-process proc-entry t)
-             ;; (overlay-put ovl-err 'face '(:foreground "grey"))
+             ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
              (jj--set-initial-run-status buf-code)
 
              (let ((stderr (get-buffer-process buf-stderr)))
@@ -4218,7 +4336,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                (set-process-sentinel stderr
                                      (jj--make-print-status-sentinel buf-stderr))
                (set-process-filter stderr
-                                   #'jj--ansi-color-filter))
+                                   (jj--make-ansi-color-multi-filter `(,buf-stderr))))
              ;; this always runs before the subsequent promise callbacks,
              ;; which means `resolve' and `reject' are not themselves callbacks
              (add-function :after (process-sentinel proc)
@@ -4269,7 +4387,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
              (setf (jj--process-log-entry-process proc-entry) proc)
              (overlay-put ovl-control 'jj-object proc-entry)
              (jj--set-collapse-process proc-entry t)
-             ;; (overlay-put ovl-err 'face '(:foreground "grey"))
+             ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
              (jj--set-initial-run-status buf-code)
 
              (when output-buffer
@@ -4523,7 +4641,11 @@ Returns the raw process, not the combined handler."
                  (jj-cmd-async-named name cmd nil :silent)
                  nil
                  (jj--call-each
-                  #'jj-see-secret-log-fail
+                  (jj-post-message
+                   (jj-format-trimmed
+                       #'jj-format-see-secret-log
+                     #'jj-format-simple-fail
+                     #'jj-format-stderr))
                   #'jj-print-crash
                   #'jj-kill-output)
                  #'jj-kill-error)
