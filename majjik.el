@@ -2886,7 +2886,7 @@ Reverted buffer is the one that was active when this function was called."
 (defun jj-jump-find-object (pred)
   (cl-loop for pos = (point-min) then (next-single-property-change pos 'jj-object)
            while pos
-           for obj = (get-pos-property pos 'jj-object)
+           for obj = (jj-thing-at pos)
            when (funcall pred obj) return (goto-char pos)))
 
 (defun jj-jump-to-thing (thing &optional test)
@@ -3849,8 +3849,14 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 ;; thing at point
 
 ;; [[file:majjik.org::*thing at point][thing at point:1]]
+(defun jj-thing-at (pos)
+  (or (get-pos-property pos 'jj-object)
+      (if-let ((sec (magit-section-at pos)))
+          (oref sec value))))
+
 (defun jj-thing-at-point ()
-  (oref (magit-section-at (point)) value))
+  (or (jj-thing-at (point))
+      (user-error "Nothing relevant at point")))
 
 (defun jj-field-at-point ()
   (get-pos-property (point) 'jj-field))
@@ -4588,7 +4594,7 @@ Sometimes this does not actually succeed at killing the process."
 (defun jj--signal-process-at-point (pos signal)
   "Send SIGNAL to the process at POS."
   (interactive "d")
-  (if-let ((proc-entry (get-pos-property pos 'jj-object)))
+  (if-let ((proc-entry (jj-thing-at pos)))
       (if (jj--process-log-entry-p proc-entry)
           (if-let ((proc (jj--process-log-entry-process proc-entry)))
               (if (process-live-p proc)
@@ -4599,18 +4605,19 @@ Sometimes this does not actually succeed at killing the process."
                       (child (message "proc has child process %s" child)
                              (when (yes-or-no-p "signal child?")
                                (signal-process child signal))))
-                    (message "sending %s to %s" signal proc)
+                    (message "sending %s to `%s'" signal proc)
                     (signal-process proc signal))
-                (user-error "process %s already stopped" proc))
+                (user-error "process `%s' already stopped" proc))
             (user-error "process %s has not started" (jj--process-log-entry-name proc-entry)))
         (user-error "not a process: %s" proc-entry))
-    (user-error "not at a process object")))
+    (user-error "not at a jj object")))
 
 (defun jj--toggle-collapse-process-at-point (pos)
   "Given a `jj--process-log-entry' at POS, toggle its collapsed state, or collapse it if it is empty."
   (interactive "d")
   (jj--toggle-collapse-process
-   (get-pos-property pos 'jj-object)))
+   (or (jj-thing-at pos)
+       (user-error "No process at point"))))
 
 (defun jj--toggle-collapse-process (proc-entry)
   "Given a `jj--process-log-entry' PROC-ENTRY, toggle its collapsed state, or collapse it if it is empty."

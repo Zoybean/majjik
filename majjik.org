@@ -615,10 +615,8 @@
   Returns an alist of buffer regions. For each LABEL, the returned alist contains an
   entry (LABEL START . END) where START and END are markers to where the
   corresponding labeled string starts and ends."
-    (xo/insert-sectioned header-parts
+    (jj--insert-sectioned header-parts
                          #'magit-insert-heading))
-
-
 #+end_src
 ****** TODO draft replacement
 #+begin_src elisp
@@ -641,7 +639,7 @@
                     :stdout
                     :stderr
                     :end)
-              `(,(jj--insert-sectioned-heading
+              `(,(xo/insert-sectioned-heading
                   `(:start
                     (:code . "   ")
                     "> jj "
@@ -653,7 +651,7 @@
                               (mapconcat #'shell-quote-argument cmd " ")))
                     "\n"
                     :content))
-                ,(jj--insert-sectioned-heading
+                ,(jj--insert-sectioned
                   `(:stdout
                     ,inv
                     :stderr
@@ -3077,7 +3075,7 @@ this might not actually work. I'm big sus actually.
   (defun jj-jump-find-object (pred)
     (cl-loop for pos = (point-min) then (next-single-property-change pos 'jj-object)
              while pos
-             for obj = (get-pos-property pos 'jj-object)
+             for obj = (jj-thing-at pos)
              when (funcall pred obj) return (goto-char pos)))
 
   (defun jj-jump-to-thing (thing &optional test)
@@ -4092,8 +4090,14 @@ need error handling in these. but I do like them being synchronous i think.
 #+end_src
 **** thing at point
 #+begin_src elisp
+  (defun jj-thing-at (pos)
+    (or (get-pos-property pos 'jj-object)
+        (if-let ((sec (magit-section-at pos)))
+            (oref sec value))))
+
   (defun jj-thing-at-point ()
-    (oref (magit-section-at (point)) value))
+    (or (jj-thing-at (point))
+        (user-error "Nothing relevant at point")))
 
   (defun jj-field-at-point ()
     (get-pos-property (point) 'jj-field))
@@ -4149,7 +4153,7 @@ need error handling in these. but I do like them being synchronous i think.
   (cl-defmethod jj-inspect-thing ((thing jj-log-entry))
     "Show the change at point."
     (jj-show (jj-log-header-commit-id (jj-log-entry-header thing))))
-  
+
   (cl-defmethod jj-inspect-thing ((thing jj-log-header))
     "Show the change at point."
     (jj-show (jj-log-header-commit-id thing)))
@@ -4870,7 +4874,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
   (defun jj--signal-process-at-point (pos signal)
     "Send SIGNAL to the process at POS."
     (interactive "d")
-    (if-let ((proc-entry (get-pos-property pos 'jj-object)))
+    (if-let ((proc-entry (jj-thing-at pos)))
         (if (jj--process-log-entry-p proc-entry)
             (if-let ((proc (jj--process-log-entry-process proc-entry)))
                 (if (process-live-p proc)
@@ -4881,18 +4885,19 @@ might actually not use these as I need a lexical variable anyway in most cases w
                         (child (message "proc has child process %s" child)
                                (when (yes-or-no-p "signal child?")
                                  (signal-process child signal))))
-                      (message "sending %s to %s" signal proc)
+                      (message "sending %s to `%s'" signal proc)
                       (signal-process proc signal))
-                  (user-error "process %s already stopped" proc))
+                  (user-error "process `%s' already stopped" proc))
               (user-error "process %s has not started" (jj--process-log-entry-name proc-entry)))
           (user-error "not a process: %s" proc-entry))
-      (user-error "not at a process object")))
+      (user-error "not at a jj object")))
 
   (defun jj--toggle-collapse-process-at-point (pos)
     "Given a `jj--process-log-entry' at POS, toggle its collapsed state, or collapse it if it is empty."
     (interactive "d")
     (jj--toggle-collapse-process
-     (get-pos-property pos 'jj-object)))
+     (or (jj-thing-at pos)
+         (user-error "No process at point"))))
 
   (defun jj--toggle-collapse-process (proc-entry)
     "Given a `jj--process-log-entry' PROC-ENTRY, toggle its collapsed state, or collapse it if it is empty."
