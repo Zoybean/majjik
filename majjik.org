@@ -542,14 +542,16 @@
     (pop-to-buffer buf))
 
   (define-advice magit-section-show (:after (sec) xo/magit-section-show-args)
+    "Show the default command-line arguments in the process log."
     (pcase (oref sec value)
       (`(:log ,ovl-args)
        (overlay-put ovl-args 'display nil))))
 
   (define-advice magit-section-hide (:after (sec) xo/magit-section-hide-args)
+    "Hide the default command-line arguments in the process log."
     (pcase (oref sec value)
       (`(:log ,ovl-args)
-       (overlay-put ovl-args 'display ""))))
+       (overlay-put ovl-args 'display (propertize "..." 'face 'shadow)))))
 
   (defun xo/modify-section-header (sec fun)
     "Update the heading of SEC by running FUN narrowed to the section's body.
@@ -4886,7 +4888,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
                     ;; there's no way to remove an overlay property except by
                     ;; setting it nil. this still overrides the corresponding
                     ;; text properties, unfortunately
-                    (and collapsed "")))))
+                    (and collapsed (propertize "..." 'face 'shadow))))))
 
   (defvar jj--process-ellipsis "\n"
     "String to show instead of process output when collapsing.")

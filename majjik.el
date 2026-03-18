@@ -4607,7 +4607,7 @@ Sometimes this does not actually succeed at killing the process."
                   ;; there's no way to remove an overlay property except by
                   ;; setting it nil. this still overrides the corresponding
                   ;; text properties, unfortunately
-                  (and collapsed "")))))
+                  (and collapsed (propertize "..." 'face 'shadow))))))
 
 (defvar jj--process-ellipsis "\n"
   "String to show instead of process output when collapsing.")
