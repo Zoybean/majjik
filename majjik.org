@@ -3059,9 +3059,9 @@ this might not actually work. I'm big sus actually.
           (dash-buf (current-buffer)))
       (cl-labels ((end-ok (_ok)
                     (unless silent
-                      (message "`jj status' ok")))
+                      (message "%s" (jj--format-simple-ok "status"))))
                   (end-err (errs)
-                    (message "jj status update failed: %s" errs)))
+                    (message "%s" (jj--format-simple-fail "status"))))
         (unless silent
           (message "`jj status'..."))
         (promise-then
@@ -4327,66 +4327,72 @@ might actually not use these as I need a lexical variable anyway in most cases w
 
 **** post-command tasks
 #+begin_src elisp
-  (defun jj-revert-silently (proc)
+  (defun jj--proc-revert-silently (proc)
+    (jj--revert-silently
+       (buffer-local-value 'default-directory
+                           (process-buffer (jj-process-process proc)))))
+  (defun jj--revert-silently (dir)
     (let ((jj--silent-revert t))
       ;; set silent revert, rather than inhibiting messages
       ;; because it's asynchronous, so the binding wouldnt last, and
       ;; because we only want to prevent non-error messages
       ;; and the revert function looks for silent-revert to suppress those.
-      (jj-revert-dash-buffer-async
-       (buffer-local-value 'default-directory
-                           (process-buffer (jj-process-process proc))))))
+      (jj-revert-dash-buffer-async dir)))
 
-  (defun jj-post-message (&rest builders)
+  (defun jj--proc-post-message (&rest builders)
     (lambda (proc)
       (message "%s" (mapconcat (lambda (fn)
                                  (funcall fn proc))
                                builders))))
 
-  (defun jj-trim-with-editor (proc)
+  (defun jj--proc-trim-with-editor (proc)
     "Delete all occurrences of the \"Waiting for Emacs\" message from the start of PROC's output buffer."
     (let ((buf (process-buffer (jj-process-process proc))))
       (with-current-buffer buf
-        (save-excursion
-          (goto-char (point-min))
-          (while (looking-at (rx line-start
-                                 "Waiting for Emacs..."
-                                 line-end))
-            (delete-line))))))
+        (jj--trim-with-editor))))
+  (defun jj--trim-with-editor ()
+    "Delete all occurrences of the \"Waiting for Emacs\" message from the start of the buffer."
+    (save-excursion
+      (goto-char (point-min))
+      (while (looking-at (rx line-start
+                             "Waiting for Emacs..."
+                             line-end))
+        (delete-line))))
 
-  (defun jj-format-simple-ok (proc)
-    (format "`jj %s' ok. " (jj--replace-newlines
-                            (process-name (jj-process-process proc)))))
+  (defun jj--proc-format-simple-ok (proc)
+    (jj--format-simple-ok (process-name (jj-process-process proc))))
+  (defun jj--format-simple-ok (name)
+    (format-message "`jj %s' %s. " (jj--replace-newlines name)
+            (propertize "ok" 'face 'success)))
 
-  (defun jj-format-simple-fail (proc)
-    (format "`jj %s' failed. " (jj--replace-newlines
-                                (process-name (jj-process-process proc)))))
+  (defun jj--proc-format-simple-fail (proc)
+    (jj--format-simple-fail (process-name (jj-process-process proc))))
+  (defun jj--format-simple-fail (name)
+    (format-message "`jj %s' %s. " (jj--replace-newlines name)
+            (propertize "failed" 'face 'error)))
 
-  (defun jj-format-see-log (_proc)
+  (defun jj--proc-format-see-log (_proc)
+    (jj--format-see-log))
+  (defun jj--format-see-log ()
     (let ((msg (substitute-command-keys "\\[jj-pop-to-command-log]")))
       (format "Type %s to see full logs." msg)))
 
-  (defun jj-format-see-secret-log (_proc)
+  (defun jj--proc-format-see-secret-log (_proc)
+    (jj--format-see-secret-log))
+  (defun jj--format-see-secret-log ()
     (let ((msg (substitute-command-keys "\\[jj-pop-to-command-log] \\<jj-process-mode-map>\\[jj-set-verbosity-level]")))
       (format "Type %s to see system error logs." msg)))
 
-  (defun jj-format-stderr-verbose (proc)
-    (let ((err-str (with-current-buffer (jj-process-stderr proc)
-                     (jj--apply-font-lock-properties
-                      (buffer-string)))))
-      (if (jj--empty-string-p err-str)
-          (format "no error output. %s" (jj-process-event proc))
-        (concat "\n" (s-chomp err-str)))))
+  (defun jj--proc-format-stderr-verbose (proc)
+    (jj--format-buffer-content
+     (process-buffer (jj-process-process proc))
+     (lambda ()
+       (format "no error output. %s" (jj-process-event proc)))))
 
-  (defun jj-format-stderr (proc)
-    (let ((err-str (with-current-buffer (jj-process-stderr proc)
-                     (jj--apply-font-lock-properties
-                      (buffer-string)))))
-      (if (jj--empty-string-p err-str)
-          ""
-        (concat "\n" (s-chomp err-str)))))
+  (defun jj--proc-format-stderr (proc)
+    (jj--format-buffer-content (jj-process-stderr proc)))
 
-  (defun jj-format-trimmed (log-referrer &rest builders)
+  (defun jj--proc-format-trimmed (log-referrer &rest builders)
     (declare (indent 1))
     (lambda (proc)
       (let ((string)
@@ -4410,50 +4416,44 @@ might actually not use these as I need a lexical variable anyway in most cases w
               (:else
                (s-chomp string))))))
 
-  (defun jj-format-stdout-verbose (proc)
-    (let ((out-str (with-current-buffer (process-buffer (jj-process-process proc))
-                     (jj--apply-font-lock-properties
-                      (buffer-string)))))
-      (if (jj--empty-string-p out-str)
-          (format "no standard output. %s" (jj-process-event proc))
-        (concat "\n" (s-chomp out-str)))))
+  (defun jj--proc-format-stdout-verbose (proc)
+    (jj--format-buffer-content
+     (process-buffer (jj-process-process proc))
+     (lambda ()
+       (format "no standard output. %s" (jj-process-event proc)))))
 
-  (defun jj-format-stdout (proc)
-    (let ((out-str (with-current-buffer (process-buffer (jj-process-process proc))
-                     (jj--apply-font-lock-properties
-                      (buffer-string)))))
-      (if (jj--empty-string-p out-str)
-          ""
-        (concat "\n" (s-chomp out-str)))))
+  (defun jj--proc-format-stdout (proc)
+    (jj--format-buffer-content (process-buffer (jj-process-process proc))))
 
-  (defun jj-kill-output (proc)
-    (let* ((buf (process-buffer (jj-process-process proc))))
-      (kill-buffer buf)))
+  (defun jj--format-buffer-content (buf &optional on-empty)
+    (let ((str (with-current-buffer buf
+                 (jj--apply-font-lock-properties
+                  (buffer-string)))))
+      (if (jj--empty-string-p str)
+          (if on-empty
+              (funcall on-empty)
+            "")
+        (concat "\n" (s-chomp str)))))
 
-  (defun jj-kill-error (proc)
-    (let* ((buf (jj-process-stderr proc)))
-      (kill-buffer buf)))
+  (defun jj--proc-kill-output (proc)
+    (kill-buffer (process-buffer (jj-process-process proc))))
+  (defun jj--proc-kill-error (proc)
+    (kill-buffer (jj-process-stderr proc)))
 
-  (defun jj-print-crash (proc)
+  (defun jj--proc-print-crash (proc)
     (jj--insert-crash-event (jj-process-stderr proc) (jj-process-event proc)))
 
-  (defun jj-view-output (proc)
-    (let ((buf (process-buffer (jj-process-process proc))))
-      (if (jj--empty-buffer-p buf)
-          (kill-buffer buf)
-        (with-current-buffer buf
-          (font-lock-mode)
-          (view-mode-enter nil #'kill-buffer))
-        (pop-to-buffer buf))))
-
-  (defun jj-view-error (proc)
-    (let ((stderr (jj-process-stderr proc)))
-      (if (jj--empty-buffer-p stderr)
-          (kill-buffer stderr)
-        (with-current-buffer stderr
-          (font-lock-mode)
-          (view-mode-enter nil #'kill-buffer))
-        (pop-to-buffer stderr))))
+  (defun jj--proc-view-output (proc)
+    (jj--view-buf (process-buffer (jj-process-process proc))))
+  (defun jj--proc-view-error (proc)
+    (jj--view-buf (jj-process-stderr proc)))
+  (defun jj--view-buf (buf)
+    (if (jj--empty-buffer-p buf)
+        (kill-buffer buf)
+      (with-current-buffer buf
+        (font-lock-mode)
+        (view-mode-enter nil #'kill-buffer))
+      (pop-to-buffer buf)))
 #+end_src
 
 **** helpers
@@ -4988,14 +4988,14 @@ main functions intended to run commands for various purposes:
                      (jj-cmd-async-named name cmd nil :silent)
                      nil
                      (jj--call-each
-                      (jj-post-message
-                       (jj-format-trimmed
-                           #'jj-format-see-secret-log
-                         #'jj-format-simple-fail
-                         #'jj-format-stderr))
-                      #'jj-print-crash
-                      #'jj-kill-output)
-                     #'jj-kill-error)
+                      (jj--proc-post-message
+                       (jj--proc-format-trimmed
+                           #'jj--proc-format-see-secret-log
+                         #'jj--proc-format-simple-fail
+                         #'jj--proc-format-stderr))
+                      #'jj--proc-print-crash
+                      #'jj--proc-kill-output)
+                     #'jj--proc-kill-error)
                     #'jj-process-process)))
 
   ;; TODO there's some lingering buffers left around, possibly by this.
@@ -5006,29 +5006,29 @@ main functions intended to run commands for various purposes:
     (jj--peek
      (jj-cmd-async cmd)
      (jj--call-each
-      #'jj-trim-with-editor
-      (jj-post-message
-       (jj-format-trimmed
-           #'jj-format-see-log
-         #'jj-format-simple-ok
-         #'jj-format-stderr))
-      #'jj-view-output)
+      #'jj--proc-trim-with-editor
+      (jj--proc-post-message
+       (jj--proc-format-trimmed
+           #'jj--proc-format-see-log
+         #'jj--proc-format-simple-ok
+         #'jj--proc-format-stderr))
+      #'jj--proc-view-output)
      (jj--call-each
       (if verbose-error
-          (jj-post-message
-           #'jj-format-simple-fail
-           #'jj-format-stderr)
-        (jj-post-message
-         (jj-format-trimmed
-             #'jj-format-see-log
-           #'jj-format-simple-fail
-           #'jj-format-stderr)))
-      #'jj-print-crash
-      #'jj-kill-output)
+          (jj--proc-post-message
+           #'jj--proc-format-simple-fail
+           #'jj--proc-format-stderr)
+        (jj--proc-post-message
+         (jj--proc-format-trimmed
+             #'jj--proc-format-see-log
+           #'jj--proc-format-simple-fail
+           #'jj--proc-format-stderr)))
+      #'jj--proc-print-crash
+      #'jj--proc-kill-output)
      (jj--call-each
       (unless no-revert
-        #'jj-revert-silently)
-      #'jj-kill-error)))
+        #'jj--proc-revert-silently)
+      #'jj--proc-kill-error)))
 
   (defun jj-cmd-async-message (cmd &optional no-revert verbose-error)
     "Run jj command CMD asynchronously, and message the combined stdout and stderr output in the echo area."
@@ -5036,29 +5036,29 @@ main functions intended to run commands for various purposes:
     (jj--peek
      (jj-cmd-async cmd)
      (jj--call-each
-      #'jj-trim-with-editor
-      (jj-post-message
-       (jj-format-trimmed
-           #'jj-format-see-log
-         #'jj-format-simple-ok
-         #'jj-format-stdout
-         #'jj-format-stderr)))
+      #'jj--proc-trim-with-editor
+      (jj--proc-post-message
+       (jj--proc-format-trimmed
+           #'jj--proc-format-see-log
+         #'jj--proc-format-simple-ok
+         #'jj--proc-format-stdout
+         #'jj--proc-format-stderr)))
      (jj--call-each
       (if verbose-error
-          (jj-post-message
-           #'jj-format-simple-fail
-           #'jj-format-stderr)
-        (jj-post-message
-         (jj-format-trimmed
-             #'jj-format-see-log
-           #'jj-format-simple-fail
-           #'jj-format-stderr)))
-      #'jj-print-crash)
+          (jj--proc-post-message
+           #'jj--proc-format-simple-fail
+           #'jj--proc-format-stderr)
+        (jj--proc-post-message
+         (jj--proc-format-trimmed
+             #'jj--proc-format-see-log
+           #'jj--proc-format-simple-fail
+           #'jj--proc-format-stderr)))
+      #'jj--proc-print-crash)
      (jj--call-each
       (unless no-revert
-        #'jj-revert-silently)
-      #'jj-kill-error
-      #'jj-kill-output)))
+        #'jj--proc-revert-silently)
+      #'jj--proc-kill-error
+      #'jj--proc-kill-output)))
 
 #+end_src
 
