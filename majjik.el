@@ -2600,10 +2600,6 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
   "Tag to use to identify jj command-log buffers.
 This is concatenated with an identifier for the repository to define the buffer name for the command log. Let-bind this in order to temporarily use a different buffer for a particular log entry.")
 
-(defvar jj--cmd-log-secret-buf-name-prefix "jj-command-secret-log"
-  "Tag to use to identify jj's secret command-log buffers.
-This is concatenated with an identifier for the repository to define the buffer name for the secret command log.")
-
 (defvar jj--cmd-show-verbosity 'system-error
   "Verbosity level to show in the command-log. This level and all less-verbose levels are visible. This value is only used for modeline display and should only be set via `jj-set-verbosity-level'.")
 (defvar jj--cmd-verbosity 'user
@@ -2641,11 +2637,6 @@ This is concatenated with an identifier for the repository to define the buffer 
   "Open the command-log buffer for the current repo."
   (interactive (list default-directory))
   (pop-to-buffer (jj--get-command-log-buf repo-dir)))
-
-(defun jj-pop-to-secret-command-log (repo-dir)
-  (interactive (list default-directory))
-  (dlet ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-    (jj-pop-to-command-log repo-dir)))
 
 (defun jj--get-command-log-buf (repo-dir)
   "Get or create the command-log buffer for the given REPO-DIR, and ensure it is in the correct mode."
@@ -3070,12 +3061,9 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
 (defun jj-tracked-files-async ()
   "Return the list of all tracked files in the current repo."
   (promise-then
-   (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-     ;; let-binding works because the buffer is set up synchronously,
-     ;; before the async dispatch
-     (jj-cmd-async--for-status "file-list"
-         `("file" "list"
-           "-T" ,(jj-status-file-tracked-template 'self))))
+   (jj-cmd-async--for-status "file-list"
+     `("file" "list"
+       "-T" ,(jj-status-file-tracked-template 'self)))
    (lambda (proc)
      (prog1
          (with-current-buffer (process-buffer proc)
@@ -3094,13 +3082,10 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
              collect entry)))
 
 (defun jj--check-files-ignored (untracked)
-  (promise-then (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-                  ;; let-binding works because the buffer is set up synchronously,
-                  ;; before the async dispatch
-                  (jj-cmd-async--for-status "git-ignored"
-                      `("util" "exec" "--"
-                        "git" "ls-files"
-                        "--others" "--ignored" "--exclude-standard" "--directory" "-z" "--" ,@untracked)))
+  (promise-then (jj-cmd-async--for-status "git-ignored"
+                  `("util" "exec" "--"
+                    "git" "ls-files"
+                    "--others" "--ignored" "--exclude-standard" "--directory" "-z" "--" ,@untracked))
                 (lambda (proc)
                   (with-current-buffer (process-buffer proc)
                     (prog1
@@ -3163,24 +3148,21 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                 ,@jj-parsing-default-args))))
 
 (defun jj--status-bookmark-conflicts ()
-  (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-    ;; let-binding works because the buffer is set up synchronously,
-    ;; before the async dispatch
-    (promise-then (jj-cmd-async--for-status "bookmarks-conflicted"
-                      `("bookmark" "list"
-                        "--conflicted"
-                        "-T" ,(jj-status-bookmark-conflict-template 'self)))
-                  (lambda (proc)
-                    (with-current-buffer (process-buffer proc)
-                      (prog1
-                          (cl-loop initially (goto-char (point-min))
-                                   while (progn
-                                           (unless (bolp)
-                                             (forward-char 1))
-                                           (not (eobp)))
-                                   for entry = (read-jj-status-bookmark-conflict)
-                                   collect entry)
-                        (kill-buffer (process-buffer proc))))))))
+  (promise-then (jj-cmd-async--for-status "bookmarks-conflicted"
+                  `("bookmark" "list"
+                    "--conflicted"
+                    "-T" ,(jj-status-bookmark-conflict-template 'self)))
+                (lambda (proc)
+                  (with-current-buffer (process-buffer proc)
+                    (prog1
+                        (cl-loop initially (goto-char (point-min))
+                                 while (progn
+                                         (unless (bolp)
+                                           (forward-char 1))
+                                         (not (eobp)))
+                                 for entry = (read-jj-status-bookmark-conflict)
+                                 collect entry)
+                      (kill-buffer (process-buffer proc)))))))
 ;; jj-bookmark-list for bookmark conflicts:1 ends here
 
 ;; Combined struct and output formatter
@@ -3202,57 +3184,54 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
 
 (defun jj--status-main-status ()
   "Return part of the alist required to make a jj-status object."
-  (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
-    ;; let-binding works because the buffer is set up synchronously,
-    ;; before the async dispatch
-    (promise-then (jj-cmd-async--for-status "show-status"
-                      `("show"
-                        "--no-patch"
-                        "-T" ,(jj-show-status-delim-template 'self)))
-                  (lambda (proc)
-                    (with-current-buffer (process-buffer proc)
-                      (prog1
-                          (with-error-label "read main status"
-                            (with-error-context (lambda (e)
-                                                  (format "err: %s:\n%s\n%s><"
-                                                          e
-                                                          (buffer-substring (line-beginning-position) (line-end-position))
-                                                          (make-string (- (point) (line-beginning-position)) ?\s)))
-                              (cl-labels ((more ()
-                                            (with-error-label "not at line bounds"
-                                              (jj--re-step-over (rx (or line-start string-end "\n"))))
-                                            (not (or (eobp)
-                                                     (looking-at (rx (opt "\n")
-                                                                     "--\n")))))
-                                          (step-section ()
-                                            (more)
-                                            (with-error-label "section separator"
-                                              (jj--re-step-over (rx (opt "\n")
-                                                                    "--\n")))))
-                                `(:files-changed
-                                  ,(with-error-label "files-changed"
-                                     (cl-loop initially (goto-char (point-min))
-                                              while (more)
-                                              for entry = (read-jj-status-wc-change)
-                                              collect entry))
-                                  :commit-working-copy
-                                  ,(with-error-label "commit-working-copy"
-                                     (progn (step-section)
-                                            (read-jj-status-lineage-entry)))
-                                  :commits-parent
-                                  ,(with-error-label "commits-parent"
-                                     (cl-loop initially (step-section)
-                                              while (more)
-                                              for entry = (read-jj-status-lineage-entry)
-                                              collect entry))
-                                  :files-conflict
-                                  ,(with-error-label "files-conflict"
-                                     (cl-loop initially (step-section)
-                                              while (more)
-                                              for entry = (read-jj-status-file-conflict)
-                                              collect entry))))))
-                        (should (eobp))
-                        (kill-buffer)))))))
+  (promise-then (jj-cmd-async--for-status "show-status"
+                  `("show"
+                    "--no-patch"
+                    "-T" ,(jj-show-status-delim-template 'self)))
+                (lambda (proc)
+                  (with-current-buffer (process-buffer proc)
+                    (prog1
+                        (with-error-label "read main status"
+                          (with-error-context (lambda (e)
+                                                (format "err: %s:\n%s\n%s><"
+                                                        e
+                                                        (buffer-substring (line-beginning-position) (line-end-position))
+                                                        (make-string (- (point) (line-beginning-position)) ?\s)))
+                            (cl-labels ((more ()
+                                          (with-error-label "not at line bounds"
+                                            (jj--re-step-over (rx (or line-start string-end "\n"))))
+                                          (not (or (eobp)
+                                                   (looking-at (rx (opt "\n")
+                                                                   "--\n")))))
+                                        (step-section ()
+                                          (more)
+                                          (with-error-label "section separator"
+                                            (jj--re-step-over (rx (opt "\n")
+                                                                  "--\n")))))
+                              `(:files-changed
+                                ,(with-error-label "files-changed"
+                                   (cl-loop initially (goto-char (point-min))
+                                            while (more)
+                                            for entry = (read-jj-status-wc-change)
+                                            collect entry))
+                                :commit-working-copy
+                                ,(with-error-label "commit-working-copy"
+                                   (progn (step-section)
+                                          (read-jj-status-lineage-entry)))
+                                :commits-parent
+                                ,(with-error-label "commits-parent"
+                                   (cl-loop initially (step-section)
+                                            while (more)
+                                            for entry = (read-jj-status-lineage-entry)
+                                            collect entry))
+                                :files-conflict
+                                ,(with-error-label "files-conflict"
+                                   (cl-loop initially (step-section)
+                                            while (more)
+                                            for entry = (read-jj-status-file-conflict)
+                                            collect entry))))))
+                      (should (eobp))
+                      (kill-buffer))))))
 
 (defun jj-show-status-delim-template (self)
   (jj-template
@@ -3429,7 +3408,8 @@ Also sets `jj--current-status' in the initial buffer when the status process com
            (magit-section-update-highlight t)))))))
 
 (defun jj--get-dash-data ()
-  (let ((jj--cmd-log-buf-name-prefix jj--cmd-log-secret-buf-name-prefix))
+  (let ((jj--cmd-verbosity 'system)
+        (jj--cmd-error-verbosity 'system-error))
     (promise-all
      `[,(jj-log-entries-async)
        ,(jj-get-status-async)])))
@@ -4093,8 +4073,8 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
     (format "Type %s to see full logs." msg)))
 
 (defun jj-format-see-secret-log (_proc)
-  (let ((msg (substitute-command-keys "\\[jj-pop-to-secret-command-log] or \\[jj-pop-to-command-log] \\<jj-process-mode-map>\\[jj-pop-to-secret-command-log]")))
-    (format "Type %s to see full logs." msg)))
+  (let ((msg (substitute-command-keys "\\[jj-pop-to-command-log] \\<jj-process-mode-map>\\[jj-set-verbosity-level]")))
+    (format "Type %s to see system error logs." msg)))
 
 (defun jj-format-stderr-verbose (proc)
   (let ((err-str (with-current-buffer (jj-process-stderr proc)
@@ -4550,7 +4530,7 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
   :parent jj-inspect-mode-map
   "TAB" #'jj--toggle-collapse-process-at-point
   "k" #'jj--kill-process-at-point
-  "$" #'jj-pop-to-secret-command-log)
+  "$" #'jj-set-verbosity-level)
 
 (defvar-keymap jj-process-mode--verbosity-modeline-map
   "<mode-line> <mouse-1>" #'jj-set-verbosity-level)
@@ -4714,24 +4694,28 @@ Sometimes this does not actually succeed at killing the process."
 
 This means on failure refer to secret log and kill associated buffers, and on success, just kill the error buffer.
 Returns the raw process, not the combined handler."
-  (promise-then (jj--peek
-                 (jj-cmd-async-named name cmd nil :silent)
-                 nil
-                 (jj--call-each
-                  (jj-post-message
-                   (jj-format-trimmed
-                       #'jj-format-see-secret-log
-                     #'jj-format-simple-fail
-                     #'jj-format-stderr))
-                  #'jj-print-crash
-                  #'jj-kill-output)
-                 #'jj-kill-error)
-                #'jj-process-process))
+  (declare (indent 1))
+  (let ((jj--cmd-verbosity 'system)
+        (jj--cmd-error-verbosity 'system-error))
+    (promise-then (jj--peek
+                   (jj-cmd-async-named name cmd nil :silent)
+                   nil
+                   (jj--call-each
+                    (jj-post-message
+                     (jj-format-trimmed
+                         #'jj-format-see-secret-log
+                       #'jj-format-simple-fail
+                       #'jj-format-stderr))
+                    #'jj-print-crash
+                    #'jj-kill-output)
+                   #'jj-kill-error)
+                  #'jj-process-process)))
 
 ;; TODO there's some lingering buffers left around, possibly by this.
 ;; look into it.
 (defun jj-cmd-async-view (cmd &optional no-revert verbose-error)
   "Run jj command CMD asynchronously, view the stdout output in its own buffer (if there is any), and message the stderr output in the echo area."
+  (declare (indent 1))
   (jj--peek
    (jj-cmd-async cmd)
    (jj--call-each
@@ -4761,6 +4745,7 @@ Returns the raw process, not the combined handler."
 
 (defun jj-cmd-async-message (cmd &optional no-revert verbose-error)
   "Run jj command CMD asynchronously, and message the combined stdout and stderr output in the echo area."
+  (declare (indent 1))
   (jj--peek
    (jj-cmd-async cmd)
    (jj--call-each
