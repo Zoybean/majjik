@@ -420,8 +420,8 @@
                  " "
                  (:cmd . ,(jj--replace-newlines
                            (mapconcat #'shell-quote-argument cmd " ")))
-                 :content
                  "\n"
+                 :content
                  :stdout
                  ,inv
                  :stderr
@@ -604,56 +604,57 @@
     "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, MIN-CMD is a shorter version of CMD, e.g. omitting majjik's default arguments."
     (let ((repo-dir default-directory))
       (with-current-buffer (jj--get-command-log-buf repo-dir)
-        (let* ((inhibit-read-only t)
-               (display-name (jj--replace-newlines name)))
+        (let ((inhibit-read-only t)
+              (display-name (jj--replace-newlines name))
+              ;; pretending to be a zero-width-space
+              (inv (propertize " " 'display ""))
+              ;; real zero-width-space
+              (zws "\u200B"))
           (goto-char (point-max))
-          (magit-insert-section sec
-            (jj-proc-log-section)
-            (map-let (:start
-                      :code 
-                      :args
-                      :cmd
-                      :content
-                      :stdout
-                      :stderr
-                      :end)
-                `(,@(xo/insert-sectioned-heading
-                     `(:start
-                       (:code . "   ")
-                       "> jj "
-                       (:args . ,(propertize (jj--replace-newlines
-                                              (mapconcat #'shell-quote-argument hide-args " "))
-                                             'font-lock-face 'shadow))
-                       " "
-                       (:cmd . ,(jj--replace-newlines
-                                 (mapconcat #'shell-quote-argument cmd " ")))
-                       "\n"))
-                  ,@(xo/insert-sectioned
-                     `(:content
-                       "\n"
-                       :stdout
-                       "\n"
-                       :stderr
-                       "\n"
-                       :end)))
-              (let* ((code-buf (xo/make-narrowed-indirect (format "*code-section %s*" display-name) (car code) (cdr code)))
-                     (stdout (xo/make-narrowed-indirect (format "*stdout-section %s*" display-name) stdout stdout))
-                     (stderr (xo/make-narrowed-indirect (format "*stderr-section %s*" display-name) stderr stderr))
-                     ;; these need to be overlays,
-                     ;; so we can toggle their properties as a unit
-                     (ovl-args (make-overlay (car args) (cdr args)))
-                     (ovl-collapse (make-overlay content end))
-                     ;; these all also need to be overlays,
-                     ;; so they keep applying as text is added
-                     (ovl-control (make-overlay start end)))
-                (make-jj--process-log-entry
-                 :name name
-                 :buf-code code-buf
-                 :buf-stdout stdout
-                 :buf-stderr stderr
-                 :ovl-control ovl-control
-                 :ovl-collapse ovl-collapse
-                 :ovl-args ovl-args))))))))
+          (map-let (:start
+                    :code 
+                    :args
+                    :cmd
+                    :content
+                    :stdout
+                    :stderr
+                    :end)
+              `(,(jj--insert-sectioned-heading
+                  `(:start
+                    (:code . "   ")
+                    "> jj "
+                    (:args . ,(propertize (jj--replace-newlines
+                                           (mapconcat #'shell-quote-argument hide-args " "))
+                                          'font-lock-face 'shadow))
+                    " "
+                    (:cmd . ,(jj--replace-newlines
+                              (mapconcat #'shell-quote-argument cmd " ")))
+                    "\n"
+                    :content))
+                ,(jj--insert-sectioned-heading
+                  `(:stdout
+                    ,inv
+                    :stderr
+                    "\n"
+                    :end)))
+            (let* ((buf-code (jj--make-narrowed-indirect (format "*code-section %s*" display-name) (car code) (cdr code)))
+                   (stdout (jj--make-narrowed-indirect (format "*stdout-section %s*" display-name) stdout stdout))
+                   (stderr (jj--make-narrowed-indirect (format "*stderr-section %s*" display-name) stderr stderr))
+                   ;; these need to be overlays,
+                   ;; so we can toggle their properties as a unit
+                   (ovl-args (make-overlay (car args) (cdr args)))
+                   (ovl-collapse (make-overlay content end))
+                   ;; these all also need to be overlays,
+                   ;; so they keep applying as text is added
+                   (ovl-control (make-overlay start end)))
+              (make-jj--process-log-entry
+               :name name
+               :buf-code buf-code
+               :buf-stdout stdout
+               :buf-stderr stderr
+               :ovl-control ovl-control
+               :ovl-collapse ovl-collapse
+               :ovl-args ovl-args)))))))
 #+end_src
 ****** TODO replacement
 **** sentinels and filters
@@ -4890,7 +4891,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
                     ;; text properties, unfortunately
                     (and collapsed (propertize "..." 'face 'shadow))))))
 
-  (defvar jj--process-ellipsis "\n"
+  (defvar jj--process-ellipsis ""
     "String to show instead of process output when collapsing.")
 #+end_src
 

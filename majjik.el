@@ -410,8 +410,8 @@ When returning both a string result and an exit code, they are returned as a con
                " "
                (:cmd . ,(jj--replace-newlines
                          (mapconcat #'shell-quote-argument cmd " ")))
-               :content
                "\n"
+               :content
                :stdout
                ,inv
                :stderr
@@ -4609,7 +4609,7 @@ Sometimes this does not actually succeed at killing the process."
                   ;; text properties, unfortunately
                   (and collapsed (propertize "..." 'face 'shadow))))))
 
-(defvar jj--process-ellipsis "\n"
+(defvar jj--process-ellipsis ""
   "String to show instead of process output when collapsing.")
 ;; command log mode:1 ends here
 
