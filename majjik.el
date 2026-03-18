@@ -2624,6 +2624,12 @@ This is concatenated with an identifier for the repository to define the buffer 
   (cl-position v jj--cmd-verbosity-sequence
                :key #'car))
 
+(defun jj--select-event-window ()
+  (cl-loop for evt across (this-command-keys-vector)
+           when (mouse-event-p evt)
+           return (let ((pos (cadr evt)))
+                    (select-window (posn-window pos)))))
+
 (defun jj-set-verbosity-level (v)
   ;; (progn
   ;;                (when-let ((ev (this-command-keys-vector)))
@@ -2632,7 +2638,8 @@ This is concatenated with an identifier for the repository to define the buffer 
   ;;                           return (select-window ))
   ;;                (list (intern-soft (completing-read "Verbosity level: " jj--cmd-verbosity-sequence nil nil nil t))
   ;;                    )))
-  (interactive (list (intern-soft (completing-read "Verbosity level: " jj--cmd-verbosity-sequence))))
+  (interactive (progn (jj--select-event-window)
+                      (list (intern-soft (completing-read "Verbosity level: " jj--cmd-verbosity-sequence)))))
   (setq jj--cmd-show-verbosity v)
   (mapc #'remove-from-invisibility-spec (mapcar #'car jj--cmd-verbosity-sequence))
   (mapc #'add-to-invisibility-spec (jj-get-verbosity-invisibility-spec v))
