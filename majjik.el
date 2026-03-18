@@ -362,24 +362,46 @@ When returning both a string result and an exit code, they are returned as a con
 
 (cl-defstruct jj--process-log-entry
   "The buffers representing the various sections of a jj process' output"
-  (process nil :type process
-           :documentation "The process object itself.")
-  (name nil :type string
-        :documentation "Description of the process, e.g. the command line used to invoke it.")
-  (buf-code nil :type buffer
-            :documentation "Buffer containing only the area where exit code of the process will be written.")
-  (buf-stdout nil :type buffer
-              :documentation "Buffer for process standard output.")
-  (buf-stderr nil :type buffer
-              :documentation "Buffer for process standard error.")
-  (ovl-control nil :type overlay
-               :documentation "Overlay for the area through which the user may interact with the process.")
-  (ovl-args nil :type overlay
-            :documentation "Overlay for the default args string, which should be hidden when collapsed.")
-  (ovl-collapse nil :type overlay
-                :documentation "Overlay for the area which should be collapsible.")
-  (ovl-err nil :type overlay
-           :documentation "Overlay for the process standard error."))
+  (process
+   nil
+   :type process
+   :documentation "The process object itself.")
+  (name
+   nil
+   :type string
+   :documentation "Description of the process, e.g. the command line used to invoke it.")
+  (buf-code
+   nil
+   :type buffer
+   :documentation "Buffer containing only the area where exit code of the process will be written.")
+  (buf-stdout
+   nil
+   :type buffer
+   :documentation "Buffer for process standard output.")
+  (buf-stderr
+   nil
+   :type buffer
+   :documentation "Buffer for process standard error.")
+  (ovl-control
+   nil
+   :type overlay
+   :documentation "Overlay for the area through which the user may interact with the process.")
+  (ovl-args
+   nil
+   :type overlay
+   :documentation "Overlay for the default args string, which should be hidden when collapsed.")
+  (ovl-collapse
+   nil
+   :type overlay
+   :documentation "Overlay for the area which should be collapsible.")
+  (ovl-err
+   nil
+   :type overlay
+   :documentation "Overlay for the process standard error.")
+  (verbosity
+   nil
+   :type '(member critical error user system debug)
+   :documentation "Verbosity level for the log entry. User settings can show or hide entries by verbosity."))
 
 (defun jj--make-process-log-entry (name cmd &optional min-cmd hide-args)
   "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, MIN-CMD is a shorter version of CMD, e.g. omitting majjik's default arguments."
@@ -2582,6 +2604,39 @@ This is concatenated with an identifier for the repository to define the buffer 
   "Tag to use to identify jj's secret command-log buffers.
 This is concatenated with an identifier for the repository to define the buffer name for the secret command log.")
 
+(defvar jj--cmd-show-verbosity 'system-error
+  "Verbosity level to show in the command-log. This level and all less-verbose levels are visible. This value is only used for modeline display and should only be set via `jj-set-verbosity-level'.")
+(defvar jj--cmd-verbosity 'user
+  "Verbosity of each entry-to-be. Dynamically bound around invocation to affect particular commands.")
+(defvar jj--cmd-error-verbosity 'error
+  "Verbosity of each entry-to-be when it results in an error. Dynamically bound around invocation to affect particular commands.")
+(defconst jj--cmd-verbosity-sequence '((critical "Critical errors.")
+                                       (error "Errors from user-issued commands")
+                                       (user "Output of user-issued commands")
+                                       (system-error "Errors from system commands, e.g. dash regeneration")
+                                       (system "System messages, e.g. from dash regeneration")
+                                       (debug "Verbose messages, for debugging")))
+
+(defun jj-get-verbosity-invisibility-spec (v)
+  "Get the levels that ought to be invisible, if the verbosity level is V."
+  (mapcar #'car
+          (cdr (cl-member v jj--cmd-verbosity-sequence
+                          :key #'car))))
+
+(defun jj-set-verbosity-level (v)
+  ;; (progn
+  ;;                (when-let ((ev (this-command-keys-vector)))
+  ;;                  (cl-loop for x across ev
+  ;;                           when (mouse-event-p x)
+  ;;                           return (select-window ))
+  ;;                (list (intern-soft (completing-read "Verbosity level: " jj--cmd-verbosity-sequence nil nil nil t))
+  ;;                    )))
+  (interactive (list (intern-soft (completing-read "Verbosity level: " jj--cmd-verbosity-sequence))))
+  (setq jj--cmd-show-verbosity v)
+  (mapc #'remove-from-invisibility-spec (mapcar #'car jj--cmd-verbosity-sequence))
+  (mapc #'add-to-invisibility-spec (jj-get-verbosity-invisibility-spec v))
+  buffer-invisibility-spec)
+
 (defun jj-pop-to-command-log (repo-dir)
   "Open the command-log buffer for the current repo."
   (interactive (list default-directory))
@@ -4206,7 +4261,10 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
              :read-only t)
   (event nil
          :type string
-         :documentation "The final event after the process has exited, otherwise nil."))
+         :documentation "The final event after the process has exited, otherwise nil.")
+  (repo nil
+        :type string
+        :documentation "The repository in which the corresponding command was run"))
 
 (defun jj-cmd-promise (name cmd &optional output-buffer silent)
   "Run CMD asynchronously, returning a promise of its completion.
@@ -4300,7 +4358,8 @@ Does not use `process-mark', but instead manages internal alist of markers per b
   (let ((repo-dir default-directory))
     (let ((full-cmd `(,@(jj-cmd--with-standard-args cmd)))
           (min-cmd `(,@cmd))
-          (hide-args (jj-cmd--standard-args)))
+          (hide-args (jj-cmd--standard-args))
+          (error-verbosity jj--cmd-error-verbosity))
       (pcase-let (((and proc-entry
                         (cl-struct jj--process-log-entry
                                    buf-code
@@ -4324,12 +4383,14 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                          :command `("jj" ,@full-cmd)))
                   (jj-proc (make-jj-process :process proc
                                             :stderr buf-stderr
-                                            :log-entry proc-entry)))
+                                            :log-entry proc-entry
+                                            :repo repo-dir)))
              (setf (jj--process-log-entry-process proc-entry) proc)
              (overlay-put ovl-control 'jj-object proc-entry)
              (jj--set-collapse-process proc-entry t)
              ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
              (jj--set-initial-run-status buf-code)
+             (jj--set-entry-verbosity proc-entry jj--cmd-verbosity)
 
              (let ((stderr (get-buffer-process buf-stderr)))
                ;; print any abnormal process termination
@@ -4354,7 +4415,13 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                               ;; handle the promise state. this is basically the return-value
                               (if (eq exit-status 0)
                                   (funcall resolve jj-proc)
+                                ;; change visibility on error
+                                (jj--set-entry-verbosity proc-entry error-verbosity)
                                 (funcall reject jj-proc))))))))))))
+
+(defun jj--set-entry-verbosity (proc-entry verbosity)
+  (overlay-put (jj--process-log-entry-ovl-control proc-entry)
+               'invisible verbosity))
 
 (defun jj-cmd--futur (name cmd &optional output-buffer)
   "Run CMD asynchronously, returning a futur that is resolved (returning the process) on completion."
@@ -4370,7 +4437,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                                    ovl-control
                                    ovl-collapse
                                    ovl-err))
-                   (jj--make-process-log-entry name full-cmd min-cmd)))
+                   (jj--make-process-log-entry jj--cmd-verbosity name full-cmd min-cmd)))
         (futur-new
          (lambda (f)
            (let ((proc (make-process
@@ -4485,8 +4552,18 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
   "k" #'jj--kill-process-at-point
   "$" #'jj-pop-to-secret-command-log)
 
-(define-derived-mode jj-process-mode jj-inspect-mode "jj-proc"
-  "Major mode for jj process buffer.")
+(defvar-keymap jj-process-mode--verbosity-modeline-map
+  "<mode-line> <mouse-1>" #'jj-set-verbosity-level)
+
+(define-derived-mode jj-process-mode jj-inspect-mode
+  `("JJ process"
+    (:propertize (:eval (format "/%s" jj--cmd-show-verbosity))
+                 help-echo (format "Verbosity level: %s" jj--cmd-show-verbosity)
+		 face warning
+		 mouse-face mode-line-highlight
+                 local-map ,jj-process-mode--verbosity-modeline-map))
+  "Major mode for jj process buffer."
+  (jj-set-verbosity-level jj--cmd-show-verbosity))
 
 (defun jj--empty-string-p (string)
   "Returns non-nil when STRING is only unicode whitespace."
