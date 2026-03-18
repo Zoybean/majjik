@@ -478,10 +478,6 @@
                                             (0 "green")
                                             (_ "red")))))))))))))
 #+end_src
-***** TODO mystery issue with jumping cursor
-likely due to all the overriding text properties happening in this buffer.
-cursor jumps strangely when moving ~previous-line~ in the first column.
-cursor appears to jump to top of screen when inside a collapsed section as it collapses.
 ***** TODO COMMENT sectioned mutable process log
 ****** proof of concept
 #+begin_src elisp
