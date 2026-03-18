@@ -2619,6 +2619,11 @@ This is concatenated with an identifier for the repository to define the buffer 
           (cdr (cl-member v jj--cmd-verbosity-sequence
                           :key #'car))))
 
+(defun jj--get-numeric-verbosity-level (v)
+  "Return the numeric equivalent of the named verbosity level V."
+  (cl-position v jj--cmd-verbosity-sequence
+               :key #'car))
+
 (defun jj-set-verbosity-level (v)
   ;; (progn
   ;;                (when-let ((ev (this-command-keys-vector)))
@@ -4400,6 +4405,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                                 (funcall reject jj-proc))))))))))))
 
 (defun jj--set-entry-verbosity (proc-entry verbosity)
+  "Set the verbosity level for PROC-ENTRY to VERBOSITY."
   (overlay-put (jj--process-log-entry-ovl-control proc-entry)
                'invisible verbosity))
 
@@ -4537,7 +4543,7 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
 
 (define-derived-mode jj-process-mode jj-inspect-mode
   `("JJ process"
-    (:propertize (:eval (format "/%s" jj--cmd-show-verbosity))
+    (:propertize (:eval (format "/%s" (jj--get-numeric-verbosity-level jj--cmd-show-verbosity)))
                  help-echo (format "Verbosity level: %s" jj--cmd-show-verbosity)
 		 face warning
 		 mouse-face mode-line-highlight
