@@ -513,8 +513,8 @@ corresponding labeled string starts and ends."
 ;; command-log section writer
 
 ;; [[file:majjik.org::*command-log section writer][command-log section writer:1]]
-(defun jj--make-process-log-entry (name cmd &optional min-cmd hide-args)
-  "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, MIN-CMD is a shorter version of CMD, e.g. omitting majjik's default arguments."
+(defun jj--make-process-log-entry (name cmd &optional hide-args)
+  "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, HIDE-ARGS is majjik's default arguments as applied to CMD. They are hidden when the entry is collapsed."
   ;; ensure there is a root section
   (unless magit-root-section
     (goto-char (point-min))
@@ -4461,7 +4461,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
   "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
   (declare (indent 2))
   (let ((repo-dir default-directory))
-    (let ((full-cmd `(,@(jj-cmd--with-standard-args cmd)))
+    (let ((full-cmd `("jj" ,@(jj-cmd--with-standard-args cmd)))
           (hide-args (jj-cmd--standard-args))
           (error-verbosity jj--cmd-error-verbosity)
           (log-buf (jj--get-command-log-buf repo-dir)))
@@ -4475,7 +4475,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                                    ovl-collapse
                                    ovl-err))
                    (with-current-buffer log-buf
-                     (jj--make-process-log-entry name cmd nil hide-args))))
+                     (jj--make-process-log-entry name cmd hide-args))))
         (promise-new
          (lambda (resolve reject)
            (let* ((proc (make-process
@@ -4485,7 +4485,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                          :sentinel (jj--make-update-exit-code-sentinel section buf-code)
                          :filter (apply #'jj--make-ansi-color-multi-filter section buf-stdout (opt output-buffer))
                          :noquery t
-                         :command `("jj" ,@full-cmd)))
+                         :command full-cmd))
                   (jj-proc (make-jj-process :process proc
                                             :stderr buf-stderr
                                             :log-entry proc-entry
@@ -4505,6 +4505,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                ;; don't clean up stderr - again, we might need it later.
                ;; (set-process-sentinel stderr
                ;;                       (jj--make-cleanup-sentinel buf-stderr))
+               (set-process-sentinel stderr #'ignore)
                (set-process-filter stderr
                                    (jj--make-ansi-color-multi-filter section buf-stderr)))
 
@@ -4538,7 +4539,6 @@ Does not use `process-mark', but instead manages internal alist of markers per b
   (declare (indent 2))
   (let ((repo-dir default-directory))
     (let ((full-cmd `("jj" ,@(jj-cmd--with-standard-args cmd)))
-          (min-cmd `("jj" ,@cmd))
           (log-buf (jj--get-command-log-buf repo-dir)))
       (pcase-let (((and proc-entry
                         (cl-struct jj--process-log-entry
@@ -4549,7 +4549,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                                    ovl-collapse
                                    ovl-err))
                    (with-current-buffer log-buf
-                     (jj--make-process-log-entry name cmd min-cmd hide-args))))
+                     (jj--make-process-log-entry name cmd hide-args))))
         (futur-new
          (lambda (f)
            (let ((proc (make-process
