@@ -1186,7 +1186,7 @@ Patterns all have keyword names, and all keywords are assumed to be patterns.
 See URL `https://docs.jj-vcs.dev/latest/filesets/' for more info."
   (cl-labels ((render-unpack (sexp)
                 (pcase (render sexp)
-                  ((or `(form)
+                  ((or `(,form)
                        form)
                    (format "%s" form))
                   (unrecognised
@@ -1212,8 +1212,8 @@ See URL `https://docs.jj-vcs.dev/latest/filesets/' for more info."
                    ;; trick to only nest in quotes if an outer form requires it
                    ;; outermost caller will unwrap any toplevel list
                    (render form))
-                  ;; operators: or, none (empty sum)
-                  ((or `(or)
+                  ;; operators: or, none (empty sum) 
+                 ((or `(or)
                        `(none))
                    "none()")
                   (`(or . ,forms)
