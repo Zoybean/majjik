@@ -401,95 +401,189 @@ When returning both a string result and an exit code, they are returned as a con
   (verbosity
    nil
    :type '(member critical error user system debug)
-   :documentation "Verbosity level for the log entry. User settings can show or hide entries by verbosity."))
+   :documentation "Verbosity level for the log entry. User settings can show or hide entries by verbosity.")
+  (section
+   nil
+   :type magit-section
+   :documentation "Corresponding `magit-section' object in the log buffer."))
 
+(defun jj--set-initial-run-status ()
+  (let ((inhibit-read-only t))
+    (replace-region-contents
+     (point-min) (point-max)
+     (lambda () (propertize "run" 'font-lock-face '(:foreground "yellow"))))))
+
+(defun jj--make-update-exit-code-sentinel (section code-buf)
+  "Process sentinel to update the contents of CODE-BUF (a buffer) within SECTION (a magit-section) with the exit status of the process."
+  (lambda (proc event)
+    (jj--modify-section-header section
+      (lambda ()
+        (with-current-buffer code-buf
+          (let ((inhibit-read-only t))
+            (replace-region-contents
+             (point-min) (point-max)
+             (lambda ()
+               (cond ((process-live-p proc)
+                      ;; process is still running
+                      ;; what's it doing?
+                      (propertize
+                       (format "%s" (process-status proc))
+                       'font-lock-face `(:foreground
+                                         "yellow")))
+                     (t
+                      ;; process is done. how'd it exit?
+                      (let ((code (process-exit-status proc)))
+                        (propertize
+                         (format "%3d" code)
+                         'font-lock-face `(:foreground
+                                           ,(pcase code
+                                              (0 "green")
+                                              (_ "red")))))))))))))))
+;; command-log management:1 ends here
+
+;; section utils
+
+;; [[file:majjik.org::*section utils][section utils:1]]
+(defun jj--modify-section-header (sec fun)
+  "Update the heading of SEC by running FUN narrowed to the section's body.
+Update the properties and markers appropriately to expand the header to the new contents."
+  (declare (indent 1))
+  (let ((buf (marker-buffer (oref sec start))))
+    (with-current-buffer buf
+      (save-excursion
+        (with-restriction (oref sec start) (oref sec content)
+          (let ((inhibit-read-only t))
+            (funcall fun)
+            (move-marker (oref sec start) (point-min))
+            (move-marker (oref sec content) (point-max))
+            (jj--propertize-buffer-for-section sec)))))))
+
+(defun jj--modify-section-body (sec fun)
+  "Update the body of SEC by running FUN narrowed to the section's body.
+Update the properties and markers appropriately to expand the body to the new contents."
+  (declare (indent 1))
+  (let ((buf (marker-buffer (oref sec start))))
+    (with-current-buffer buf
+      (save-excursion
+        (with-restriction (oref sec content) (oref sec end)
+          (let ((inhibit-read-only t))
+            (funcall fun)
+            (move-marker (oref sec content) (point-min))
+            (move-marker (oref sec end) (point-max))
+            (jj--propertize-buffer-for-section sec)
+            (when (oref sec hidden)
+              (magit-section-hide sec))))))))
+
+(defun jj--propertize-buffer-for-section (sec)
+  "Apply SEC as the `magit-section' property for all of the accessible buffer that does not already have a `magit-section'"
+  (cl-loop for start = (point-min) then pos
+           for pos = (next-property-change start)
+           for end = (or pos
+                         (point-max))
+           for sec-here = (or (get-text-property start 'magit-section)
+                              sec)
+           do (put-text-property start end 'magit-section sec-here)
+           while pos))
+
+(defun jj--insert-sectioned-heading (header-parts)
+  "Insert all of HEADER-PARTS as a magit section heading.
+Returns an alist of buffer regions. For each LABEL, the returned alist contains an
+entry (LABEL START . END) where START and END are markers to where the
+corresponding labeled string starts and ends."
+  (jj--insert-sectioned header-parts
+                        #'magit-insert-heading))
+
+(define-advice magit-section-show (:after (sec) jj--magit-section-show-args)
+  "Show the default command-line arguments in the process log."
+  (pcase (oref sec value)
+    ((and proc-entry
+          (cl-struct jj--process-log-entry
+                     ovl-args))
+     (overlay-put ovl-args 'display nil))))
+
+(define-advice magit-section-hide (:after (sec) jj--magit-section-hide-args)
+  "Hide the default command-line arguments in the process log."
+  (pcase (oref sec value)
+    ((and proc-entry
+          (cl-struct jj--process-log-entry
+                     ovl-args))
+     (overlay-put ovl-args 'display (propertize "..." 'face 'shadow)))))
+;; section utils:1 ends here
+
+;; command-log section writer
+
+;; [[file:majjik.org::*command-log section writer][command-log section writer:1]]
 (defun jj--make-process-log-entry (name cmd &optional min-cmd hide-args)
   "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, MIN-CMD is a shorter version of CMD, e.g. omitting majjik's default arguments."
-  (let ((repo-dir default-directory))
-    (with-current-buffer (jj--get-command-log-buf repo-dir)
-      (let ((inhibit-read-only t)
-            (display-name (jj--replace-newlines name))
-            ;; pretending to be a zero-width-space
-            (inv (propertize " " 'display ""))
-            ;; real zero-width-space
-            (zws "\u200B"))
-        (goto-char (point-max))
-        (map-let (:start
-                  :code 
-                  :args
-                  :cmd
-                  :content
-                  :stdout
-                  :stderr
-                  :end)
-            (jj--insert-sectioned
-             `(:start
-               (:code . "   ")
-               "> jj "
-               (:args . ,(propertize (jj--replace-newlines
-                                      (mapconcat #'shell-quote-argument hide-args " "))
-                                     'font-lock-face 'shadow))
-               " "
-               (:cmd . ,(jj--replace-newlines
-                         (mapconcat #'shell-quote-argument cmd " ")))
-               "\n"
-               :content
-               :stdout
-               ,inv
-               :stderr
-               "\n"
-               :end))
-          (let* ((buf-code (jj--make-narrowed-indirect (format "*code-section %s*" display-name) (car code) (cdr code)))
-                 (stdout (jj--make-narrowed-indirect (format "*stdout-section %s*" display-name) stdout stdout))
-                 (stderr (jj--make-narrowed-indirect (format "*stderr-section %s*" display-name) stderr stderr))
-                 ;; these need to be overlays,
-                 ;; so we can toggle their properties as a unit
-                 (ovl-args (make-overlay (car args) (cdr args)))
-                 (ovl-collapse (make-overlay content end))
-                 ;; these all also need to be overlays,
-                 ;; so they keep applying as text is added
-                 (ovl-control (make-overlay start end)))
-            (make-jj--process-log-entry
-             :name name
-             :buf-code buf-code
-             :buf-stdout stdout
-             :buf-stderr stderr
-             :ovl-control ovl-control
-             :ovl-collapse ovl-collapse
-             :ovl-args ovl-args)))))))
-
-(defun jj--set-initial-run-status (code-buf)
-  (with-current-buffer code-buf
+  ;; ensure there is a root section
+  (unless magit-root-section
+    (goto-char (point-min))
     (let ((inhibit-read-only t))
-      (replace-region-contents
-       (point-min) (point-max)
-       (lambda () (propertize "run" 'font-lock-face '(:foreground "yellow")))))))
-
-(defun jj--make-update-exit-code-sentinel (code-buf)
-  "Process sentinel to update the contents of CODE-BUF (a buffer) with the exit status of the process."
-  (lambda (proc event)
-    (with-current-buffer code-buf
-      (let ((inhibit-read-only t))
-        (replace-region-contents
-         (point-min) (point-max)
-         (lambda ()
-           (cond ((process-live-p proc)
-                  ;; process is still running
-                  ;; what's it doing?
-                  (propertize
-                   (format "%s" (process-status proc))
-                   'font-lock-face `(:foreground
-                                     "yellow")))
-                 (t
-                  ;; process is done. how'd it exit?
-                  (let ((code (process-exit-status proc)))
-                    (propertize
-                     (format "%3d" code)
-                     'font-lock-face `(:foreground
-                                       ,(pcase code
-                                          (0 "green")
-                                          (_ "red")))))))))))))
-;; command-log management:1 ends here
+      (magit-insert-section (root))))
+  ;; act as if nested within the root section 
+  (let ((magit-insert-section--current magit-root-section)
+        (magit-insert-section--parent magit-root-section)
+        (magit-insert-section--oldroot magit-root-section)
+        (inhibit-read-only t)
+        (display-name (jj--replace-newlines name))
+        ;; pretending to be a zero-width-space
+        (inv (propertize " " 'display ""))
+        ;; real zero-width-space
+        (zws "\u200B"))
+    (goto-char (point-max))
+    (oref
+     ;; get the log entry
+     (magit-insert-section sec
+       (jj-proc-log-section)
+       (map-let (:start
+                 :code 
+                 :args
+                 :cmd
+                 :content
+                 :stdout
+                 :stderr
+                 :end)
+           `(,@(jj--insert-sectioned-heading
+                `(:start
+                  ,zws
+                  (:code . "   ")
+                  "> jj "
+                  (:args . ,(propertize (jj--replace-newlines
+                                         (mapconcat #'shell-quote-argument hide-args " "))
+                                        'font-lock-face 'shadow))
+                  " "
+                  (:cmd . ,(jj--replace-newlines
+                            (mapconcat #'shell-quote-argument cmd " ")))
+                  "\n"
+                  :content))
+             ,@(jj--insert-sectioned
+                `(:stdout
+                  ,inv
+                  :stderr
+                  "\n"
+                  :end)))
+         (let* ((buf-code (jj--make-narrowed-indirect (format "*code-section %s*" display-name) (car code) (cdr code)))
+                (stdout (jj--make-narrowed-indirect (format "*stdout-section %s*" display-name) stdout stdout))
+                (stderr (jj--make-narrowed-indirect (format "*stderr-section %s*" display-name) stderr stderr))
+                ;; these need to be overlays,
+                ;; so we can toggle their properties as a unit
+                (ovl-args (make-overlay (car args) (cdr args)))
+                (ovl-collapse (make-overlay content end))
+                ;; these all also need to be overlays,
+                ;; so they keep applying as text is added
+                (ovl-control (make-overlay start end)))
+           (oset sec value
+                 (make-jj--process-log-entry
+                  :name name
+                  :section sec
+                  :buf-code buf-code
+                  :buf-stdout stdout
+                  :buf-stderr stderr
+                  :ovl-control ovl-control
+                  :ovl-collapse ovl-collapse
+                  :ovl-args ovl-args)))))
+     value)))
+;; command-log section writer:1 ends here
 
 ;; sentinels and filters
 
@@ -2877,7 +2971,9 @@ Reverted buffer is the one that was active when this function was called."
                   (unless silent
                     (message "%s" (jj--format-simple-ok "status"))))
                 (end-err (errs)
-                  (message "%s" (jj--format-simple-fail "status"))))
+                  (message "%s: %s"
+                           (jj--format-simple-fail "status")
+                           errs)))
       (unless silent
         (message "`jj status'..."))
       (promise-then
@@ -3143,7 +3239,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
   (let ((inhibit-read-only t))
     (erase-accessible-buffer))
   (let* ((err (generate-new-buffer "*jj-bookmark-list-stderr*"))
-         (sentinel (make-jj-simple-sentinel err))
+         (sentinel (jj--make-cleanup-sentinel err))
          (filter (make-sticky-process-filter :sticky)))
     (make-process
      :name "jj-bookmark-list"
@@ -3458,7 +3554,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
        (let* ((buf (current-buffer))
               (temp (generate-new-buffer "*jj-log-temp*"))
               (err (generate-new-buffer "*jj-log-stderr*"))
-              (sentinel (make-jj-simple-sentinel err temp))
+              (sentinel (jj--make-cleanup-sentinel err temp))
               (filter (cl-labels ((read-next ()
                                     (ignore-errors (jj-read-graph-and-maybe-elided)))
                                   (push-entries (news)
@@ -4072,8 +4168,9 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
 (defun jj--proc-trim-with-editor (proc)
   "Delete all occurrences of the \"Waiting for Emacs\" message from the start of PROC's output buffer."
   (let ((buf (process-buffer (jj-process-process proc))))
-    (with-current-buffer buf
-      (jj--trim-with-editor))))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (jj--trim-with-editor)))))
 (defun jj--trim-with-editor ()
   "Delete all occurrences of the \"Waiting for Emacs\" message from the start of the buffer."
   (save-excursion
@@ -4205,11 +4302,13 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
                   collect `(when-let ((f ,func))
                              (funcall f x))))))
 
-(defun jj--const (ok)
+(defun jj--const-ok (ok)
   "Return a function that runs OK on its argument before returning the argument unmodified."
   (lambda (val)
-    (prog1 val
-      (funcall ok val))))
+    (condition-case e
+        (prog1 (promise-resolve val)
+          (funcall ok val))
+      (error (promise-reject e)))))
 
 (defun jj--const-err (err)
   "Return a function that runs ERR on its argument before returning the async rejection of the argument."
@@ -4222,7 +4321,7 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
   (jj--finally
    (promise-then
     promise
-    (and ok (jj--const ok))
+    (and ok (jj--const-ok ok))
     (and err (jj--const-err err)))
    final))
 ;; helpers:1 ends here
@@ -4297,7 +4396,7 @@ On success, returns the (PROCESS ERR-BUF). On error, returns (PROCESS ERR-BUF EV
     (buffer-string)))
 
 ;; copied and heavily modified from `comint-osc-process-output'
-(defun jj--make-ansi-color-multi-filter (buffers)
+(defun jj--make-ansi-color-multi-filter (main-section section-buf &rest other-buffers)
   "Process filter for writing to multiple output buffers. Converts ANSI color sequences in the output.
 Does not use `process-mark', but instead manages internal alist of markers per buffer."
   (let ((buf-proc-mark-alist))
@@ -4305,7 +4404,7 @@ Does not use `process-mark', but instead manages internal alist of markers per b
     ;; each such set is a cons of a marker and an alist.
     ;; the first marker is the position of point at the time of this call, serving as the default position.
     ;; each of the alists is mapping processes to markers within that buffer.
-    (dolist (buf buffers)
+    (dolist (buf `(,section-buf ,@other-buffers))
       ;; set the default marker for each buffer
       (push `(,buf ,(copy-marker (point)) . nil)
             buf-proc-mark-alist))
@@ -4320,23 +4419,31 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                               ;; need to push to an existing object
                               ;; otherwise I'm just mutating a local
                               (cdr m-pma))
-                        mark)))))
+                        mark))))
+                (do-update (mark string)
+                  ;; (message "run update at %s" mark)
+                  (save-excursion
+                    (goto-char mark)
+                    ;; this already handles partial sequences, and assumes
+                    ;; sequential calls apply to contiguous chunks of output.
+                    ;; it must be run in the buffer it's inserting into.
+                    (insert (ansi-color-apply string))
+                    ;; advance the process marker in this buffer
+                    (set-marker mark (point))))
+                (do-full (buf proc string)
+                  (when (buffer-live-p buf)
+                    (with-current-buffer buf
+                      (let* ((inhibit-read-only t)
+                             ;; get the process marker for the current auxiliary buffer
+                             (mark (marker buf proc)))
+                        (do-update mark string))))))
       (lambda (proc string)
-        (dolist (buf buffers)
+        (jj--modify-section-body main-section
+          (lambda ()
+            (do-full section-buf proc string)))
+        (dolist (buf other-buffers)
           ;; insert in each buffer
-          (when (buffer-live-p buf)
-            (with-current-buffer buf
-              (let* ((inhibit-read-only t)
-                     ;; get the process marker for the current buffer
-                     (mark (marker buf proc)))
-                (save-excursion
-                  (goto-char mark)
-                  ;; this already handles partial sequences, and assumes
-                  ;; sequential calls apply to contiguous chunks of output.
-                  ;; it must be run in the buffer it's inserting into.
-                  (insert (ansi-color-apply string))
-                  ;; advance the process marker in this buffer
-                  (set-marker mark (point)))))))))))
+          (do-full buf proc string))))))
 
 (defun jj-cmd--with-standard-args (cmd)
   "Return CMD with added arguments for using emacs as editor, and all the applicable configured arguments for a logging command."
@@ -4355,28 +4462,28 @@ Does not use `process-mark', but instead manages internal alist of markers per b
   (declare (indent 2))
   (let ((repo-dir default-directory))
     (let ((full-cmd `(,@(jj-cmd--with-standard-args cmd)))
-          (min-cmd `(,@cmd))
           (hide-args (jj-cmd--standard-args))
-          (error-verbosity jj--cmd-error-verbosity))
+          (error-verbosity jj--cmd-error-verbosity)
+          (log-buf (jj--get-command-log-buf repo-dir)))
       (pcase-let (((and proc-entry
                         (cl-struct jj--process-log-entry
+                                   section
                                    buf-code
                                    buf-stdout
                                    buf-stderr
                                    ovl-control
                                    ovl-collapse
                                    ovl-err))
-                   (jj--make-process-log-entry name cmd min-cmd hide-args)))
+                   (with-current-buffer log-buf
+                     (jj--make-process-log-entry name cmd nil hide-args))))
         (promise-new
          (lambda (resolve reject)
            (let* ((proc (make-process
                          :name name
-                         :buffer (or output-buffer
-                                     buf-stdout)
+                         :buffer (or output-buffer buf-stdout)
                          :stderr buf-stderr
-                         :sentinel (jj--make-update-exit-code-sentinel buf-code)
-                         :filter (jj--make-ansi-color-multi-filter `(,buf-stdout
-                                                                     ,@(opt output-buffer)))
+                         :sentinel (jj--make-update-exit-code-sentinel section buf-code)
+                         :filter (apply #'jj--make-ansi-color-multi-filter section buf-stdout (opt output-buffer))
                          :noquery t
                          :command `("jj" ,@full-cmd)))
                   (jj-proc (make-jj-process :process proc
@@ -4384,26 +4491,30 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                                             :log-entry proc-entry
                                             :repo repo-dir)))
              (setf (jj--process-log-entry-process proc-entry) proc)
-             (overlay-put ovl-control 'jj-object proc-entry)
-             (jj--set-collapse-process proc-entry t)
+             ;; (overlay-put ovl-control 'jj-object proc-entry)
+             ;; (jj--set-collapse-process proc-entry t)
              ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
-             (jj--set-initial-run-status buf-code)
+             (jj--modify-section-header section
+               (lambda ()
+                 (with-current-buffer buf-code
+                   (jj--set-initial-run-status))))
              (jj--set-entry-verbosity proc-entry jj--cmd-verbosity)
 
+             ;; handle the stderr monitor process separately
              (let ((stderr (get-buffer-process buf-stderr)))
-               ;; print any abnormal process termination
-               (set-process-sentinel stderr
-                                     (jj--make-print-status-sentinel buf-stderr))
+               ;; don't clean up stderr - again, we might need it later.
+               ;; (set-process-sentinel stderr
+               ;;                       (jj--make-cleanup-sentinel buf-stderr))
                (set-process-filter stderr
-                                   (jj--make-ansi-color-multi-filter `(,buf-stderr))))
-             ;; this always runs before the subsequent promise callbacks,
-             ;; which means `resolve' and `reject' are not themselves callbacks
+                                   (jj--make-ansi-color-multi-filter section buf-stderr)))
+
              (add-function :after (process-sentinel proc)
                            (apply #'jj--make-cleanup-sentinel
-                                  ;; also kill the stdout buffer when an output buffer is specified
-                                  `(,buf-code
-                                    ,@(opt (when output-buffer
-                                             buf-stdout)))))
+                            ;; kill all aux buffers
+                            buf-code
+                            ;; if a separate output buffer was provided, kill the auxiliary output buffer
+                            ;; otherwise, keep it around. we might need it.
+                            (opt (when output-buffer buf-stdout))))
              
              (add-function :after (process-sentinel proc)
                            (make-jj-callback-sentinel
@@ -4427,7 +4538,8 @@ Does not use `process-mark', but instead manages internal alist of markers per b
   (declare (indent 2))
   (let ((repo-dir default-directory))
     (let ((full-cmd `("jj" ,@(jj-cmd--with-standard-args cmd)))
-          (min-cmd `("jj" ,@cmd)))
+          (min-cmd `("jj" ,@cmd))
+          (log-buf (jj--get-command-log-buf repo-dir)))
       (pcase-let (((and proc-entry
                         (cl-struct jj--process-log-entry
                                    buf-code
@@ -4436,7 +4548,8 @@ Does not use `process-mark', but instead manages internal alist of markers per b
                                    ovl-control
                                    ovl-collapse
                                    ovl-err))
-                   (jj--make-process-log-entry jj--cmd-verbosity name full-cmd min-cmd)))
+                   (with-current-buffer log-buf
+                     (jj--make-process-log-entry name cmd min-cmd hide-args))))
         (futur-new
          (lambda (f)
            (let ((proc (make-process
@@ -4454,7 +4567,8 @@ Does not use `process-mark', but instead manages internal alist of markers per b
              (overlay-put ovl-control 'jj-object proc-entry)
              (jj--set-collapse-process proc-entry t)
              ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
-             (jj--set-initial-run-status buf-code)
+             (with-current-buffer code-buf
+               (jj--set-initial-run-status))
 
              (when output-buffer
                (kill-buffer buf-stdout))
@@ -4547,7 +4661,6 @@ FORMATTER should be a function of 2 arguments: the ARG, and the value returned b
 ;; [[file:majjik.org::*command log mode][command log mode:1]]
 (defvar-keymap jj-process-mode-map
   :parent jj-inspect-mode-map
-  "TAB" #'jj--toggle-collapse-process-at-point
   "k" #'jj--kill-process-at-point
   "$" #'jj-set-verbosity-level)
 
