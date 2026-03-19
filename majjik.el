@@ -887,7 +887,7 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
      string t t)))
 
 (defun jj--replace-newlines (string)
-  "Propertize all newlines in STRING with the corresponding escape glyph, with the `escape-glyph' face."
+  "Replace all newlines in STRING with the corresponding escape glyph, with the `escape-glyph' face."
   (let* ((replacements `(("\n" . "^J")
                          ("\r" . "^M"))))
     (replace-regexp-in-string
@@ -3490,6 +3490,9 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                  (cl-loop for change in files-changed
                           for (type from to) = (slot-values change
                                                  (status path-source path-target))
+                          ;; for now this doesn't correctly display - the entity is rendered in the wrong colour
+                          ;; for from = (jj--entitize-newlines from)
+                          ;; for to = (jj--entitize-newlines to)
                           for (color . elems) = (pcase-exhaustive type
                                                   ("modified" `(cyan "M" ,to))
                                                   ("added" `(green "A" ,to))
@@ -3502,7 +3505,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                  (propertize (concat list-prefix
                                                      (mapconcat #'identity elems " ")
                                                      "\n")
-                                             'font-lock-face `(:foreground ,(format "%s" color))
+                                             'font-lock-face `(:foreground ,(symbol-name color))
                                              'jj-object change))
                                ))))
               (t (magit-insert-heading "Working copy unchanged\n"))))
@@ -4873,7 +4876,7 @@ Returns the raw process, not the combined handler."
   (let ((jj--cmd-verbosity 'system)
         (jj--cmd-error-verbosity 'system-error))
     (promise-then (jj--peek
-                   (jj-cmd-async-named name cmd nil :silent)
+                   (jj-cmd-async-named name cmd (generate-new-buffer (format "*jj %s*" name)) :silent)
                    nil
                    (jj--call-each
                     (jj--proc-post-message
