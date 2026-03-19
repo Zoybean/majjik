@@ -5401,7 +5401,7 @@ Will likely fail for any interactive command."
     ("-r" "revisions" jj-multi-revision-argument
      :argument "-r")]]
   ["go"
-   ("p" "parallelize"
+   ("z" "parallelize"
     (lambda (args)
       (interactive (list (jj--transient-args)))
       (jj-cmd-async-view `("parallelize" ,@args)))
