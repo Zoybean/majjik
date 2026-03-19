@@ -2203,16 +2203,33 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 
 (define-jj-format log-header
   (change-id-min
-   :face '(ansi-color-bold (:foreground "light pink"))
+   :face (lambda (off ent)
+           (cond ((jj-log-header-divergent ent)
+                  ;; if both commit and desc are empty, they're both green
+                  '(ansi-color-bold (:foreground "red")))
+                 ((jj-log-header-hidden ent)
+                  ;; if just desc is empty, it's gold
+                  '(:foreground "grey"))
+                 (:else
+                  '(ansi-color-bold (:foreground "light pink")))))
    :form (:chain self (.change_id) (.shortest 8) (.prefix)))
   (change-id-tail
    :separator ""
    :face '(:foreground "dim gray")
    :form (:chain self (.change_id) (.shortest 8) (.rest)))
   (change-offset
-   :printer (lambda (off _ent)
-              (unless (string= "0" off)
-                off))
+   :separator ""
+   :face (lambda (off ent)
+           (cond ((jj-log-header-divergent ent)
+                  ;; if both commit and desc are empty, they're both green
+                  '(ansi-color-bold (:foreground "red")))
+                 ((jj-log-header-hidden ent)
+                  ;; if just desc is empty, it's gold
+                  '(:foreground "grey"))))
+   :printer (lambda (off ent)
+              (when (or (jj-log-header-hidden ent)
+                        (jj-log-header-divergent ent))
+                (format "/%s" off)))
    :form (:chain self (.change_offset)))
   (change-id
    :printer (cl-constantly nil)
@@ -2249,16 +2266,24 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   (commit-id
    :printer (cl-constantly nil)
    :form (:chain self (.commit_id) (.short 16)))
+  (divergent
+   :face '(:foreground "red")
+   :parser (-compose (jj--make-opt-resolver :divergent) #'s-presence)
+   :printer (jj--make-opt-resolver "(divergent)")
+   :form (if (:chain self (.divergent)) "divergent"))
   (conflict
    :face '(:foreground "red")
-   :parser #'s-presence
-   ;; :printer (jj--make-opt-resolver "conflict")
+   :parser (-compose (jj--make-opt-resolver :conflict) #'s-presence)
+   :printer (jj--make-opt-resolver "(conflict)")
    :form (if (:chain self (.conflict)) "conflict"))
   (current-working-copy
-   ;; not sure why, but for now adding this entry seems to break everything.
    :parser (-compose (jj--make-opt-resolver :current-wc) #'s-presence)
    :printer (cl-constantly nil)
    :form (if (:chain self (.current_working_copy)) "@"))
+  (hidden
+   :printer (cl-constantly nil)
+   :parser (-compose (jj--make-opt-resolver :hidden) #'s-presence)
+   :form (if (:chain self (.hidden)) "hidden"))
   (nil
    ;; empty non-field element for splitting the header from the desc and empty markers
    :parser #'s-presence
@@ -2627,26 +2652,111 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
 
 ;; [[file:majjik.org::*Status format][Status format:1]]
 (define-jj-format status-lineage-entry
+  (change-id-min
+   :face (lambda (off ent)
+           (cond ((jj-status-lineage-entry-divergent ent)
+                  ;; if both commit and desc are empty, they're both green
+                  '(ansi-color-bold (:foreground "red")))
+                 ((jj-status-lineage-entry-hidden ent)
+                  ;; if just desc is empty, it's gold
+                  '(:foreground "grey"))
+                 (:else
+                  '(ansi-color-bold (:foreground "light pink")))))
+   :form (:chain self (.change_id) (.shortest 8) (.prefix)))
+  (change-id-tail
+   :separator ""
+   :face '(:foreground "dim gray")
+   :form (:chain self (.change_id) (.shortest 8) (.rest)))
+  (change-offset
+   :separator ""
+   :face (lambda (off ent)
+           (cond ((jj-status-lineage-entry-divergent ent)
+                  ;; if both commit and desc are empty, they're both green
+                  '(ansi-color-bold (:foreground "red")))
+                 ((jj-status-lineage-entry-hidden ent)
+                  ;; if just desc is empty, it's gold
+                  '(:foreground "grey"))))
+   :printer (lambda (off ent)
+              (when (or (jj-status-lineage-entry-hidden ent)
+                        (jj-status-lineage-entry-divergent ent))
+                (format "/%s" off)))
+   :form (:chain self (.change_offset)))
   (change-id
-   :face '(:foreground "magenta")
-   :form (:chain self (format_short_change_id_with_change_offset)))
-  (commit-id
-   :face '(:foreground "light blue")
-   :form (:chain self (.commit_id) (format_short_commit_id)))
+   :printer (cl-constantly nil)
+   :form (:chain self (.change_id) (.short 16)))
+  (author
+   :printer (cl-constantly nil)
+   :parser #'json-parse-string
+   :form (:chain self (.author) (.email) (stringify) (.escape_json)))
+  (timestamp
+   :printer (cl-constantly nil)
+   :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
   (bookmarks
-   :face '(:foreground "magenta")
+   :face '(:foreground "medium orchid")
    :parser (jj--make-list-parser " ")
    :printer (jj--make-list-printer " ")
    :form (:chain self (.bookmarks)))
   (tags
-   :face '(:foreground "yellow")
+   :face '(:foreground "goldenrod")
+   :parser (jj--make-list-parser " ")
+   :printer (jj--make-list-printer " ")
    :form (:chain self (.tags)))
+  (working-copies
+   :face '(:foreground "green")
+   :parser (jj--make-list-parser " ")
+   :printer (jj--make-list-printer " ")
+   :form (:chain self (.working_copies)))
+  (commit-id-min
+   :face '(ansi-color-bold (:foreground "dodger blue"))
+   :form (:chain self (.commit_id) (.shortest 8) (.prefix)))
+  (commit-id-tail
+   :separator ""
+   :face '(:foreground "dim gray")
+   :form (:chain self (.commit_id) (.shortest 8) (.rest)))
+  (commit-id
+   :printer (cl-constantly nil)
+   :form (:chain self (.commit_id) (.short 16)))
+  (divergent
+   :face '(:foreground "red")
+   :parser (-compose (jj--make-opt-resolver :divergent) #'s-presence)
+   :printer (jj--make-opt-resolver "(divergent)")
+   :form (if (:chain self (.divergent)) "divergent"))
   (conflict
    :face '(:foreground "red")
+   :parser (-compose (jj--make-opt-resolver :conflict) #'s-presence)
+   :printer (jj--make-opt-resolver "(conflict)")
    :form (if (:chain self (.conflict)) "conflict"))
+  (current-working-copy
+   :parser (-compose (jj--make-opt-resolver :current-wc) #'s-presence)
+   :printer (cl-constantly nil)
+   :form (if (:chain self (.current_working_copy)) "@"))
+  (hidden
+   :printer (cl-constantly nil)
+   :parser (-compose (jj--make-opt-resolver :hidden) #'s-presence)
+   :form (if (:chain self (.hidden)) "hidden"))
+  (empty
+   :face '(ansi-color-bold (:foreground "medium sea green"))
+   :parser (-compose (jj--make-opt-resolver :empty) #'s-presence)
+   :printer (jj--make-opt-resolver "(empty)")
+   :form (if (:chain self (.empty)) "empty"))
   (description
-   :parser #'json-parse-string
-   :form (:chain self (.description) (.first_line) (.trim) (.escape_json))))
+   :parser (lambda (s)
+             (s-presence (json-parse-string s)))
+   :face (lambda (desc ent)
+           (cond (desc
+                  ;; present description is unformatted
+                  nil)
+                 ((jj-status-lineage-entry-empty ent)
+                  ;; if both commit and desc are empty, they're both green
+                  '(ansi-color-bold (:foreground "medium sea green")))
+                 (:else
+                  ;; if just desc is empty, it's gold
+                  '(:foreground "gold"))))
+   :printer (lambda (desc _ent)
+              (if (not desc)
+                  "(no description)"
+                (car (s-lines desc))))
+   :form (:chain self (.description) (.escape_json))))
 
 (define-jj-format status-wc-change
   (status
@@ -2767,7 +2877,9 @@ This is concatenated with an identifier for the repository to define the buffer 
     "--no-pager"))
 (defvar jj-parsing-default-args
   '(;; omit extra output
-    "--quiet"))
+    "--quiet"
+    ;; don't use colours
+    "--color=never"))
 (defvar jj-logging-default-args
   '("--color=always"))
 (defvar jj-global-debug-args
