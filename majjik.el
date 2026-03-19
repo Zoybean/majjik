@@ -534,7 +534,7 @@ corresponding labeled string starts and ends."
     (oref
      ;; get the log entry
      (magit-insert-section sec
-       (jj-proc-log-section)
+       (jj-proc-log-section nil :hidden)
        (map-let (:start
                  :code 
                  :args
