@@ -4372,15 +4372,6 @@ On success, returns the (PROCESS ERR-BUF). On error, returns (PROCESS ERR-BUF EV
     (message "`jj %s'..." (jj--replace-newlines name)))
   (jj-cmd--promise name cmd output-buffer))
 
-(defun jj-cmd-futur (name cmd &optional output-buffer silent)
-  "Run CMD asynchronously, returning a futur of its completion.
-
-On success, returns the (PROCESS ERR-BUF). On error, returns (PROCESS ERR-BUF EVENT). If OUTPUT-BUFFER, use that buffer for stdout instead of a temp indirect buffer."
-  (declare (indent 2))
-  (unless silent
-    (message "`jj %s'..." name))
-  (jj-cmd--futur name cmd output-buffer))
-
 (defun jj--apply-font-lock-properties (string)
   "Within STRING, add a `face' property for every `font-lock-face' property."
   (with-temp-buffer
@@ -4533,65 +4524,6 @@ Does not use `process-mark', but instead manages internal alist of markers per b
   "Set the verbosity level for PROC-ENTRY to VERBOSITY."
   (overlay-put (jj--process-log-entry-ovl-control proc-entry)
                'invisible verbosity))
-
-(defun jj-cmd--futur (name cmd &optional output-buffer)
-  "Run CMD asynchronously, returning a futur that is resolved (returning the process) on completion."
-  (declare (indent 2))
-  (let ((repo-dir default-directory))
-    (let ((full-cmd `("jj" ,@(jj-cmd--with-standard-args cmd)))
-          (log-buf (jj--get-command-log-buf repo-dir)))
-      (pcase-let (((and proc-entry
-                        (cl-struct jj--process-log-entry
-                                   buf-code
-                                   buf-stdout
-                                   buf-stderr
-                                   ovl-control
-                                   ovl-collapse
-                                   ovl-err))
-                   (with-current-buffer log-buf
-                     (jj--make-process-log-entry name cmd hide-args))))
-        (futur-new
-         (lambda (f)
-           (let ((proc (make-process
-                        :name name
-                        :buffer (or output-buffer buf-stdout)
-                        :stderr buf-stderr
-                        :sentinel (jj--make-update-exit-code-sentinel buf-code)
-                        :filter #'jj--ansi-color-filter
-                        :noquery t
-                        :command full-cmd))
-                 (jj-proc (make-jj-process :process proc
-                                           :stderr buf-stderr
-                                           :log-entry proc-entry)))
-             (setf (jj--process-log-entry-process proc-entry) proc)
-             (overlay-put ovl-control 'jj-object proc-entry)
-             (jj--set-collapse-process proc-entry t)
-             ;; (overlay-put ovl-err 'font-lock-face '(:foreground "grey"))
-             (with-current-buffer code-buf
-               (jj--set-initial-run-status))
-
-             (when output-buffer
-               (kill-buffer buf-stdout))
-             (let ((stderr (get-buffer-process buf-stderr)))
-               ;; print any abnormal process termination
-               (set-process-sentinel stderr
-                                     (jj--make-print-status-sentinel buf-stderr))
-               (set-process-filter stderr
-                                   #'jj--ansi-color-filter))
-             ;; this always runs before the subsequent futurs,
-             ;; which means they are not themselves callbacks
-             (add-function :after (process-sentinel proc)
-                           (jj--make-cleanup-sentinel buf-code))
-             ;; handle the promise state
-             (add-function :after (process-sentinel proc)
-                           (make-jj-callback-sentinel
-                            (lambda (exit-status event)
-                              ;; record the process-end event
-                              (setf (jj-process-event jj-proc) event)
-                              ;; handle the futur state. this is basically the return-value
-                              (if (eq exit-status 0)
-                                  (futur-deliver-value f jj-proc)
-                                (futur-blocker-abort f jj-proc))))))))))))
 ;; async command plumbing:1 ends here
 
 ;; transient command utils
