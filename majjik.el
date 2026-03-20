@@ -1679,10 +1679,12 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 - `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
 - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
   (declare (indent 1))
-  (let ((fields (-filter (-lambda ((name . rest)) name)
-                         field-specs)))
+  (let* ((fields (-filter #'car
+                          ;; field-specs which have non-nil name are retained for general use
+                          field-specs))
+         (field-names (mapcar #'car fields)))
     `(progn
-       ,(jj--define-shortdoc-for type-name fields)
+       ,(jj--define-shortdoc-for type-name field-names)
        ;; (defvar ,(intern (format "jj-%s-regex" type-name))
        ;;   ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
        ;;      `(rx line-start
@@ -1701,11 +1703,9 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
        ,(jj--define-reader-for type-name fields)
        ,(jj--define-inserter-for type-name field-specs)
        (cl-defstruct ,(intern (format "jj-%s" type-name))
-         ;; semantic fields
-         ,@(cl-loop for (field-name . props) in fields
-                    collect field-name)))))
+         ,@field-names))))
 
-(defun jj--define-shortdoc-for (type-name fields)
+(defun jj--define-shortdoc-for (type-name field-names)
   `(define-short-documentation-group ,(intern (format "jj-%s" type-name))
      (define-jj-format
          :no-manual t)
@@ -1716,7 +1716,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
      (,(intern (format "jj-%s-template" type-name))
       :no-manual t)
      (,(intern (format "make-jj-%s" type-name))
-      :args (&key ,@(mapcar #'car fields))
+      :args (&key ,@field-names)
       :no-manual t)))
 
 (defun jj--define-template-for (type-name fields)
