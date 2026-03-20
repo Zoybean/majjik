@@ -4388,6 +4388,15 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
       (font-lock-mode)
       (view-mode-enter nil #'kill-buffer))
     (pop-to-buffer buf)))
+
+(defun jj--proc-clear-stdout-properties (proc)
+  "Clear the text properties from PROC's output buffer. Does not affect the command log buffer."
+  (jj--clear-buffer-text-properties (process-buffer (jj-process-process proc))))
+
+(defun jj--clear-buffer-text-properties (buf)
+  "Clear the text properties from all text in BUF."
+  (with-current-buffer buf
+    (set-text-properties (point-min) (point-max) nil)))
 ;; post-command tasks:1 ends here
 
 ;; helpers
@@ -4877,7 +4886,7 @@ Returns the raw process, not the combined handler."
         (jj--cmd-error-verbosity 'system-error))
     (promise-then (jj--peek
                    (jj-cmd-async-named name cmd (generate-new-buffer (format "*jj %s*" name)) :silent)
-                   nil
+                   #'jj--proc-clear-stdout-properties
                    (jj--call-each
                     (jj--proc-post-message
                      (jj--proc-format-trimmed
