@@ -1660,18 +1660,7 @@ this might not actually work. I'm big sus actually.
                            field-specs)))
       `(progn
          (require 'json)
-         (define-short-documentation-group ,(intern (format "jj-%s" type-name))
-           (define-jj-format
-               :no-manual t)
-           (,(intern (format "read-jj-%s" type-name))
-            :no-manual t)
-           (,(intern (format "insert-jj-%s" type-name))
-            :no-manual t)
-           (,(intern (format "jj-%s-template" type-name))
-            :no-manual t)
-           (,(intern (format "make-jj-%s" type-name))
-            :args (&key ,@(mapcar #'car fields))
-            :no-manual t))
+         ,(jj--define-shortdoc-for type-name fields)
          ;; (defvar ,(intern (format "jj-%s-regex" type-name))
          ;;   ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
          ;;      `(rx line-start
@@ -1686,92 +1675,117 @@ this might not actually work. I'm big sus actually.
          ;;               (* ,content))
          ;;            "\n")))
          ;;   ,(format "Regex to match a full `jj-%1$s' entry. This *should* match exactly the same content that `read-jj-%1$s' will parse." type-name))
-         (defun ,(intern (format "jj-%s-template" type-name)) (self)
-           ,(format "Get a commit template to produce entries parseable by `read-jj-%s'. SELF is the symbol to use for the self-type; usually this will just be `self', but if using the template in a lambda you may want a different type-name." type-name)
-           (jj-template (cl-subst self 'self
-                                  '(++ ,(format "%S" type-name)
-                                       ,jj--major-delim
-                                       (join ,jj--delim
-                                             ,@(cl-loop for (field-name . props) in fields
-                                                        for form = (plist-get props :form)
-                                                        collect form))
-                                       ))))
-         (defun ,(intern (format "read-jj-%s" type-name)) ()
-           ,(format "With point at the beginning of a `jj-%1$s' entry, parse the entry into a `jj-%1$s' struct." type-name)
-           ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
-              `(cl-loop initially (with-error-label ,(format "read struct label %s" type-name)
-                                    (jj--re-step-over (rx ,(format "%s" type-name) ,jj--major-delim)))
-                        for (field-name key parser) in (list ,@(cl-loop for (field-name . props) in fields
-                                                                        for key = (intern (format ":%s" field-name))
-                                                                        for parser = (plist-get props :parser)
-                                                                        collect `(list ',field-name ,key ,parser)))
-                        ;; no delimiter for first field
-                        for first = t then nil
-                        for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
-                        when (with-error-label (format "read field %s" field-name)
-                               (jj--re-step-over field-rx))
-                        for parsed = (if parser
-                                         (save-match-data
-                                           (funcall parser (match-string 1)))
-                                       (match-string 1))
-                        nconc `(,key ,parsed)
-                        into struct-props
-                        finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props))))
-         (defun ,(intern (format "insert-jj-%s" type-name)) (entry)
-           ,(format "Insert the ENTRY, formatted as a `jj-%s' entry." type-name)
-           ,(cl-labels ((field (name-sym)
-                          `(,(intern (format "jj-%s-%s" type-name name-sym))
-                            entry)))
-              `(with-insert-temp-buffer
-                (cl-loop for (field-name val printer face first sep) in (list ,@(cl-loop  
-                                                                                 for (field-name . props) in field-specs
-                                                                                 for first = (if-let ((c (plist-member props :first)))
-                                                                                                 ;; if it's explicitly set (even nil), use that
-                                                                                                 (car c)
-                                                                                               ;; otherwise, it's the first, so set it
-                                                                                               t)
-                                                                                 ;; otherwise, it's not first, so unset it
-                                                                                 then (plist-get props :first)
-                                                                                 for sep = (plist-get props :separator)
-                                                                                 for face = (plist-get props :face)
-                                                                                 for printer = (plist-get props :printer)
-                                                                                 collect `(list
-                                                                                           ',field-name
-                                                                                           ,(and field-name (field field-name))
-                                                                                           ,printer
-                                                                                           ,face
-                                                                                           ,first
-                                                                                           ,sep)))
-                         with effective-first
-                         do (when first
-                              (setq effective-first t))
-                         for sep = (or sep
-                                       (cond
-                                        (effective-first "")
-                                        (t " ")))
-                         for face = (cond ((functionp face)
-                                           (funcall face val entry))
-                                          (:else
-                                           face))
-                         do (when-let ((printed (s-presence
-                                                 (if printer
-                                                     (funcall printer val entry)
-                                                   val))))
-                              (setq effective-first nil)
-                              (insert sep (apply #'propertize
-                                                 `(,printed
-                                                   help-echo ,(symbol-name field-name)
-                                                   ,@(jj--if-arg face #'identity 'font-lock-face))))))
-                ;; ensure commit text ends on a newline
-                (unless (bolp)
-                  (insert "\n"))
-                ;; add field to all the commit text (including newlines)
-                ;; pointing to the entry struct
-                (add-text-properties (point-min) (point-max) `(jj-object ,entry)))))
+         ,(jj--define-template-for type-name fields)
+         ,(jj--define-reader-for type-name fields)
+         ,(jj--define-inserter-for type-name field-specs)
          (cl-defstruct ,(intern (format "jj-%s" type-name))
            ;; semantic fields
            ,@(cl-loop for (field-name . props) in fields
                       collect field-name)))))
+
+  (defun jj--define-shortdoc-for (type-name fields)
+    `(define-short-documentation-group ,(intern (format "jj-%s" type-name))
+       (define-jj-format
+           :no-manual t)
+       (,(intern (format "read-jj-%s" type-name))
+        :no-manual t)
+       (,(intern (format "insert-jj-%s" type-name))
+        :no-manual t)
+       (,(intern (format "jj-%s-template" type-name))
+        :no-manual t)
+       (,(intern (format "make-jj-%s" type-name))
+        :args (&key ,@(mapcar #'car fields))
+        :no-manual t)))
+
+  (defun jj--define-template-for (type-name fields)
+    "Return an expression defining a template-function named by TYPE-NAME, which accepts a SELF parameter, and produces a template applying to the symbol named by SELF, laid out according to FIELDS."
+    `(defun ,(intern (format "jj-%s-template" type-name)) (self)
+       ,(format "Get a commit template to produce entries parseable by `read-jj-%s'. SELF is the symbol to use for the self-type; usually this will just be `self', but if using the template in a lambda you may want a different type-name." type-name)
+       (jj-template (cl-subst self 'self
+                              '(++ ,(format "%S" type-name)
+                                   ,jj--major-delim
+                                   (join ,jj--delim
+                                         ,@(cl-loop for (field-name . props) in fields
+                                                    for form = (plist-get props :form)
+                                                    collect form)))))))
+
+  (defun jj--define-reader-for (type-name fields)
+    "Return an expression defining a reader-function of zero parameters, reading a TYPE-NAME with the given FIELDS."
+    `(defun ,(intern (format "read-jj-%s" type-name)) ()
+       ,(format "With point at the beginning of a `jj-%1$s' entry, parse the entry into a `jj-%1$s' struct." type-name)
+       ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
+          `(cl-loop initially (with-error-label ,(format "read struct label %s" type-name)
+                                (jj--re-step-over (rx ,(format "%s" type-name) ,jj--major-delim)))
+                    for (field-name key parser) in (list ,@(cl-loop for (field-name . props) in fields
+                                                                    for key = (intern (format ":%s" field-name))
+                                                                    for parser = (plist-get props :parser)
+                                                                    collect `(list ',field-name ,key ,parser)))
+                    ;; no delimiter for first field
+                    for first = t then nil
+                    for field-rx = (rx (group (* ,content))) then (rx ,jj--delim (group (* ,content)))
+                    when (with-error-label (format "read field %s" field-name)
+                           (jj--re-step-over field-rx))
+                    for parsed = (if parser
+                                     (save-match-data
+                                       (funcall parser (match-string 1)))
+                                   (match-string 1))
+                    nconc `(,key ,parsed)
+                    into struct-props
+                    finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props)))))
+
+  (defun jj--define-inserter-for (type-name field-specs)
+    "Return an expression defining an inserter-function of one parameter, the ENTRY of type TYPE-NAME to insert, with the given FIELD-SPECS defining names and properties of the fields."
+    `(defun ,(intern (format "insert-jj-%s" type-name)) (entry)
+      ,(format "Insert the ENTRY, formatted as a `jj-%s' entry." type-name)
+      ,(cl-labels ((field (name-sym)
+                     `(,(intern (format "jj-%s-%s" type-name name-sym))
+                       entry)))
+         `(with-insert-temp-buffer
+           (cl-loop for (field-name val printer face first sep) in (list ,@(cl-loop  
+                                                                            for (field-name . props) in field-specs
+                                                                            for first = (if-let ((c (plist-member props :first)))
+                                                                                            ;; if it's explicitly set (even nil), use that
+                                                                                            (car c)
+                                                                                          ;; otherwise, it's the first, so set it
+                                                                                          t)
+                                                                            ;; otherwise, it's not first, so unset it
+                                                                            then (plist-get props :first)
+                                                                            for sep = (plist-get props :separator)
+                                                                            for face = (plist-get props :face)
+                                                                            for printer = (plist-get props :printer)
+                                                                            collect `(list
+                                                                                      ',field-name
+                                                                                      ,(and field-name (field field-name))
+                                                                                      ,printer
+                                                                                      ,face
+                                                                                      ,first
+                                                                                      ,sep)))
+                    with effective-first
+                    do (when first
+                         (setq effective-first t))
+                    for sep = (or sep
+                                  (cond
+                                   (effective-first "")
+                                   (t " ")))
+                    for face = (cond ((functionp face)
+                                      (funcall face val entry))
+                                     (:else
+                                      face))
+                    do (when-let ((printed (s-presence
+                                            (if printer
+                                                (funcall printer val entry)
+                                              val))))
+                         (setq effective-first nil)
+                         (insert sep (apply #'propertize
+                                            `(,printed
+                                              help-echo ,(symbol-name field-name)
+                                              ,@(jj--if-arg face #'identity 'font-lock-face))))))
+           ;; ensure commit text ends on a newline
+           (unless (bolp)
+             (insert "\n"))
+           ;; add field to all the commit text (including newlines)
+           ;; pointing to the entry struct
+           (add-text-properties (point-min) (point-max) `(jj-object ,entry))))))
 #+end_src
 ** Log graph format
 #+begin_src elisp
