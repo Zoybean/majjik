@@ -7,7 +7,7 @@
 ;; Version: 0.1.0
 ;; Keywords: vc
 ;; URL: https://github.com/Zoybean/majjik
-;; Package-Requires: (dash s eieio with-editor magit-section promise transient llama)
+;; Package-Requires: (dash s eieio with-editor magit-section promise transient llama json)
 
 ;;; Commentary:
 
@@ -25,6 +25,7 @@
 (require 'llama)
 (require 'string-edit)
 (require 'magit-section)
+(require 'json)
 ;; Require:1 ends here
 
 ;; collect-repeat
@@ -1681,7 +1682,6 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   (let ((fields (-filter (-lambda ((name . rest)) name)
                          field-specs)))
     `(progn
-       (require 'json)
        ,(jj--define-shortdoc-for type-name fields)
        ;; (defvar ,(intern (format "jj-%s-regex" type-name))
        ;;   ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
