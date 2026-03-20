@@ -3304,11 +3304,11 @@ so far, the only significant differences in parity that I'm aware of, are:
      (jj-cmd-async--for-status "file-list"
        `("file" "list"
          "-T" ,(jj-status-file-tracked-template 'self)))
-     (lambda (proc)
+     (lambda (buf)
        (prog1
-           (with-current-buffer (process-buffer proc)
+           (with-current-buffer buf
              (jj--read-tracked-files))
-         (kill-buffer (process-buffer proc))))))
+         (kill-buffer buf)))))
 
   (defun jj--read-tracked-files ()
     "Read all `jj-status-file-tracked' in the buffer."
@@ -3326,8 +3326,8 @@ so far, the only significant differences in parity that I'm aware of, are:
                     `("util" "exec" "--"
                       "git" "ls-files"
                       "--others" "--ignored" "--exclude-standard" "--directory" "-z" "--" ,@untracked))
-                  (lambda (proc)
-                    (with-current-buffer (process-buffer proc)
+                  (lambda (buf)
+                    (with-current-buffer buf
                       (prog1
                           (let ((ignored (cl-loop initially (goto-char (point-min))
                                                   while (not (eobp))
@@ -3336,7 +3336,7 @@ so far, the only significant differences in parity that I'm aware of, are:
                                                           ?\0))
                                                   collect (match-string 1))))
                             (cons ignored untracked))
-                        (kill-buffer (process-buffer proc))))))
+                        (kill-buffer buf)))))
     )
 
 
@@ -3390,8 +3390,8 @@ so far, the only significant differences in parity that I'm aware of, are:
                     `("bookmark" "list"
                       "--conflicted"
                       "-T" ,(jj-status-bookmark-conflict-template 'self)))
-                  (lambda (proc)
-                    (with-current-buffer (process-buffer proc)
+                  (lambda (buf)
+                    (with-current-buffer buf
                       (prog1
                           (cl-loop initially (goto-char (point-min))
                                    while (progn
@@ -3400,7 +3400,7 @@ so far, the only significant differences in parity that I'm aware of, are:
                                            (not (eobp)))
                                    for entry = (read-jj-status-bookmark-conflict)
                                    collect entry)
-                        (kill-buffer (process-buffer proc)))))))
+                        (kill-buffer buf))))))
 #+end_src
 **** TODO ensure these are distinct from similar-name commands
 these section commands should be named to be sure that theydont collide with user-facing commands like jj-show for viewing a commit in its own buffer
@@ -3427,8 +3427,8 @@ but, they should also be able to rely on the same underlying machinery, if possi
                     `("show"
                       "--no-patch"
                       "-T" ,(jj-show-status-delim-template 'self)))
-                  (lambda (proc)
-                    (with-current-buffer (process-buffer proc)
+                  (lambda (buf)
+                    (with-current-buffer buf
                       (prog1
                           (with-error-label "read main status"
                             (with-error-context (lambda (e)
@@ -3470,7 +3470,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                                               for entry = (read-jj-status-file-conflict)
                                               collect entry))))))
                         (should (eobp))
-                        (kill-buffer))))))
+                        (kill-buffer buf))))))
 
   (defun jj-show-status-delim-template (self)
     (jj-template
@@ -4978,7 +4978,7 @@ main functions intended to run commands for various purposes:
                       #'jj--proc-print-crash
                       #'jj--proc-kill-output)
                      #'jj--proc-kill-error)
-                    #'jj-process-process)))
+                    (-compose #'process-buffer #'jj-process-process))))
 
   ;; TODO there's some lingering buffers left around, possibly by this.
   ;; look into it.

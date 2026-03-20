@@ -3282,11 +3282,11 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
    (jj-cmd-async--for-status "file-list"
      `("file" "list"
        "-T" ,(jj-status-file-tracked-template 'self)))
-   (lambda (proc)
+   (lambda (buf)
      (prog1
-         (with-current-buffer (process-buffer proc)
+         (with-current-buffer buf
            (jj--read-tracked-files))
-       (kill-buffer (process-buffer proc))))))
+       (kill-buffer buf)))))
 
 (defun jj--read-tracked-files ()
   "Read all `jj-status-file-tracked' in the buffer."
@@ -3304,8 +3304,8 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                   `("util" "exec" "--"
                     "git" "ls-files"
                     "--others" "--ignored" "--exclude-standard" "--directory" "-z" "--" ,@untracked))
-                (lambda (proc)
-                  (with-current-buffer (process-buffer proc)
+                (lambda (buf)
+                  (with-current-buffer buf
                     (prog1
                         (let ((ignored (cl-loop initially (goto-char (point-min))
                                                 while (not (eobp))
@@ -3314,7 +3314,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                                         ?\0))
                                                 collect (match-string 1))))
                           (cons ignored untracked))
-                      (kill-buffer (process-buffer proc))))))
+                      (kill-buffer buf)))))
   )
 
 
@@ -3370,8 +3370,8 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                   `("bookmark" "list"
                     "--conflicted"
                     "-T" ,(jj-status-bookmark-conflict-template 'self)))
-                (lambda (proc)
-                  (with-current-buffer (process-buffer proc)
+                (lambda (buf)
+                  (with-current-buffer buf
                     (prog1
                         (cl-loop initially (goto-char (point-min))
                                  while (progn
@@ -3380,7 +3380,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                          (not (eobp)))
                                  for entry = (read-jj-status-bookmark-conflict)
                                  collect entry)
-                      (kill-buffer (process-buffer proc)))))))
+                      (kill-buffer buf))))))
 ;; jj-bookmark-list for bookmark conflicts:1 ends here
 
 ;; Combined struct and output formatter
@@ -3406,8 +3406,8 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                   `("show"
                     "--no-patch"
                     "-T" ,(jj-show-status-delim-template 'self)))
-                (lambda (proc)
-                  (with-current-buffer (process-buffer proc)
+                (lambda (buf)
+                  (with-current-buffer buf
                     (prog1
                         (with-error-label "read main status"
                           (with-error-context (lambda (e)
@@ -3449,7 +3449,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                             for entry = (read-jj-status-file-conflict)
                                             collect entry))))))
                       (should (eobp))
-                      (kill-buffer))))))
+                      (kill-buffer buf))))))
 
 (defun jj-show-status-delim-template (self)
   (jj-template
@@ -4896,7 +4896,7 @@ Returns the raw process, not the combined handler."
                     #'jj--proc-print-crash
                     #'jj--proc-kill-output)
                    #'jj--proc-kill-error)
-                  #'jj-process-process)))
+                  (-compose #'process-buffer #'jj-process-process))))
 
 ;; TODO there's some lingering buffers left around, possibly by this.
 ;; look into it.
