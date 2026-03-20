@@ -3501,12 +3501,15 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                                   ("renamed" `(cyan "R" "{" ,from "=>" ,to "}")))
                           do (magit-insert-section sec
                                (jj-status-wc-change change)
-                               (magit-insert-heading
-                                 (propertize (concat list-prefix
-                                                     (mapconcat #'identity elems " ")
-                                                     "\n")
-                                             'font-lock-face `(:foreground ,(symbol-name color))
-                                             'jj-object change))
+                               (insert
+                                 (propertize
+                                  (concat
+                                   (jj--entitize-newlines
+                                    (propertize (concat list-prefix
+                                                        (mapconcat #'identity elems " "))
+                                                'font-lock-face `(:foreground ,(symbol-name color))))
+                                   "\n")
+                                  'jj-object change))
                                ))))
               (t (magit-insert-heading "Working copy unchanged\n"))))
       (magit-insert-section sec
