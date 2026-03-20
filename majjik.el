@@ -1685,7 +1685,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
          (field-names (mapcar #'car fields)))
     `(progn
        ,(jj--define-shortdoc-for type-name field-names)
-       ;; (defvar ,(intern (format "jj-%s-regex" type-name))
+       ;; (defvar ,(intern (format "%s-regex" type-name))
        ;;   ,(let* ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
        ;;      `(rx line-start
        ;;           (seq
@@ -1702,27 +1702,27 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
        ,(jj--define-template-for type-name fields)
        ,(jj--define-reader-for type-name fields)
        ,(jj--define-inserter-for type-name field-specs)
-       (cl-defstruct ,(intern (format "jj-%s" type-name))
+       (cl-defstruct ,(intern (format "%s" type-name))
          ,@field-names))))
 
 (defun jj--define-shortdoc-for (type-name field-names)
-  `(define-short-documentation-group ,(intern (format "jj-%s" type-name))
+  `(define-short-documentation-group ,(intern (format "%s" type-name))
      (define-jj-format
          :no-manual t)
-     (,(intern (format "read-jj-%s" type-name))
+     (,(intern (format "read-%s" type-name))
       :no-manual t)
-     (,(intern (format "insert-jj-%s" type-name))
+     (,(intern (format "insert-%s" type-name))
       :no-manual t)
-     (,(intern (format "jj-%s-template" type-name))
+     (,(intern (format "%s-template" type-name))
       :no-manual t)
-     (,(intern (format "make-jj-%s" type-name))
+     (,(intern (format "make-%s" type-name))
       :args (&key ,@field-names)
       :no-manual t)))
 
 (defun jj--define-template-for (type-name fields)
   "Return an expression defining a template-function named by TYPE-NAME, which accepts a SELF parameter, and produces a template applying to the symbol named by SELF, laid out according to FIELDS."
-  `(defun ,(intern (format "jj-%s-template" type-name)) (self)
-     ,(format "Get a commit template to produce entries parseable by `read-jj-%s'. SELF is the symbol to use for the self-type; usually this will just be `self', but if using the template in a lambda you may want a different type-name." type-name)
+  `(defun ,(intern (format "%s-template" type-name)) (self)
+     ,(format "Get a commit template to produce entries parseable by `read-%s'. SELF is the symbol to use for the self-type; usually this will just be `self', but if using the template in a lambda you may want a different type-name." type-name)
      (jj-template (cl-subst self 'self
                             '(++ ,(format "%S" type-name)
                                  ,jj--major-delim
@@ -1733,7 +1733,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 
 (defun jj--define-reader-for (type-name fields)
   "Return an expression defining a reader-function of zero parameters, reading a TYPE-NAME with the given FIELDS."
-  `(defun ,(intern (format "read-jj-%s" type-name)) ()
+  `(defun ,(intern (format "read-%s" type-name)) ()
      ,(format "With point at the beginning of a `jj-%1$s' entry, parse the entry into a `jj-%1$s' struct." type-name)
      ,(let ((content `(not (any ,jj--delim ,jj--major-delim "\r\n"))))
         `(cl-loop initially (with-error-label ,(format "read struct label %s" type-name)
@@ -1753,14 +1753,14 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                                  (match-string 1))
                   nconc `(,key ,parsed)
                   into struct-props
-                  finally return (apply #',(intern (format "make-jj-%s" type-name)) struct-props)))))
+                  finally return (apply #',(intern (format "make-%s" type-name)) struct-props)))))
 
 (defun jj--define-inserter-for (type-name field-specs)
   "Return an expression defining an inserter-function of one parameter, the ENTRY of type TYPE-NAME to insert, with the given FIELD-SPECS defining names and properties of the fields."
-  `(defun ,(intern (format "insert-jj-%s" type-name)) (entry)
-    ,(format "Insert the ENTRY, formatted as a `jj-%s' entry." type-name)
+  `(defun ,(intern (format "insert-%s" type-name)) (entry)
+    ,(format "Insert the ENTRY, formatted as a `%s' entry." type-name)
     ,(cl-labels ((field (name-sym)
-                   `(,(intern (format "jj-%s-%s" type-name name-sym))
+                   `(,(intern (format "%s-%s" type-name name-sym))
                      entry)))
        `(with-insert-temp-buffer
          (cl-loop for (field-name val printer face first sep) in (list ,@(cl-loop  
@@ -2219,7 +2219,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
 ;; log format
 
 ;; [[file:majjik.org::*log format][log format:1]]
-(define-jj-format log-header
+(define-jj-format jj-log-header
   (change-id-min
    :face (lambda (off ent)
            (cond ((jj-log-header-divergent ent)
@@ -2663,7 +2663,7 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
 ;; Status format
 
 ;; [[file:majjik.org::*Status format][Status format:1]]
-(define-jj-format status-lineage-entry
+(define-jj-format jj-status-lineage-entry
   (change-id-min
    :face (lambda (off ent)
            (cond ((jj-status-lineage-entry-divergent ent)
@@ -2770,7 +2770,7 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
                 (car (s-lines desc))))
    :form (:chain self (.description) (.escape_json))))
 
-(define-jj-format status-wc-change
+(define-jj-format jj-status-wc-change
   (status
    :form (:chain self (.status)))
   (path-source
@@ -2780,7 +2780,7 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    :parser #'json-parse-string
    :form (:chain self (.target) (.path) (.display) (.escape_json))))
 
-(define-jj-format status-file-conflict
+(define-jj-format jj-status-file-conflict
   (path
    :face '(:foreground "red")
    :parser #'json-parse-string
@@ -2788,18 +2788,18 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
   ;; (num-sides) ;; todo once it's representable in a template. for now, always unknown.
   )
 
-(define-jj-format status-file-untracked
+(define-jj-format jj-status-file-untracked
   (path
    :face '(:foreground "magenta")
    :parser #'json-parse-string
    :form (++ (:chain self (.display t) (.escape_json)) "\n")))
 
-(define-jj-format status-file-tracked
+(define-jj-format jj-status-file-tracked
   (path
    :parser #'json-parse-string
    :form (++ (:chain self (.path) (.display) (.escape_json)) "\n")))
 
-(define-jj-format status-bookmark-conflict
+(define-jj-format jj-status-bookmark-conflict
   (name
    :face '(:foreground "magenta")
    :form (:chain self (.name) ))
