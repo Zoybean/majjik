@@ -2188,52 +2188,47 @@ If the line is an elided entry, returns a single string, which is the prefix bef
 ;; (defclass jj-log-entry-section (magit-section)
 ;;   ((data :initarg :data)))
 
-;;TODO!!
 (defun jj-insert-annotated-log (graph header)
   (save-excursion (jj-insert header))
   (insert-jj-log-graph-prefix graph)
   (add-text-properties (point-min) (point-max) `(jj-object ,header)))
 
-(defun insert-jj-graph-log-maybe-elided (entry)
-  (pcase entry
-    ((pred jj-log-graph-p)
-     (magit-insert-section sec
-       (elided)
-       (insert (with-temp-buffer
-                 (insert-jj-log-elided entry)
-                 (s-chomp (buffer-string))))))
-    ((pred jj-log-entry-p)
-     (let ((header (jj-log-entry-header entry))
-           (graph (jj-log-entry-graph entry)))
-       (jj-insert-log-entry-section
-        entry
-        (with-temp-buffer
-          (jj-insert-annotated-log graph header)
-          (s-chomp (buffer-string))))))))
+(cl-defgeneric jj-insert-section (obj)
+  "Insert jj object OBJ within its own section.")
+
+(cl-defmethod jj-insert-section ((entry jj-log-entry))
+  "Insert a graph-prefixed log entry section."
+  (let ((header (jj-log-entry-header entry))
+        (graph (jj-log-entry-graph entry)))
+    (jj-insert-section-lines
+     2 jj-log-entry-section
+     entry
+     (with-temp-buffer
+       (jj-insert-annotated-log graph header)
+       (s-chomp (buffer-string))))))
+
+(cl-defmethod jj-insert-section ((elided-graph jj-log-graph))
+  "Insert a graph-prefixed elided log entry section."
+  (magit-insert-section sec
+    (elided)
+    (insert (with-temp-buffer
+              (insert-jj-log-elided elided-graph)
+              (s-chomp (buffer-string))))))
 
 (defmacro jj-insert-section-lines (n-lines section-type value content)
-  `(magit-insert-section sec
-     (,section-type ,value)
-     ;; (oset sec data entry)
-     (magit-insert-heading (concat (s-join "\n" `(,line-0 ,@(opt line-1)))
-                                   "\n"))
-     (when rest
-       (magit-insert-section-body
-         (dolist (line rest)
-           (insert line "\n"))))))
-
-(defun jj-insert-log-entry-section (entry content)
-  (-let (((line-0 line-1 . rest)
-          (s-split "\n" content)))
-    (magit-insert-section sec
-      (jj-log-entry-section entry)
-      ;; (oset sec data entry)
-      (magit-insert-heading (concat (s-join "\n" `(,line-0 ,@(opt line-1)))
-                                    "\n"))
-      (when rest
-        (magit-insert-section-body
-          (dolist (line rest)
-            (insert line "\n")))))))
+  "Insert a section containing the first N-LINES of CONTENT as the header and the rest as the body."
+  `(let* ((lines (s-split "\n" ,content))
+          (first (take ,n-lines lines))
+          (rest (nthcdr ,n-lines lines)))
+     (magit-insert-section sec
+       (,section-type ,value)
+       ;; (oset sec data entry)
+       (magit-insert-heading (concat (s-join "\n" lines)
+                                     "\n"))
+       (when rest
+         (magit-insert-section-body
+           (dolist (line rest)
+             (insert line "\n")))))))
 ;; plumbing:1 ends here
 
 ;; log format
@@ -3690,7 +3685,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
           (when log
             (magit-insert-section-body
               (dolist (entry log)
-                (insert-jj-graph-log-maybe-elided entry)))))))))
+                (jj-insert-section entry)))))))))
 ;; status piping fns:1 ends here
 
 ;; section
