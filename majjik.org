@@ -1648,6 +1648,8 @@ this might not actually work. I'm big sus actually.
 * Templates and Structs
 ** generic format macro
 #+begin_src elisp
+  (cl-defgeneric jj-insert (obj)
+    "Insert a jj object OBJ")
   (defmacro define-jj-format (type-name &rest field-specs)
     "Define the format to be used for parsing and formatting various jj output.
   Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
@@ -1735,7 +1737,7 @@ this might not actually work. I'm big sus actually.
 
   (defun jj--define-inserter-for (type-name field-specs)
     "Return an expression defining an inserter-function of one parameter, the ENTRY of type TYPE-NAME to insert, with the given FIELD-SPECS defining names and properties of the fields."
-    `(defun ,(intern (format "insert-%s" type-name)) (entry)
+    `(cl-defmethod jj-insert ((entry ,type-name))
       ,(format "Insert the ENTRY, formatted as a `%s' entry." type-name)
       ,(cl-labels ((field (name-sym)
                      `(,(intern (format "%s-%s" type-name name-sym))
@@ -1826,7 +1828,7 @@ this might not actually work. I'm big sus actually.
                 ;; repeatable list is identified by being a run
                 `(,graph-mandatory . ,resolved-tail))
                (`(,graph-mandatory)
-                ;; no tail, so assume the repeatable list is empty. in `insert-jj-log-entry', assume the last mandatory is repeatable.
+                ;; no tail, so assume the repeatable list is empty. in `jj-insert', assume the last mandatory is repeatable.
                 ;; special case used to identify (and print in grey) the truncated marker of fully-separate subtrees
                 ;; - this implementation is brittle AF. I really should set the truncation marker and search for it.
                 `(,graph-mandatory))
@@ -1904,7 +1906,7 @@ this might not actually work. I'm big sus actually.
                                      "   ")
                                     nil))))
       (with-temp-buffer
-        (insert-jj-log-entry entry)
+        (jj-insert entry)
         (should (string= (substring-no-properties (buffer-string))
                          "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n│  bic\n~  *big\n   multiline\n   message\n   with\n   honestly,\n   too much \n   text\n   right here\n"
                          )))))
@@ -1931,7 +1933,7 @@ this might not actually work. I'm big sus actually.
                                      "   ")
                                     nil))))
       (with-temp-buffer
-        (insert-jj-log-entry entry)
+        (jj-insert entry)
         (should (string= (substring-no-properties (buffer-string))
                          "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n│  \n~  \n   \n")))))
 
@@ -1955,7 +1957,7 @@ this might not actually work. I'm big sus actually.
                                     ()
                                     "│  "))))
       (with-temp-buffer
-        (insert-jj-log-entry entry)
+        (jj-insert entry)
         (should (string= (substring-no-properties (buffer-string))
                          "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n")))))
 #+end_src
@@ -2101,7 +2103,7 @@ this might not actually work. I'm big sus actually.
         (cl-loop for reg in regions
                  do (apply #'delete-region reg)))))
 
-  (defun insert-jj-log-elided (graph)
+  (cl-defmethod jj-insert ((graph jj-log-graph))
     "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
     (with-insert-temp-buffer
      (insert (propertize "(elided revisions)\n" 'font-lock-face '(:foreground "grey")))
@@ -2159,19 +2161,20 @@ this might not actually work. I'm big sus actually.
   (defclass jj-log-entry-section (magit-section)
     ((data :initarg :data)))
 
+  ;;TODO!!
   (defun insert-jj-graph-log-maybe-elided (entry)
     (pcase entry
       ((pred jj-log-graph-p)
        (magit-insert-section sec
          (elided)
          (magit-insert-heading (with-temp-buffer
-                                 (insert-jj-log-elided entry)
+                                 (jj-insert entry)
                                  (s-chomp (buffer-string))))))
       ((pred jj-log-entry-p)
        (let ((header (jj-log-entry-header entry)))
          (-let (((line-0 line-1 . rest)
                  (s-split "\n" (with-temp-buffer
-                                 (save-excursion (insert-jj-log-header header))
+                                 (save-excursion (jj-insert header))
                                  (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
                                  (add-text-properties (point-min) (point-max) `(jj-object ,header))
                                  (s-chomp (buffer-string))))))
@@ -3508,7 +3511,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                                       (:lit ,(jj-status-file-conflict-template 'f))))
                               (.join "\n"))))))
 
-  (defun insert-jj-status (status)
+  (cl-defmethod jj-insert ((status jj-status))
     (with-slots (files-untracked
                  files-changed
                  commit-working-copy
@@ -3554,12 +3557,12 @@ but, they should also be able to rely on the same underlying machinery, if possi
             (magit-insert-section sec
               (jj-status-lineage-entry commit-working-copy)
               (insert "Working copy  (@) : ")
-              (insert-jj-status-lineage-entry commit-working-copy))
+              (jj-insert commit-working-copy))
             (cl-loop for parent in commits-parent
                      do (magit-insert-section sec
                           (jj-status-lineage-entry parent)
                           (insert "Parent commit (@-): ")
-                          (insert-jj-status-lineage-entry parent)))))
+                          (jj-insert parent)))))
         (when files-conflict
           (magit-insert-section sec
             (jj-status-files-conflict files-conflict)
@@ -3569,7 +3572,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                        do (magit-insert-section sec
                             (jj-status-file-conflict conflict)
                             (insert list-prefix)
-                            (insert-jj-status-file-conflict conflict))))))
+                            (jj-insert conflict))))))
         (when bookmarks-conflict
           (magit-insert-section sec
             (jj-status-bookmarks-conflict bookmarks-conflict)
@@ -3579,7 +3582,7 @@ but, they should also be able to rely on the same underlying machinery, if possi
                        do (magit-insert-section sec
                             (jj-status-bookmark-conflict conflict)
                             (insert list-prefix)
-                            (insert-jj-status-bookmark-conflict conflict))))))
+                            (jj-insert conflict))))))
         (when files-untracked
           (magit-insert-section sec
             (jj-status-files-untracked files-untracked)
@@ -3589,11 +3592,11 @@ but, they should also be able to rely on the same underlying machinery, if possi
                        do (magit-insert-section sec
                             (jj-status-file-untracked file)
                             (insert list-prefix)
-                            (insert-jj-status-file-untracked file)))))))))
+                            (jj-insert file)))))))))
 
   (ert-deftest jj-test-insert-status ()
     (with-temp-buffer
-      (insert-jj-status 
+      (jj-insert 
        (make-jj-status
         :files-untracked
         '(#s(jj-status-file-untracked "hello")
@@ -3682,14 +3685,14 @@ but, they should also be able to rely on the same underlying machinery, if possi
             (jj-status-section stat)
             (magit-insert-heading "Status:\n")
             (magit-insert-section-body
-              (insert-jj-status stat)))
+              (jj-insert stat)))
           (magit-insert-section sec
             (jj-log-section log)
             (magit-insert-heading "Log:\n")
             (when log
               (magit-insert-section-body
                 (dolist (entry log)
-                  (insert-jj-graph-log-maybe-elided entry)))))))))
+                  (jj-insert entry)))))))))
 #+end_src
 *** jj-log
 **** section

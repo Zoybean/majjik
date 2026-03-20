@@ -1670,6 +1670,8 @@ See URL `https://docs.jj-vcs.dev/latest/templates/' for more info."
 ;; generic format macro
 
 ;; [[file:majjik.org::*generic format macro][generic format macro:1]]
+(cl-defgeneric jj-insert (obj)
+  "Insert a jj object OBJ")
 (defmacro define-jj-format (type-name &rest field-specs)
   "Define the format to be used for parsing and formatting various jj output.
 Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
@@ -1757,7 +1759,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 
 (defun jj--define-inserter-for (type-name field-specs)
   "Return an expression defining an inserter-function of one parameter, the ENTRY of type TYPE-NAME to insert, with the given FIELD-SPECS defining names and properties of the fields."
-  `(defun ,(intern (format "insert-%s" type-name)) (entry)
+  `(cl-defmethod jj-insert ((entry ,type-name))
     ,(format "Insert the ENTRY, formatted as a `%s' entry." type-name)
     ,(cl-labels ((field (name-sym)
                    `(,(intern (format "%s-%s" type-name name-sym))
@@ -1850,7 +1852,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
               ;; repeatable list is identified by being a run
               `(,graph-mandatory . ,resolved-tail))
              (`(,graph-mandatory)
-              ;; no tail, so assume the repeatable list is empty. in `insert-jj-log-entry', assume the last mandatory is repeatable.
+              ;; no tail, so assume the repeatable list is empty. in `jj-insert', assume the last mandatory is repeatable.
               ;; special case used to identify (and print in grey) the truncated marker of fully-separate subtrees
               ;; - this implementation is brittle AF. I really should set the truncation marker and search for it.
               `(,graph-mandatory))
@@ -1928,7 +1930,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                    "   ")
                                   nil))))
     (with-temp-buffer
-      (insert-jj-log-entry entry)
+      (jj-insert entry)
       (should (string= (substring-no-properties (buffer-string))
                        "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n│  bic\n~  *big\n   multiline\n   message\n   with\n   honestly,\n   too much \n   text\n   right here\n"
                        )))))
@@ -1955,7 +1957,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                    "   ")
                                   nil))))
     (with-temp-buffer
-      (insert-jj-log-entry entry)
+      (jj-insert entry)
       (should (string= (substring-no-properties (buffer-string))
                        "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n│  \n~  \n   \n")))))
 
@@ -1979,7 +1981,7 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
                                   ()
                                   "│  "))))
     (with-temp-buffer
-      (insert-jj-log-entry entry)
+      (jj-insert entry)
       (should (string= (substring-no-properties (buffer-string))
                        "@  puvwmkxr zoeyhewll@gmail.com 2025-12-18 18:07:32 f610054a\n")))))
 ;; Log graph format:1 ends here
@@ -2128,7 +2130,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
       (cl-loop for reg in regions
                do (apply #'delete-region reg)))))
 
-(defun insert-jj-log-elided (graph)
+(cl-defmethod jj-insert ((graph jj-log-graph))
   "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
   (with-insert-temp-buffer
    (insert (propertize "(elided revisions)\n" 'font-lock-face '(:foreground "grey")))
@@ -2186,19 +2188,20 @@ If the line is an elided entry, returns a single string, which is the prefix bef
 (defclass jj-log-entry-section (magit-section)
   ((data :initarg :data)))
 
+;;TODO!!
 (defun insert-jj-graph-log-maybe-elided (entry)
   (pcase entry
     ((pred jj-log-graph-p)
      (magit-insert-section sec
        (elided)
        (magit-insert-heading (with-temp-buffer
-                               (insert-jj-log-elided entry)
+                               (jj-insert entry)
                                (s-chomp (buffer-string))))))
     ((pred jj-log-entry-p)
      (let ((header (jj-log-entry-header entry)))
        (-let (((line-0 line-1 . rest)
                (s-split "\n" (with-temp-buffer
-                               (save-excursion (insert-jj-log-header header))
+                               (save-excursion (jj-insert header))
                                (insert-jj-log-graph-prefix (jj-log-entry-graph entry))
                                (add-text-properties (point-min) (point-max) `(jj-object ,header))
                                (s-chomp (buffer-string))))))
@@ -3487,7 +3490,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                     (:lit ,(jj-status-file-conflict-template 'f))))
                             (.join "\n"))))))
 
-(defun insert-jj-status (status)
+(cl-defmethod jj-insert ((status jj-status))
   (with-slots (files-untracked
                files-changed
                commit-working-copy
@@ -3533,12 +3536,12 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
           (magit-insert-section sec
             (jj-status-lineage-entry commit-working-copy)
             (insert "Working copy  (@) : ")
-            (insert-jj-status-lineage-entry commit-working-copy))
+            (jj-insert commit-working-copy))
           (cl-loop for parent in commits-parent
                    do (magit-insert-section sec
                         (jj-status-lineage-entry parent)
                         (insert "Parent commit (@-): ")
-                        (insert-jj-status-lineage-entry parent)))))
+                        (jj-insert parent)))))
       (when files-conflict
         (magit-insert-section sec
           (jj-status-files-conflict files-conflict)
@@ -3548,7 +3551,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                      do (magit-insert-section sec
                           (jj-status-file-conflict conflict)
                           (insert list-prefix)
-                          (insert-jj-status-file-conflict conflict))))))
+                          (jj-insert conflict))))))
       (when bookmarks-conflict
         (magit-insert-section sec
           (jj-status-bookmarks-conflict bookmarks-conflict)
@@ -3558,7 +3561,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                      do (magit-insert-section sec
                           (jj-status-bookmark-conflict conflict)
                           (insert list-prefix)
-                          (insert-jj-status-bookmark-conflict conflict))))))
+                          (jj-insert conflict))))))
       (when files-untracked
         (magit-insert-section sec
           (jj-status-files-untracked files-untracked)
@@ -3568,11 +3571,11 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                      do (magit-insert-section sec
                           (jj-status-file-untracked file)
                           (insert list-prefix)
-                          (insert-jj-status-file-untracked file)))))))))
+                          (jj-insert file)))))))))
 
 (ert-deftest jj-test-insert-status ()
   (with-temp-buffer
-    (insert-jj-status 
+    (jj-insert 
      (make-jj-status
       :files-untracked
       '(#s(jj-status-file-untracked "hello")
@@ -3663,14 +3666,14 @@ Also sets `jj--current-status' in the initial buffer when the status process com
           (jj-status-section stat)
           (magit-insert-heading "Status:\n")
           (magit-insert-section-body
-            (insert-jj-status stat)))
+            (jj-insert stat)))
         (magit-insert-section sec
           (jj-log-section log)
           (magit-insert-heading "Log:\n")
           (when log
             (magit-insert-section-body
               (dolist (entry log)
-                (insert-jj-graph-log-maybe-elided entry)))))))))
+                (jj-insert entry)))))))))
 ;; status piping fns:1 ends here
 
 ;; section
