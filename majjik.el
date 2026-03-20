@@ -1953,26 +1953,28 @@ Reverted buffer is the one that was active when this function was called."
       (jj-dash (project-root (project-current t)))
     (user-error "`jj-project-dash' requires `project' 0.3.0 or greater")))
 
-(defun jj-make-section-buffer (section-name &optional header trailer)
+(defun jj-make-section-buffer (section-name header trailer)
   "Make a jj section called SECTION-NAME which is narrowed down to the current value of point. Returns the buffer.
  HEADER is the text to insert before the section, and TRAILER is the text to insert after it."
   (let ((buf (clone-indirect-buffer
               (format "*jj-%s-section %s*" section-name default-directory)
-              nil :norecord)))
+              nil :norecord))
+        (marker (make-marker)))
     (prog1 buf
-      (insert header)
+      (when header (insert header))
       ;; make sure there's something between end-of-buffer and where we'll be inserting stuff
       (save-excursion
+        (when (string= "" trailer)
+          (warn "empty section trailer for %s" section-name))
         (insert trailer)
-        (push-mark nil :nomsg))
+        (setf (marker-position marker) (point)))
       ;; record point from the original buffer
       ;; seems there's a race condition to update it in the indirect buffer
       (let ((p (point)))
         (with-current-buffer buf
           (narrow-to-region p p)))
-      ;; step over the added character
-      (goto-char (mark))
-      (pop-mark))))
+      ;; step over the added trailer
+      (goto-char marker))))
 ;; Dashboard buffer:1 ends here
 
 ;; jj-show for status section
@@ -2841,13 +2843,13 @@ When NO-ERROR, return the error code instead of raising an error. See `call-cmd'
 ;; [[file:majjik.org::*async command utils][async command utils:1]]
 (defalias 'jj-cmd-async 'jj-cmd-promise)
 
-(defun jj-cmd-promise (name cmd &optional no-revert silent-ok no-kill-output)
+(defun jj-cmd-promise (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
   "Run CMD asynchronously, returning a promise of its completion.
 
-On success, reverts the repo's dash buffer unless NO-REVERT, prints a message unless SILENT-OK, kills the output buffer unless NO-KILL-OUTPUT, and returns the process. On error, prints a message indicating the command log buffer, and returns a cons (PROCESS . EVENT)."
+On success, reverts the repo's dash buffer unless NO-REVERT, prints a message unless SILENT-OK, kills the output buffer unless NO-KILL-OUTPUT, and returns the process. On error, prints a message indicating the command log buffer, and returns a cons (PROCESS . EVENT). If OUTPUT-BUFFER, use that buffer for stdout instead of a temp indirect buffer."
   (declare (indent 2))
   (promise-then
-   (jj-cmd--promise name cmd)
+   (jj-cmd--promise name cmd output-buffer)
    (jj--make-async-success-callback name no-revert silent-ok no-kill-output)
    (jj--make-async-failure-callback name)))
 
@@ -2867,7 +2869,7 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
   (-lambda ((proc . event))
     (message "`jj %s' failed. Type %s to see logs" name (substitute-command-keys "\\[jj-pop-to-command-log]"))))
 
-(defun jj-cmd--promise (name cmd)
+(defun jj-cmd--promise (name cmd &optional output-buffer)
   "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
   (declare (indent 2))
   (let ((repo-dir default-directory))
@@ -2880,11 +2882,13 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
        (lambda (resolve reject)
          (let ((proc (make-process
                       :name (format "jj-%s" name)
-                      :buffer stdout
+                      :buffer (or output-buffer stdout)
                       :stderr stderr
                       :sentinel (jj--make-update-exit-code-sentinel code)
                       :noquery t
                       :command full-cmd)))
+           (when output-buffer
+             (kill-buffer stdout))
            (jj--set-initial-run-status code)
            (add-function :after (process-sentinel proc)
                          (jj--make-print-status-sentinel stderr))
@@ -2900,20 +2904,6 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                          (jj--make-cleanup-sentinel stderr code))))))))
 ;; async command utils:1 ends here
 
-;; util
-
-;; [[file:majjik.org::*util][util:1]]
-(defun jj--make-async-copy-cleanup-pop-callback (to-buf)
-  "For jj commands which open up a new output buffer, make a callback to copy from the process buffer into TO-BUF,
-then kill the process buffer and pop to TO-BUF."
-  (lambda (proc)
-    (with-current-buffer to-buf
-      (let ((inhibit-read-only t))
-        (replace-buffer-contents (process-buffer proc)))
-      (kill-buffer (process-buffer proc)))
-    (pop-to-buffer to-buf)))
-;; util:1 ends here
-
 ;; jj diff
 
 ;; [[file:majjik.org::*jj diff][jj diff:1]]
@@ -2922,9 +2912,6 @@ then kill the process buffer and pop to TO-BUF."
   (let* ((repo-dir default-directory)
          (main-buf (get-buffer-create (format "*jj-diff %s:%s:%s*" repo-dir at fileset))))
     (with-current-buffer main-buf
-      (diff-mode)
-      (view-mode-enter nil #'kill-buffer)
-      (setq-local default-directory repo-dir)
       (let ((inhibit-read-only t))
         (erase-accessible-buffer)))
     (promise-then
@@ -2937,8 +2924,14 @@ then kill the process buffer and pop to TO-BUF."
            ,@(jj--if-arg to #'identity "--to")
            "--"
            ,@(jj--if-arg fileset #'identity nil))
-       :no-revert :silent-ok :no-kill-output)
-     (jj--make-async-copy-cleanup-pop-callback main-buf))))
+       :no-revert :silent-ok :no-kill-output main-buf)
+     (lambda (proc)
+       (with-current-buffer main-buf
+         (diff-mode)
+         (view-mode-enter nil #'kill-buffer)
+         (setq-local default-directory repo-dir))
+
+       (pop-to-buffer main-buf)))))
 
 (defun jj-diff-at (revset &optional fileset)
   "View the diff for REVISION, optionally limited to files in FILESET."
@@ -2957,10 +2950,6 @@ then kill the process buffer and pop to TO-BUF."
   (let* ((repo-dir default-directory)
          (main-buf (get-buffer-create (format "*jj-show %s:%s:%s*" repo-dir commit fileset))))
     (with-current-buffer main-buf
-      ;; TODO get a better mode for full commit view
-      (diff-mode)
-      (view-mode-enter nil #'kill-buffer)
-      (setq-local default-directory repo-dir)
       (let ((inhibit-read-only t))
         (erase-accessible-buffer)))
     (promise-then
@@ -2971,8 +2960,15 @@ then kill the process buffer and pop to TO-BUF."
            "-r" ,commit
            "--"
            ,@(jj--if-arg fileset #'identity nil))
-       :no-revert :silent-ok :no-kill-output)
-     (jj--make-async-copy-cleanup-pop-callback main-buf))))
+       :no-revert :silent-ok :no-kill-output main-buf)
+     (lambda (proc)
+       (with-current-buffer main-buf
+         ;; TODO get a better mode for full commit view
+         (diff-mode)
+         (view-mode-enter nil #'kill-buffer)
+         (setq-local default-directory repo-dir))
+
+       (pop-to-buffer main-buf)))))
 ;; jj show:1 ends here
 
 ;; jj undo
