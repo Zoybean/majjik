@@ -1346,86 +1346,92 @@ cursor appears to jump to top of screen when inside a collapsed section as it co
                                                      :first-line-node graph-node
                                                      :first-line-suffix graph-suf
                                                      :mandatory-segments graph-tail))))
-       (defun insert-jj-log-entry (entry)
-         "Insert the ENTRY, formatted as a jj log entry."
+       (defun jj--insert-log-header (header)
+         "Insert the HEADER object formatted for a jj log."
          ,(cl-labels ((field (name-sym)
                         `(,(intern (format "%s-%s" 'jj-log-header name-sym))
                           header)))
-            `(let ((target-buffer (current-buffer)))
-               (with-temp-buffer
-                 (let ((header (jj-log-entry-header entry))
-                       (graph (jj-log-entry-graph entry)))
-                   ;; open a buffer to make a mess in
-                   ;; we'll insert its contents later
-                   (cl-loop for (name val printer face sep) in (list ,@(cl-loop  
-                                                                        for (name . props) in fields
-                                                                        for first = t then nil
-                                                                        for sep = (if-let ((sep (plist-get props :separator)))
-                                                                                      sep
-                                                                                    (cond
-                                                                                     (first "")
-                                                                                     (t " ")))
-                                                                        for face = (plist-get props :face)
-                                                                        for printer = (plist-get props :printer)
-                                                                        collect `(list ',name ,(field name) ,printer ,face ,sep)))
-                            do (when-let ((printed (s-presence
-                                                    (if printer
-                                                        (funcall printer val header)
-                                                      val))))
-                                 ;; combine the field property
-                                 ;; (push-text-property 0 (length printed)
-                                 ;;                     jj-field-path (,name) printed)
-                                 (insert sep (apply #'propertize
-                                                    `(,printed ;; value to propertize
-                                                      ;; properties
-                                                      jj-field ,name 
-                                                      help-echo ,(symbol-name name)
-                                                      ,@(jj--if-arg face #'identity 'face))))))
-                   ;; ensure commit text ends on a newline
-                   (unless (bolp)
-                     (insert "\n"))
-                   ;; add field to all the commit text (including newlines)
-                   ;; pointing to the header struct
-                   (add-text-properties (point-min) (point-max) `(jj-object ,header))
-                   ;; insert the mandatory graph prefix segments
-                   ;; these will add new lines if there arent enough already
-                   (cl-loop initially (progn
-                                        (goto-char (point-min))
-                                        (insert (jj-log-graph-first-line-prefix graph)
-                                                (propertize (jj-log-graph-first-line-node graph)
-                                                            'face '(:foreground "cyan")
-                                                            'jj-object header)
-                                                (jj-log-graph-first-line-suffix graph))
-                                        (forward-line 1))
-                            for (prefix . rest) on (jj-log-graph-mandatory-segments graph)
-                            do (progn
-                                 (cond ((and
-                                         ;; last nonempty mandatory segment
-                                         (not (cdr rest))
-                                         (not (string= "" (string-trim prefix)))
-                                         ;; no repeatable segments
-                                         (not (jj-log-graph-repeatable-segment graph)))
-                                        (insert (propertize prefix 'face '(:foreground "grey"))))
-                                       (t
-                                        (insert prefix)))
-                                 (forward-line 1)
-                                 ;; while there's more mandatory graph segments, put them on new lines if you have to
-                                 (unless (bolp)
-                                   (insert "\n"))))
-                   ;; insert the repeatable graph prefix segments
-                   ;; these are added to all remaining lines, but no new lines are added
-                   (cl-loop with tail = (or (jj-log-graph-repeatable-segment graph)
-                                            (car (last (jj-log-graph-mandatory-segments graph))))
-                            while (and (bolp)
-                                       (not (eobp)))
-                            do (progn (insert tail)
-                                      (forward-line 1)))
-                   ;; insert the content of this temp buffer into the target buffer
-                   ;; we can't just return it from the with-temp-buffer block,
-                   ;; as by that point it's been disposed
-                   (let ((content-buffer (current-buffer)))
-                     (with-current-buffer target-buffer
-                       (insert-buffer-substring content-buffer))))))))
+            `(progn
+               (cl-loop for (name val printer face sep) in (list ,@(cl-loop  
+                                                                    for (name . props) in fields
+                                                                    for first = t then nil
+                                                                    for sep = (if-let ((sep (plist-get props :separator)))
+                                                                                  sep
+                                                                                (cond
+                                                                                 (first "")
+                                                                                 (t " ")))
+                                                                    for face = (plist-get props :face)
+                                                                    for printer = (plist-get props :printer)
+                                                                    collect `(list ',name ,(field name) ,printer ,face ,sep)))
+                        do (when-let ((printed (s-presence
+                                                (if printer
+                                                    (funcall printer val header)
+                                                  val))))
+                             ;; combine the field property
+                             ;; (push-text-property 0 (length printed)
+                             ;;                     jj-field-path (,name) printed)
+                             (insert sep (apply #'propertize
+                                                `(,printed ;; value to propertize
+                                                  ;; properties
+                                                  jj-field ,name 
+                                                  help-echo ,(symbol-name name)
+                                                  ,@(jj--if-arg face #'identity 'face))))))
+               ;; ensure commit text ends on a newline
+               (unless (bolp)
+                 (insert "\n")))))
+       (defun jj--prefix-insert-log-graph (graph)
+         "Insert the GRAPH object as a prefix to all lines of the current buffer."
+         ;; insert the mandatory graph prefix segments
+         ;; these will add new lines if there arent enough already
+         (cl-loop initially (progn
+                              (goto-char (point-min))
+                              (insert (jj-log-graph-first-line-prefix graph)
+                                      (propertize (jj-log-graph-first-line-node graph)
+                                                  'face '(:foreground "cyan"))
+                                      (jj-log-graph-first-line-suffix graph))
+                              (forward-line 1))
+                  for (prefix . rest) on (jj-log-graph-mandatory-segments graph)
+                  do (progn
+                       (cond ((and
+                               ;; last nonempty mandatory segment
+                               (not (cdr rest))
+                               (not (string= "" (string-trim prefix)))
+                               ;; no repeatable segments
+                               (not (jj-log-graph-repeatable-segment graph)))
+                              (insert (propertize prefix 'face '(:foreground "grey"))))
+                             (t
+                              (insert prefix)))
+                       (forward-line 1)
+                       ;; while there's more mandatory graph segments, put them on new lines if you have to
+                       (unless (bolp)
+                         (insert "\n"))))
+         ;; insert the repeatable graph prefix segments
+         ;; these are added to all remaining lines, but no new lines are added
+         (cl-loop with tail = (or (jj-log-graph-repeatable-segment graph)
+                                  (car (last (jj-log-graph-mandatory-segments graph))))
+                  while (and (bolp)
+                             (not (eobp)))
+                  do (progn (insert tail)
+                            (forward-line 1))))
+       (defun insert-jj-log-entry (entry)
+         "Insert the ENTRY, formatted as a jj log entry."
+         (let ((target-buffer (current-buffer)))
+           ;; open a buffer to make a mess in
+           ;; we'll insert its contents later
+           (with-temp-buffer
+             (let ((header (jj-log-entry-header entry))
+                   (graph (jj-log-entry-graph entry)))
+               (jj--insert-log-header header)
+               (jj--prefix-insert-log-graph graph)
+               ;; add field to all the commit text (including newlines)
+               ;; pointing to the header struct
+               (add-text-properties (point-min) (point-max) `(jj-object ,header))
+               ;; insert the content of this temp buffer into the target buffer
+               ;; we can't just return it from the with-temp-buffer block,
+               ;; as by that point it's been disposed
+               (let ((content-buffer (current-buffer)))
+                 (with-current-buffer target-buffer
+                   (insert-buffer-substring content-buffer)))))))
        (defun insert-jj-log-elided (graph)
          "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
          (let ((target-buffer (current-buffer)))
