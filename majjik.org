@@ -283,9 +283,25 @@
      #b00000000
      #b00000000])
 
-  (defun jj--make-process-log-section-buffers (name cmd)
-    "Return a triple of buffers (CODE STDOUT . STDERR) for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams.
-  Also sets up folding so that TAB anywhere within a command will toggle the display of the full log."
+  (cl-defstruct jj--process-log-entry
+    "The buffers representing the various sections of a jj process' output"
+    (name nil :type string
+          :documentation "Description of the process, e.g. the command line used to invoke it")
+    (buf-code nil :type buffer
+              :documentation "Buffer containing only the area where exit code of the process will be written.")
+    (buf-stdout nil :type buffer
+                :documentation "Buffer for process standard output.")
+    (buf-stderr nil :type buffer
+                :documentation "Buffer for process standard error.")
+    (ovl-control nil :type overlay
+                 :documentation "Overlay for the area through which the user may interact with the process.")
+    (ovl-collapse nil :type overlay
+                  :documentation "Overlay for the area which should be collapsible.")
+    (ovl-err nil :type overlay
+             :documentation "Overlay for the process standard error."))
+
+  (defun jj--make-process-log-entry (name cmd)
+    "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams."
     (let ((repo-dir default-directory))
       (with-current-buffer (jj--get-command-log-buf repo-dir)
         (goto-char (point-max))
@@ -314,62 +330,14 @@
                (ovl-err (make-overlay mark-err-start mark-collapse-end))
                (ovl-control (make-overlay mark-control-start mark-control-end))
                )
-          (let* ((ellipsis "\n")
-                 (fringe> '(left-fringe jj-fringe-bitmap> fringe))
-                 (fringev '(left-fringe jj-fringe-bitmapv fringe))
-                 (collapsed nil)
-                 (toggle (lambda ()
-                           (interactive)
-                           (setq collapsed
-                                 ;; collapse regardless if output is empty
-                                 (or (jj--empty-output-p (jj--overlay-text ovl-collapse))
-                                     ;; otherwise, toggle
-                                     (not collapsed)))
-                           ;; the cursor jumping is because of this.
-                           ;; commented out, no jumping.
-                           (overlay-put ovl-control
-                                        'before-string
-                                        (concat
-                                         ;; i've put 2 hidden spaces to work around some display quirks.
-                                         ;; for some reason, if the before-string is invisible,
-                                         ;; and the display property is nil (conditional or otherwise),
-                                         ;; then the colour disappears from the exit code.
-                                         (propertize " " 'display
-                                                     ;; hide fringe when content empty
-                                                     `(when (not (jj--empty-output-p (jj--overlay-text ,ovl-collapse)))
-                                                        ;; change fringe to match expand-collapse state.
-                                                        ,@(if collapsed fringe> fringev))
-                                                     'invisible t
-                                                     'cursor-intangible t)
-                                         (propertize " " 'display "")))
-                           (overlay-put ovl-collapse
-                                        'display
-                                        ;; there's no way to remove an overlay property except by
-                                        ;; setting it nil. this still overrides the corresponding
-                                        ;; text properties, unfortunately
-                                        (and collapsed ellipsis)))))
-            (funcall toggle)
-            (overlay-put ovl-err 'face '(:foreground "grey"))
-            (overlay-put ovl-control 'keymap
-                         (jj--make-toggle-keymap toggle))
-            `(,code-buf ,stdout . ,stderr))))))
-
-  (defun jj--empty-output-p (string)
-    "Returns non-nil when STRING is only unicode whitespace."
-    (string-match-p (rx string-start
-                        (* (any space))
-                        string-end)
-                    string))
-
-  (defun jj--overlay-text (ovl)
-    (with-current-buffer (overlay-buffer ovl)
-      (buffer-substring (overlay-start ovl) (overlay-end ovl))))
-
-  (defun jj--make-toggle-keymap (toggle-fn)
-    "Make a keymap that binds TAB to TOGGLE-FN."
-    (let ((map (make-sparse-keymap)))
-      (keymap-set map "TAB" toggle-fn)
-      map))
+          (make-jj--process-log-entry
+           :name name
+           :buf-code code-buf
+           :buf-stdout stdout
+           :buf-stderr stderr
+           :ovl-control ovl-control
+           :ovl-collapse ovl-collapse
+           :ovl-err ovl-err)))))
 
   (defun jj--set-initial-run-status (code-buf)
     (with-current-buffer code-buf
@@ -1998,7 +1966,7 @@ cursor appears to jump to top of screen when inside a collapsed section as it co
   (defun jj-jump-find-object (pred)
     (cl-loop for pos = (point-min) then (next-single-property-change pos 'jj-object)
              while pos
-             for obj = (get-text-property pos 'jj-object)
+             for obj = (get-pos-property pos 'jj-object)
              when (funcall pred obj) return (goto-char pos)))
 
   (defun jj-jump-to-thing (thing &optional test)
@@ -2987,10 +2955,10 @@ need error handling in these. but I do like them being synchronous i think.
 **** thing at point
 #+begin_src elisp
   (defun jj-thing-at-point ()
-    (get-text-property (point) 'jj-object))
+    (get-pos-property (point) 'jj-object))
 
   (defun jj-field-at-point ()
-    (get-text-property (point) 'jj-field))
+    (get-pos-property (point) 'jj-field))
 
   (defun jj-struct-slot-value (slot inst)
     (cl-struct-slot-value
@@ -3044,6 +3012,9 @@ need error handling in these. but I do like them being synchronous i think.
     "Show the change at point."
     (jj-show (jj-log-header-commit-id thing)))
 #+end_src
+***** TODO Enrich the inspect buffer
+I want it so that each structure has its fields accessible, so I can hit comma on a field to get the buffer for the same structure with that field selected, and then hit comma on the field-specific display section to get a buffer for that field's contents (if any).
+I'd like to be able to view e.g. an overlay's properties, and the name of each field (maybe on hover).
 **** swap buffers, same dir
 might actually not use these as I need a lexical variable anyway in most cases where i'm following this pattern
 #+begin_src elisp
@@ -3149,37 +3120,151 @@ might actually not use these as I need a lexical variable anyway in most cases w
     "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
     (declare (indent 2))
     (let ((repo-dir default-directory))
-      (-let* ((full-cmd `("jj"
+      (let ((full-cmd `("jj"
                           ,@jj-global-default-args
                           ,@jj-logging-default-args
-                          ,@cmd))
-              ((code stdout . stderr) (jj--make-process-log-section-buffers name full-cmd)))
-        (promise-new
-         (lambda (resolve reject)
-           (let ((proc (make-process
-                        :name (format "jj-%s" name)
-                        :buffer (or output-buffer stdout)
-                        :stderr stderr
-                        :sentinel (jj--make-update-exit-code-sentinel code)
-                        :noquery t
-                        :command full-cmd)))
-             (when output-buffer
-               (kill-buffer stdout))
-             (set-process-sentinel (get-buffer-process stderr)
-                                   #'jj--default-stderr-sentinel)
-             (jj--set-initial-run-status code)
-             (add-function :after (process-sentinel proc)
-                           (jj--make-print-status-sentinel stderr))
-             (add-function :after (process-sentinel proc)
-                           (make-jj-callback-sentinel
-                            (lambda (code event)
-                              (if (eq code 0)
-                                  (funcall resolve proc)
-                                (funcall reject (cons proc event))))))
-             ;; this always runs before the subsequent callbacks,
-             ;; which means `resolve' and `reject' are not themselves callbacks
-             (add-function :after (process-sentinel proc)
-                           (jj--make-cleanup-sentinel stderr code))))))))
+                          ,@cmd)))
+        (pcase-let (((and proc-entry
+                          (cl-struct jj--process-log-entry
+                                     buf-code
+                                     buf-stdout
+                                     buf-stderr
+                                     ovl-control
+                                     ovl-collapse
+                                     ovl-err))
+                     (jj--make-process-log-entry name full-cmd)))
+          (promise-new
+           (lambda (resolve reject)
+             (let ((proc (make-process
+                          :name (format "jj-%s" name)
+                          :buffer (or output-buffer buf-stdout)
+                          :stderr buf-stderr
+                          :sentinel (jj--make-update-exit-code-sentinel buf-code)
+                          :noquery t
+                          :command full-cmd)))
+               (setf (jj--process-log-entry-process proc-entry) proc)
+               (overlay-put ovl-control 'jj-object proc-entry)
+               (jj--set-collapse-process proc-entry t)
+               (overlay-put ovl-control 'keymap
+                            (jj--make-process-log-entry-keymap))
+               (overlay-put ovl-err 'face '(:foreground "grey"))
+               (jj--set-initial-run-status buf-code)
+
+               (when output-buffer
+                 (kill-buffer buf-stdout))
+               (set-process-sentinel (get-buffer-process buf-stderr)
+                                     #'jj--default-stderr-sentinel)
+               ;; print any abnormal process termination
+               (add-function :after (process-sentinel proc)
+                             (jj--make-print-status-sentinel buf-stderr))
+               ;; handle the promise state
+               (add-function :after (process-sentinel proc)
+                             (make-jj-callback-sentinel
+                              (lambda (code event)
+                                (if (eq code 0)
+                                    (funcall resolve proc)
+                                  (funcall reject (cons proc event))))))
+               ;; this always runs before the subsequent promise callbacks,
+               ;; which means `resolve' and `reject' are not themselves callbacks
+               (add-function :after (process-sentinel proc)
+                             (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
+
+  (defvar-keymap jj-process-mode-map
+      :parent jj-inspect-mode-map
+      "TAB" #'jj--toggle-collapse-process-at-point
+      "k" #'jj--kill-process-at-point)
+
+  (defun jj--empty-output-p (string)
+    "Returns non-nil when STRING is only unicode whitespace."
+    (string-match-p (rx string-start
+                        (* (any space))
+                        string-end)
+                    string))
+
+  (defun jj--overlay-text (ovl)
+    (with-current-buffer (overlay-buffer ovl)
+      (buffer-substring (overlay-start ovl) (overlay-end ovl))))
+
+  (defun jj--make-process-log-entry-keymap ()
+    "Make a keymap that binds TAB to TOGGLE-FN."
+    (let ((map (make-sparse-keymap)))
+      (keymap-set map "TAB" #'jj--toggle-collapse-process-at-point)
+      (keymap-set map "k" #'jj--kill-process-at-point)
+      map))
+
+  (defun jj--kill-process-at-point (pos)
+    "Try to kill the process at point.
+  Sometimes this does not actually succeed at killing the process. Maybe I should try using `signal-process'?"
+    (interactive "d")
+    (if-let ((proc-entry (get-pos-property pos 'jj-object)))
+        (if (jj--process-log-entry-p proc-entry)
+            (if-let ((proc (jj--process-log-entry-process proc-entry)))
+                (kill-process proc)
+              (user-error "process %s has not started" (jj--process-log-entry-name proc-entry)))
+          (user-error "not a process: %s" proc-entry))
+      (user-error "not at a process object")))
+
+  (defun jj--toggle-collapse-process-at-point (pos)
+    "Given a `jj--process-log-entry' at POS, toggle its collapsed state, or collapse it if it is empty."
+    (interactive "d")
+    (jj--toggle-collapse-process
+     (get-pos-property pos 'jj-object)))
+
+  (defun jj--toggle-collapse-process (proc-entry)
+    "Given a `jj--process-log-entry' PROC-ENTRY, toggle its collapsed state, or collapse it if it is empty."
+    (pcase-exhaustive proc-entry
+      ((cl-struct jj--process-log-entry
+                  ovl-control
+                  ovl-collapse)
+       (let ((collapsed (overlay-get ovl-collapse 'jj--section-collapsed)))
+         ;; update value
+         (setq collapsed (or
+                          ;; if output is empty, always collapse
+                          (jj--empty-output-p (jj--overlay-text ovl-collapse))
+                          ;; otherwise, toggle. by default, initially collapsed
+                          (not collapsed)))
+         ;; set properties to action the new `collapsed' value
+         (jj--set-collapse-process proc-entry collapsed)))))
+
+  (defun jj--set-collapse-process (proc-entry collapsed)
+    "Given a `jj--process-log-entry' PROC-ENTRY, set it to collapse if COLLAPSED, otherwise expand it."
+    (pcase-exhaustive proc-entry
+      ((cl-struct jj--process-log-entry
+                  ovl-control
+                  ovl-collapse)
+       ;; store for next time
+       (overlay-put ovl-collapse
+                    'jj--section-collapsed
+                    collapsed)
+       ;; the cursor jumping is because of this.
+       ;; commented out, no jumping.
+       (overlay-put ovl-control
+                    'before-string
+                    (concat
+                     ;; i've put 2 hidden spaces to work around some display quirks.
+                     ;; for some reason, if the before-string is invisible,
+                     ;; and the display property is nil (conditional or otherwise),
+                     ;; then the colour disappears from the exit code.
+                     (propertize " " 'display
+                                 ;; hide fringe when content empty
+                                 `(when (not (jj--empty-output-p (jj--overlay-text ,ovl-collapse)))
+                                    left-fringe
+                                    ;; update fringe to match expand-collapse state.
+                                    ,(if collapsed 'jj-fringe-bitmap> 'jj-fringe-bitmapv)
+                                    fringe
+                                    )
+                                 'invisible t
+                                 'cursor-intangible t)
+                     (propertize " " 'display "")))
+       (overlay-put ovl-collapse
+                    'display
+                    ;; there's no way to remove an overlay property except by
+                    ;; setting it nil. this still overrides the corresponding
+                    ;; text properties, unfortunately
+                    (and collapsed jj--process-ellipsis)))))
+
+  (defvar jj--process-ellipsis "\n"
+    "String to show instead of process output when collapsing.")
 #+end_src
 **** view
 ***** jj diff
