@@ -325,6 +325,8 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
                                (or (jj--empty-output-p (jj--overlay-text ovl-collapse))
                                    ;; otherwise, toggle
                                    (not collapsed)))
+                         ;; the cursor jumping is because of this.
+                         ;; commented out, no jumping.
                          (overlay-put ovl-control
                                       'before-string
                                       (concat
@@ -333,21 +335,19 @@ Also sets up folding so that TAB anywhere within a command will toggle the displ
                                        ;; and the display property is nil (conditional or otherwise),
                                        ;; then the colour disappears from the exit code.
                                        (propertize " " 'display
-                                                   `(when (not (jj--empty-output-p (jj--overlay-text ,ovl-collapse))) .
-                                                          ;; hide fringe when content empty
-                                                          ,(cond (collapsed
-                                                                  fringe>)
-                                                                 (t
-                                                                  fringev)))
+                                                   ;; hide fringe when content empty
+                                                   `(when (not (jj--empty-output-p (jj--overlay-text ,ovl-collapse)))
+                                                      ;; change fringe to match expand-collapse state.
+                                                      ,@(if collapsed fringe> fringev))
                                                    'invisible t
                                                    'cursor-intangible t)
                                        (propertize " " 'display "")))
                          (overlay-put ovl-collapse
                                       'display
-                                      (cond (collapsed
-                                             ellipsis)
-                                            (t
-                                             nil))))))
+                                      ;; there's no way to remove an overlay property except by
+                                      ;; setting it nil. this still overrides the corresponding
+                                      ;; text properties, unfortunately
+                                      (and collapsed ellipsis)))))
           (funcall toggle)
           (overlay-put ovl-err 'face '(:foreground "grey"))
           (overlay-put ovl-control 'keymap
@@ -1938,7 +1938,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
   "b m" #'jj-bookmark-move-dwim
   "b !" #'jj-bookmark-set-dwim
   "b r" #'jj-bookmark-rename
-  "b d" #'jj-bookmark-delete
+  "b k" #'jj-bookmark-delete
   "b f" #'jj-bookmark-forget
   "b t" #'jj-bookmark-track
   "b u" #'jj-bookmark-untrack
