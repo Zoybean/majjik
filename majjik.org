@@ -3101,38 +3101,6 @@ might actually not use these as I need a lexical variable anyway in most cases w
 #+begin_src elisp
   (defalias 'jj-cmd-async 'jj-cmd-promise)
 
-  (defvar jj-cmd-hist nil
-    "History for `jj-cmd' command.")
-
-  (defun jj-cmd (cmd)
-    "Run an arbitrary command line. If there is any output, view it in its own buffer.
-  Will likely fail for any interactive command."
-    (interactive (-let* ((str (read-from-minibuffer "command line: jj " nil nil nil 'jj-cmd-hist))
-                         (str-list (concat "( " str " )"))
-                         ((cmd . ix) (read-from-string str-list)))
-                   (unless (= ix (length str-list))
-                     (error "unbalanced closing paren at %d: %s" (- ix 2) str))
-                   (list cmd)))
-    (cl-labels ((flat (list)
-                  (mapcar #'str-flat list))
-                (str-flat (val)
-                  (pcase val
-                    ((pred symbolp) (symbol-name val))
-                    ((pred stringp) val)
-                    (_ (user-error "unquoted parens in command line: %s" val)))))
-      (let* ((cmd-strings (flat cmd))
-             (name (s-join " " cmd-strings))
-             (buf (generate-new-buffer name)))
-        (promise-then (jj-cmd-async name cmd-strings nil nil t buf)
-                      (lambda (_)
-                          (if (jj--empty-buffer-p buf)
-                              (kill-buffer buf)
-                            (with-current-buffer buf
-                              (font-lock-mode)
-                              (view-mode-enter nil #'kill-buffer))
-                            (pop-to-buffer buf)))))))
-
-
   (defun jj-cmd-promise (name cmd &optional no-revert silent-ok no-kill-output output-buffer)
     "Run CMD asynchronously, returning a promise of its completion.
 
@@ -3245,6 +3213,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
                ;; which means `resolve' and `reject' are not themselves callbacks
                (add-function :after (process-sentinel proc)
                              (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
+
 #+end_src
 **** command log mode
 #+begin_src elisp
@@ -3376,6 +3345,46 @@ might actually not use these as I need a lexical variable anyway in most cases w
 
   (defvar jj--process-ellipsis "\n"
     "String to show instead of process output when collapsing.")
+#+end_src
+
+**** anything
+run arbitrary jj commands. View the output if there is any.
+technically run any arbitrary command, since ~jj util exec~ exists
+
+seems to sometimes have the sentinel snipe the filter, so e.g. ~jj util exec echo hello~ registers no output. but the sentinel *always* waits for the filter, unless the filter yields. so this is a mystery.
+
+after rebooting emacs, it no longer occurs. maybe an ephemeral glitch.
+#+begin_src elisp
+  (defvar jj-cmd-hist nil
+    "History for `jj-cmd' command.")
+
+  (defun jj-cmd (cmd)
+    "Run an arbitrary command line. If there is any output, view it in its own buffer.
+  Will likely fail for any interactive command."
+    (interactive (-let* ((str (read-from-minibuffer "command line: jj " nil nil nil 'jj-cmd-hist))
+                         (str-list (concat "( " str " )"))
+                         ((cmd . ix) (read-from-string str-list)))
+                   (unless (= ix (length str-list))
+                     (error "unbalanced closing paren at %d: %s" (- ix 2) str))
+                   (list cmd)))
+    (cl-labels ((flat (list)
+                  (mapcar #'str-flat list))
+                (str-flat (val)
+                  (pcase val
+                    ((pred symbolp) (symbol-name val))
+                    ((pred stringp) val)
+                    (_ (user-error "unquoted parens in command line: %s" val)))))
+      (let* ((cmd-strings (flat cmd))
+             (name (s-join " " cmd-strings))
+             (buf (generate-new-buffer name)))
+        (promise-then (jj-cmd-async name cmd-strings nil nil t buf)
+                      (lambda (_)
+                        (if (jj--empty-buffer-p buf)
+                            (kill-buffer buf)
+                          (with-current-buffer buf
+                            (font-lock-mode)
+                            (view-mode-enter nil #'kill-buffer))
+                          (pop-to-buffer buf)))))))
 #+end_src
 
 **** view
