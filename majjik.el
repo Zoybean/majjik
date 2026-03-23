@@ -1701,14 +1701,14 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
        ;;               (* ,content))
        ;;            "\n")))
        ;;   ,(format "Regex to match a full `jj-%1$s' entry. This *should* match exactly the same content that `read-jj-%1$s' will parse." type-name))
-       (cl-defstruct ,(intern (format "%s" type-name))
+       (cl-defstruct ,type-name
          ,@field-names)
        ,(jj--define-template-for type-name fields)
        ,(jj--define-reader-for type-name fields)
        ,(jj--define-inserter-for type-name field-specs))))
 
 (defun jj--define-shortdoc-for (type-name field-names)
-  `(define-short-documentation-group ,(intern (format "%s" type-name))
+  `(define-short-documentation-group ,type-name
      (define-jj-format
          :no-manual t)
      (,(intern (format "read-%s" type-name))
@@ -2212,7 +2212,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
   (magit-insert-section sec
     (elided)
     (insert (with-temp-buffer
-              (insert-jj-log-elided elided-graph)
+              (jj-insert elided-graph)
               (s-chomp (buffer-string))))))
 
 (defmacro jj-insert-section-lines (n-lines section-type value content)
@@ -2223,7 +2223,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
      (magit-insert-section sec
        (,section-type ,value)
        ;; (oset sec data entry)
-       (magit-insert-heading (concat (s-join "\n" lines)
+       (magit-insert-heading (concat (s-join "\n" first)
                                      "\n"))
        (when rest
          (magit-insert-section-body
