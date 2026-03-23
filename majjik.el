@@ -3066,7 +3066,7 @@ Will likely fail for any interactive command."
                        (str-list (concat "( " str " )"))
                        ((cmd . ix) (read-from-string str-list)))
                  (unless (= ix (length str-list))
-                   (error "unbalanced expression in command line: %s" str))
+                   (error "unbalanced closing paren at %d: %s" (- ix 2) str))
                  (list cmd)))
   (cl-labels ((flat (list)
                 (mapcar #'str-flat list))
