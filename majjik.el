@@ -1836,8 +1836,20 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
     ;; omit extra output
     "--quiet"))
 (defconst jj-logging-default-args
-  '(;; never colourise output (for now)
-    "--color=never"))
+  '())
+(defconst jj-global-debug-args
+  '("--debug")
+  "List of flags (if any) to debug jj commands.")
+(defvar jj-do-debug nil
+  "If non-nil, add `jj-global-debug-args' to all commands")
+
+(defun jj--toggle-debug ()
+  "Toggle debugging of jj commands."
+  (interactive)
+  (setq jj-do-debug (not jj-do-debug))
+  (cond (jj-do-debug
+         (message "enabled debug output for jj commands"))
+        (t (message "disabled debug output for jj commands"))))
 ;; Default args:1 ends here
 
 ;; Readers
@@ -2091,6 +2103,7 @@ Reverted buffer is the one that was active when this function was called."
                 "--no-patch"
                 "-T" ,(jj-show-status-template 'self)
                 ,@jj-global-default-args
+                ,@(and jj-do-debug jj-global-debug-args)
                 ,@jj-parsing-default-args))))
 ;; jj-show for status section:1 ends here
 
@@ -2115,6 +2128,7 @@ Reverted buffer is the one that was active when this function was called."
      :command `("jj" "file" "list-untracked"
                 "-T" ,(jj-status-file-untracked-template 'self)
                 ,@jj-global-default-args
+                ,@(and jj-do-debug jj-global-debug-args)
                 ,@jj-parsing-default-args))))
 ;; jj-file for untracked files:1 ends here
 
@@ -2215,6 +2229,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                 ,@(jj--if-arg revset #'identity "-r")
                 ,@other-args
                 ,@jj-global-default-args
+                ,@(and jj-do-debug jj-global-debug-args)
                 ,@jj-parsing-default-args))))
 ;; jj-bookmark-list for bookmark conflicts:1 ends here
 
@@ -2649,6 +2664,7 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                 ,@(jj--if-arg revset #'identity "-r")
                 ,@(jj--if-arg fileset #'identity "--")
                 ,@jj-global-default-args
+                ,@(and jj-do-debug jj-global-debug-args)
                 ,@jj-parsing-default-args
                 "--config" ,(format "templates.log_node='%s'"
                                     (jj--toml-quote-string jj-log-node-template))))))
@@ -2992,7 +3008,11 @@ When it is additionally on a FIELD of the OBJECT, also print that FIELD's name a
 (defun jj-cmd-sync (cmd &optional no-revert no-error)
   "Call jj with the given CMD, passing the default args first, and returning the output as a string. Signals an error if the command returns a nonzero exit code. When the command completes successfully, reverts the dash buffer for the repo (if there is one, and NO-REVERT was nil).
 When NO-ERROR, return the error code instead of raising an error. See `call-cmd' for details."
-  (let ((cmd `("jj" ,@jj-global-default-args ,@jj-logging-default-args ,@cmd)))
+  (let ((cmd `("jj"
+               ,@jj-global-default-args
+               ,@(and jj-do-debug jj-global-debug-args)
+               ,@jj-logging-default-args
+               ,@cmd)))
     (prog1
         (call-cmd cmd nil :string nil no-error)
       (unless no-revert
@@ -3072,14 +3092,30 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
               (insert "\n"))
             (insert event)))))))
 
+;; copied and heavily modified from `comint-osc-process-output'
+(defun jj--ansi-color-filter (proc string)
+  "Process filter for output buffers. Converts ANSI color sequences in the output."
+  (when-let ((buf (process-buffer proc)))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (let* ((inhibit-read-only t)
+               (mark (process-mark proc)))
+          (save-excursion
+            (goto-char mark)
+            ;; this already handles partial sequences, and assumes
+            ;; sequential calls apply to contiguous chunks of output.
+            (insert (ansi-color-apply string))
+            (set-marker mark (point))))))))
+
 (defun jj-cmd--promise (name cmd &optional output-buffer)
   "Run CMD asynchronously, returning a promise that is resolved (returning the process) on completion."
   (declare (indent 2))
   (let ((repo-dir default-directory))
     (let ((full-cmd `("jj"
-                        ,@jj-global-default-args
-                        ,@jj-logging-default-args
-                        ,@cmd)))
+                      ,@jj-global-default-args
+                      ,@(and jj-do-debug jj-global-debug-args)
+                      ,@jj-logging-default-args
+                      ,@cmd)))
       (pcase-let (((and proc-entry
                         (cl-struct jj--process-log-entry
                                    buf-code
@@ -3096,6 +3132,7 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                         :buffer (or output-buffer buf-stdout)
                         :stderr buf-stderr
                         :sentinel (jj--make-update-exit-code-sentinel buf-code)
+                        :filter #'jj--ansi-color-filter
                         :noquery t
                         :command full-cmd)))
              (setf (jj--process-log-entry-process proc-entry) proc)
@@ -3103,13 +3140,16 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
              (jj--set-collapse-process proc-entry t)
              (overlay-put ovl-control 'keymap
                           (jj--make-process-log-entry-keymap))
-             (overlay-put ovl-err 'face '(:foreground "grey"))
+             ;; (overlay-put ovl-err 'face '(:foreground "grey"))
              (jj--set-initial-run-status buf-code)
 
              (when output-buffer
                (kill-buffer buf-stdout))
-             (set-process-sentinel (get-buffer-process buf-stderr)
-                                   #'jj--default-stderr-sentinel)
+             (let ((stderr (get-buffer-process buf-stderr)))
+               (set-process-sentinel stderr
+                                     #'jj--default-stderr-sentinel)
+               (set-process-filter stderr
+                                   #'jj--ansi-color-filter))
              ;; print any abnormal process termination
              (add-function :after (process-sentinel proc)
                            (jj--make-print-status-sentinel buf-stderr))
@@ -3126,9 +3166,9 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
                            (jj--make-cleanup-sentinel buf-stderr buf-code)))))))))
 
 (defvar-keymap jj-process-mode-map
-    :parent jj-inspect-mode-map
-    "TAB" #'jj--toggle-collapse-process-at-point
-    "k" #'jj--kill-process-at-point)
+  :parent jj-inspect-mode-map
+  "TAB" #'jj--toggle-collapse-process-at-point
+  "k" #'jj--kill-process-at-point)
 
 (defun jj--empty-output-p (string)
   "Returns non-nil when STRING is only unicode whitespace."
@@ -3149,11 +3189,15 @@ On success, reverts the repo's dash buffer unless NO-REVERT, prints a message un
     map))
 
 (defun jj--kill-process-at-point (pos)
+  "Try to kill the process at point.
+Sometimes this does not actually succeed at killing the process. Maybe I should try using `signal-process'?"
   (interactive "d")
   (if-let ((proc-entry (get-pos-property pos 'jj-object)))
       (if (jj--process-log-entry-p proc-entry)
           (if-let ((proc (jj--process-log-entry-process proc-entry)))
-              (kill-process proc)
+              (progn
+                (message "sending kill signal to %s" proc)
+                (kill-process proc))
             (user-error "process %s has not started" (jj--process-log-entry-name proc-entry)))
         (user-error "not a process: %s" proc-entry))
     (user-error "not at a process object")))
