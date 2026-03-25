@@ -2054,6 +2054,8 @@ this might not actually work. I'm big sus actually.
                                             "\n"))
                       (push (match-string 1) rest)
                       (push (list (match-beginning 0) (match-end 0)) regions))))
+      ;; TODO check if it's a graft point and mark the data here
+      ;; this is a weird edge case for rendering so marking it in advance is useful.
       (prog1
           (apply #'make-jj-log-graph `(,@1st ,@(nreverse rest)))
         ;; delete the matched regions at the end
@@ -2106,23 +2108,29 @@ this might not actually work. I'm big sus actually.
   (cl-defmethod jj-insert ((graph jj-log-graph))
     "Insert the GRAPH and an \"elided revisions\" label, formatted as a jj log entry."
     (with-insert-temp-buffer
-     (insert (propertize "(elided revisions)\n" 'font-lock-face '(:foreground "grey")))
+     (save-excursion
+       (insert (propertize "(elided revisions)\n" 'font-lock-face '(:foreground "grey"))))
      ;; insert the mandatory graph segments
      ;; these will add new lines if there arent enough already
-     (cl-loop initially (progn
-                          (goto-char (point-min))
-                          (insert (jj-log-graph-first-line-prefix graph)
-                                  (propertize (jj-log-graph-first-line-node graph)
-                                              'font-lock-face '(:foreground "grey"))
-                                  (jj-log-graph-first-line-suffix graph))
-                          (forward-line 1))
-              for prefix in (jj-log-graph-mandatory-segments graph)
-              do (progn
-                   (insert prefix)
-                   (forward-line 1)
-                   ;; while there's more mandatory graph segments, put them on new lines if you have to
-                   (unless (bolp)
-                     (insert "\n"))))))
+     (insert-jj-elided-graph-prefix graph)))
+
+  (defun insert-jj-elided-graph-prefix (graph)
+    "Add the GRAPH prefix to the elided entry starting at point. Assume that the buffer is narrowed so as to end at the end of the entry."
+    ;; insert the mandatory graph prefix segments
+    ;; these will add new lines if there arent enough already
+    (cl-loop initially (progn
+                         (insert (jj-log-graph-first-line-prefix graph)
+                                 (propertize (jj-log-graph-first-line-node graph)
+                                             'font-lock-face '(:foreground "grey"))
+                                 (jj-log-graph-first-line-suffix graph))
+                         (forward-line 1))
+             for prefix in (jj-log-graph-mandatory-segments graph)
+             do (progn
+                  (insert prefix)
+                  (forward-line 1)
+                  ;; while there's more mandatory graph segments, put them on new lines if you have to
+                  (unless (bolp)
+                    (insert "\n")))))
 
   (defun insert-jj-log-graph-prefix (graph)
     "Add the GRAPH prefix to the entry starting at point. assume that the buffer is narrowed so as to end at the end of the entry."
@@ -2140,13 +2148,16 @@ this might not actually work. I'm big sus actually.
                           ;; last nonempty mandatory segment
                           (not (cdr rest))
                           (not (string= "" (string-trim prefix)))
-                          ;; no repeatable segments
+                          ;; no repeatable segments (so the last (empty) mandatory segment is repeated)
                           (not (jj-log-graph-repeatable-segment graph)))
+                         ;; this segment is specifically the graft-point "~" indicator,
+                         ;; for when a sub-graph is entirely separate from the root
                          (insert (propertize prefix 'font-lock-face '(:foreground "grey"))))
                         (t
                          (insert prefix)))
                   (forward-line 1)
-                  ;; while there's more mandatory graph segments, put them on new lines if you have to
+                  ;; while there's more mandatory graph segments than content,
+                  ;; put them on new lines
                   (unless (bolp)
                     (insert "\n"))))
     ;; insert the repeatable graph prefix segments
@@ -2171,10 +2182,15 @@ this might not actually work. I'm big sus actually.
 
   (cl-defmethod jj-insert-section ((entry jj-log-entry))
     "Insert a graph-prefixed log entry section."
-    (let ((header (jj-log-entry-header entry))
-          (graph (jj-log-entry-graph entry)))
+    (let* ((header (jj-log-entry-header entry))
+           (graph (jj-log-entry-graph entry))
+           (n (1+ (length (jj-log-graph-mandatory-segments graph)))))
       (jj-insert-section-lines
-       2 jj-log-entry-section
+       ;; always at least 2 header lines
+       ;; maybe more if there's more mandatory segments
+       ;; this will need to change a bit if I want to properly truncate
+       ;; the description to 1 line regardless of graph length
+       (max 2 n) jj-log-entry-section
        entry
        (with-temp-buffer
          (jj-insert-annotated-log graph header)
@@ -2184,9 +2200,7 @@ this might not actually work. I'm big sus actually.
     "Insert a graph-prefixed elided log entry section."
     (magit-insert-section sec
       (elided)
-      (insert (with-temp-buffer
-                (jj-insert elided-graph)
-                (s-chomp (buffer-string))))))
+      (jj-insert elided-graph)))
 
   (defmacro jj-insert-section-lines (n-lines section-type value content)
     "Insert a section containing the first N-LINES of CONTENT as the header and the rest as the body."
