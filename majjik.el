@@ -2342,8 +2342,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
    :printer (jj--make-opt-resolver "(empty)")
    :form (if (:chain self (.empty)) "empty"))
   (description
-   :parser (lambda (s)
-             (s-presence (json-parse-string s)))
+   :parser (-compose #'s-presence #'s-chomp #'json-parse-string)
    :face (lambda (desc ent)
            (cond (desc
                   ;; present description is unformatted
