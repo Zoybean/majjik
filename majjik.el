@@ -494,21 +494,23 @@ corresponding labeled string starts and ends."
   (jj--insert-sectioned header-parts
                         #'magit-insert-heading))
 
-(define-advice magit-section-show (:after (sec) jj--magit-section-show-args)
-  "Show the default command-line arguments in the process log."
-  (pcase (oref sec value)
-    ((and proc-entry
-          (cl-struct jj--process-log-entry
-                     ovl-args))
-     (overlay-put ovl-args 'display nil))))
+(define-advice magit-section-show (:after (section) jj--magit-section-after-show)
+  "Perform extra tasks after showing a SECTION."
+  (jj-after-show (oref section value) section))
 
-(define-advice magit-section-hide (:after (sec) jj--magit-section-hide-args)
-  "Hide the default command-line arguments in the process log."
-  (pcase (oref sec value)
-    ((and proc-entry
-          (cl-struct jj--process-log-entry
-                     ovl-args))
-     (overlay-put ovl-args 'display (propertize "..." 'face 'shadow)))))
+(cl-defgeneric jj-after-show (value section)
+  "Operation to perform after showing SECTION, which has VALUE.")
+(cl-defmethod jj-after-show (_value _section)
+  "Nothing to do after showing SECTION.")
+
+(define-advice magit-section-hide (:after (section) jj--magit-section-after-hide)
+  "Perform extra tasks after hiding a SECTION."
+  (jj-after-hide (oref section value) section))
+
+(cl-defgeneric jj-after-hide (value section)
+  "Operation to perform after hiding SECTION, which has VALUE.")
+(cl-defmethod jj-after-hide (_value _section)
+  "Nothing to do after hiding SECTION.")
 ;; section utils:1 ends here
 
 ;; command-log section writer
@@ -584,6 +586,18 @@ corresponding labeled string starts and ends."
                   :ovl-collapse ovl-collapse
                   :ovl-args ovl-args)))))
      value)))
+
+(cl-defmethod jj-after-show ((value jj--process-log-entry) _section)
+  "Show the default arguments in a process log entry."
+  (with-slots (ovl-args)
+      value
+    (overlay-put ovl-args 'display nil)))
+
+(cl-defmethod jj-after-hide ((value jj--process-log-entry) _section)
+  "Hide the default arguments in a process log entry."
+  (with-slots (ovl-args)
+      value
+    (overlay-put ovl-args 'display (propertize "..." 'face 'shadow))))
 ;; command-log section writer:1 ends here
 
 ;; sentinels and filters
