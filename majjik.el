@@ -2241,6 +2241,15 @@ If the line is an elided entry, returns a single string, which is the prefix bef
   (insert-jj-log-graph-prefix graph)
   (add-text-properties (point-min) (point-max) `(jj-object ,header)))
 
+(defun jj-insert-annotated-log-short (graph header)
+  (save-excursion
+    (jj-insert header)
+    (goto-char (point-min))
+    (forward-line 2)
+    (delete-region (point) (point-max)))
+  (insert-jj-log-graph-prefix graph)
+  (add-text-properties (point-min) (point-max) `(jj-object ,header)))
+
 (cl-defgeneric jj-insert-section (obj)
   "Insert jj object OBJ within its own section.")
 
