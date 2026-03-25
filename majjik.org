@@ -2419,7 +2419,7 @@ this might not actually work. I'm big sus actually.
     (change-offset
      :form (:chain self (.change_offset)))
     (change-id
-     :form (:chain self (.change_id) (.short 16)))
+     :form (format_short_change_id_with_change_offset self))
     (author
      :parser #'json-parse-string
      :form (:chain self (.author) (.email) (stringify) (.escape_json)))
@@ -2953,7 +2953,7 @@ this might not actually work. I'm big sus actually.
      :form (:chain self (.change_offset)))
     (change-id
      :printer (cl-constantly nil)
-     :form (:chain self (.change_id) (.short 16)))
+     :form (format_short_change_id_with_change_offset self))
     (author
      :printer (cl-constantly nil)
      :parser #'json-parse-string

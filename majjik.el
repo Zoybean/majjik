@@ -2397,7 +2397,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
   (change-offset
    :form (:chain self (.change_offset)))
   (change-id
-   :form (:chain self (.change_id) (.short 16)))
+   :form (format_short_change_id_with_change_offset self))
   (author
    :parser #'json-parse-string
    :form (:chain self (.author) (.email) (stringify) (.escape_json)))
@@ -2903,7 +2903,7 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    :form (:chain self (.change_offset)))
   (change-id
    :printer (cl-constantly nil)
-   :form (:chain self (.change_id) (.short 16)))
+   :form (format_short_change_id_with_change_offset self))
   (author
    :printer (cl-constantly nil)
    :parser #'json-parse-string
