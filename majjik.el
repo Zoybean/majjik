@@ -1695,6 +1695,16 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 - `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
 - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
   (declare (indent 1))
+  `(progn
+     (define-jj-data ,type-name ,@field-specs)
+     (define-jj-inserter ,type-name ,@field-specs)))
+
+(defmacro define-jj-data (type-name &rest field-specs)
+  "Define the format to be used for parsing and recording various jj output.
+Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
+- `:form' specifies the sexpression used to produce the field's log template, produced with `jj-template'. (So far there's no way to use a string template directly)
+- `:parser' specifies how to read the data in to lisp."
+  (declare (indent 1))
   (let* ((fields (-filter #'car
                           ;; field-specs which have non-nil name are retained for general use
                           field-specs))
@@ -1719,15 +1729,28 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
          ,@field-names)
        ,(jj--define-template-for type-name fields)
        ,(jj--define-reader-for type-name fields)
-       ,(jj--define-inserter-for type-name field-specs))))
+       )))
+
+(defmacro define-jj-inserter (type-name &rest field-specs)
+  "Define the format to be used for formatting various jj output.
+Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
+- `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
+- `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
+- `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
+  (declare (indent 1))
+  (jj--define-inserter-for type-name field-specs))
 
 (defun jj--define-shortdoc-for (type-name field-names)
   `(define-short-documentation-group ,type-name
      (define-jj-format
          :no-manual t)
+     (define-jj-data
+         :no-manual t)
+     (define-jj-inserter
+         :no-manual t)
      (,(intern (format "read-%s" type-name))
       :no-manual t)
-     (,(intern (format "insert-%s" type-name))
+     (jj-insert
       :no-manual t)
      (,(intern (format "%s-template" type-name))
       :no-manual t)
