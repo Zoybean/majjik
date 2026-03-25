@@ -2266,6 +2266,11 @@ If the line is an elided entry, returns a single string, which is the prefix bef
     (elided)
     (jj-insert elided-graph)))
 
+;; (cl-defmethod jj-after-show ((value jj-log-header) section)
+;;   )
+;; (cl-defmethod jj-after-hide ((value jj-log-header) section)
+;;   )
+
 (defmacro jj-insert-section-lines (n-lines section-type value content)
   "Insert a section containing the first N-LINES of CONTENT as the header and the rest as the body."
   `(let* ((lines (s-split "\n" ,content))
@@ -3617,6 +3622,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                                                   ("removed" `(red "D" ,from))
                                                   ("copied" `(green "C" "{" ,from "=>" ,to "}"))
                                                   ("renamed" `(cyan "R" "{" ,from "=>" ,to "}")))
+                          ;; TODO decouple entitizing newlines from setting face
                           do (magit-insert-section sec
                                (jj-status-wc-change change)
                                (insert
