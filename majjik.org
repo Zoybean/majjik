@@ -4288,10 +4288,10 @@ might actually not use these as I need a lexical variable anyway in most cases w
     (mapconcat #'jj--maybe-quote-argument key "."))
 
   (cl-defmethod jj--config-value ((value string))
-    (prin1-to-string value))
+    (pr1 value))
   (cl-defmethod jj--config-value ((value list))
     (jj--toml-list
-     (mapcar #'prin1-to-string value)))
+     (mapcar #'pr1 value)))
 
   (defun jj--merge-tool-args (entry-point-exp)
     "Returns the arguments needed to register emacs as the merge tool for a JJ command.
@@ -4304,8 +4304,7 @@ might actually not use these as I need a lexical variable anyway in most cases w
             `(,(jj--editor-server-path-arg)
               ;; need a new frame, or `jj--call-from-cli' won't work
               "-c"
-              "-e" ,(prin1-to-string
-                     entry-point-exp)
+              "-e" ,(pr1 entry-point-exp)
               ;; always pass the files as the last arguments
               "--" "$left" "$right")))
       `(,(jj--config-arg "merge-tools.emacs.program" program)
@@ -4341,12 +4340,10 @@ might actually not use these as I need a lexical variable anyway in most cases w
               ,server
               ;; need a new frame, or the client will immediately exit after `jj--with-editor-mode-from-cli' 
               "-c"
-              "-e" ,(prin1-to-string
-                     entry-point-exp))))
+              "-e" ,(pr1 entry-point-exp))))
       `("--config" ,(concat "ui.editor="
                             (jj--toml-list
-                             (mapcar #'prin1-to-string
-                                     editor))))))
+                             (mapcar #'pr1 editor))))))
 
   (defvar jj--current-eval-client nil)
 
@@ -6791,10 +6788,7 @@ for push and fetch
            (frame (selected-frame))
            (proc (frame-parameter frame 'client))
            (args
-            (mapcar (lambda (s)
-                      ;; make sure it's a string
-                      ;; unquoted args are symbols
-                      (format "%s" s))
+            (mapcar #'prc
                     server-eval-args-left)))
       (apply fun
              proc frame
@@ -6932,10 +6926,7 @@ could I have the server call the (plugin) startup function, which returns a list
            (frame (selected-frame))
            (proc (frame-parameter frame 'client))
            (args
-            (mapcar (lambda (s)
-                      ;; make sure it's a string
-                      ;; unquoted args are symbols
-                      (format "%s" s))
+            (mapcar #'prc
                     (prog1 server-eval-args-left
                       ;; treat other args exclusively as filenames.
                       ;; otherwise they are evalled after this

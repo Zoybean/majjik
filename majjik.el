@@ -4246,10 +4246,10 @@ Both KEY and VALUE can be strings or lists. If KEY is a list, it is formatted as
   (mapconcat #'jj--maybe-quote-argument key "."))
 
 (cl-defmethod jj--config-value ((value string))
-  (prin1-to-string value))
+  (pr1 value))
 (cl-defmethod jj--config-value ((value list))
   (jj--toml-list
-   (mapcar #'prin1-to-string value)))
+   (mapcar #'pr1 value)))
 
 (defun jj--merge-tool-args (entry-point-exp)
   "Returns the arguments needed to register emacs as the merge tool for a JJ command.
@@ -4262,8 +4262,7 @@ Returns a plist of arguments to jj: --config to set up a merge-tool, and --tool 
           `(,(jj--editor-server-path-arg)
             ;; need a new frame, or `jj--call-from-cli' won't work
             "-c"
-            "-e" ,(prin1-to-string
-                   entry-point-exp)
+            "-e" ,(pr1 entry-point-exp)
             ;; always pass the files as the last arguments
             "--" "$left" "$right")))
     `(,(jj--config-arg "merge-tools.emacs.program" program)
