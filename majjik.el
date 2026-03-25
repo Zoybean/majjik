@@ -453,12 +453,19 @@ Update the properties and markers appropriately to expand the header to the new 
     (with-current-buffer buf
       (save-excursion
         (with-restriction (oref sec start) (oref sec content)
-          (let ((inhibit-read-only t))
+          (let* ((l (magit-section-lineage sec t))
+                 (inhibit-read-only t))
+            ;; function to be called with appropriate marker movement scheme
+            (dolist (s l)
+              (set-marker-insertion-type (oref s end) t)
+              (when-let ((c (oref s content)))
+                (set-marker-insertion-type c t)))
             (funcall fun)
-            (move-marker (oref sec start) (point-min))
-            (move-marker (oref sec content) (point-max))
-            (move-marker (oref sec end) (max (point-max)
-                                             (oref sec end)))
+            ;; marker movement types reset
+            (dolist (s l)
+              (set-marker-insertion-type (oref s end) nil)
+              (when-let ((c (oref s content)))
+                (set-marker-insertion-type c nil)))
             (jj--propertize-buffer-for-section sec)))))))
 
 (defun jj--modify-section-body (sec fun &optional no-refresh)
@@ -469,10 +476,15 @@ Update the properties and markers appropriately to expand the body to the new co
     (with-current-buffer buf
       (save-excursion
         (with-restriction (oref sec content) (oref sec end)
-          (let ((inhibit-read-only t))
+          (let* ((l (magit-section-lineage sec t))
+                 (inhibit-read-only t))
+            ;; function to be called with appropriate marker movement scheme
+            (dolist (s l)
+              (set-marker-insertion-type (oref s end) t))
             (funcall fun)
-            (move-marker (oref sec content) (point-min))
-            (move-marker (oref sec end) (point-max))
+            ;; marker movement types reset
+            (dolist (s l)
+              (set-marker-insertion-type (oref s end) nil))
             (jj--propertize-buffer-for-section sec)
             (when (and (not no-refresh)
                        (oref sec hidden))
