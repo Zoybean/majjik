@@ -186,11 +186,11 @@
          ;; open a buffer to make a mess in
          ;; we'll insert its contents later
          (with-temp-buffer
-           ,@body
-           ;; insert the content of this temp buffer into the target buffer
-           ;; we can't just return it from the with-temp-buffer block,
-           ;; as by that point it's been disposed
            (let ((,content-buffer (current-buffer)))
+             ,@body
+             ;; insert the content of this temp buffer into the target buffer
+             ;; we can't just return it from the with-temp-buffer block,
+             ;; as by that point it's been disposed
              (with-current-buffer ,target-buffer
                (insert-buffer-substring ,content-buffer)))))))
 #+end_src

@@ -185,11 +185,11 @@ Where each VAR is the local variable, and each GROUP is a numeric literal or var
        ;; open a buffer to make a mess in
        ;; we'll insert its contents later
        (with-temp-buffer
-         ,@body
-         ;; insert the content of this temp buffer into the target buffer
-         ;; we can't just return it from the with-temp-buffer block,
-         ;; as by that point it's been disposed
          (let ((,content-buffer (current-buffer)))
+           ,@body
+           ;; insert the content of this temp buffer into the target buffer
+           ;; we can't just return it from the with-temp-buffer block,
+           ;; as by that point it's been disposed
            (with-current-buffer ,target-buffer
              (insert-buffer-substring ,content-buffer)))))))
 ;; with-insert-temp-buffer:1 ends here
