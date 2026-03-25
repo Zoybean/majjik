@@ -457,9 +457,11 @@ Update the properties and markers appropriately to expand the header to the new 
             (funcall fun)
             (move-marker (oref sec start) (point-min))
             (move-marker (oref sec content) (point-max))
+            (move-marker (oref sec end) (max (point-max)
+                                             (oref sec end)))
             (jj--propertize-buffer-for-section sec)))))))
 
-(defun jj--modify-section-body (sec fun)
+(defun jj--modify-section-body (sec fun &optional no-refresh)
   "Update the body of SEC by running FUN narrowed to the section's body.
 Update the properties and markers appropriately to expand the body to the new contents."
   (declare (indent 1))
@@ -472,7 +474,8 @@ Update the properties and markers appropriately to expand the body to the new co
             (move-marker (oref sec content) (point-min))
             (move-marker (oref sec end) (point-max))
             (jj--propertize-buffer-for-section sec)
-            (when (oref sec hidden)
+            (when (and (not no-refresh)
+                       (oref sec hidden))
               (magit-section-hide sec))))))))
 
 (defun jj--propertize-buffer-for-section (sec)
@@ -494,23 +497,23 @@ corresponding labeled string starts and ends."
   (jj--insert-sectioned header-parts
                         #'magit-insert-heading))
 
-(define-advice magit-section-show (:after (section) jj--magit-section-after-show)
+(define-advice magit-section-show (:before (section) jj--magit-section-before-show)
   "Perform extra tasks after showing a SECTION."
-  (jj-after-show (oref section value) section))
+  (jj-before-show (oref section value) section))
 
-(cl-defgeneric jj-after-show (value section)
-  "Operation to perform after showing SECTION, which has VALUE.")
-(cl-defmethod jj-after-show (_value _section)
-  "Nothing to do after showing SECTION.")
+(cl-defgeneric jj-before-show (value section)
+  "Operation to perform before showing SECTION, which has VALUE.")
+(cl-defmethod jj-before-show (_value _section)
+  "Nothing to do before showing SECTION.")
 
-(define-advice magit-section-hide (:after (section) jj--magit-section-after-hide)
-  "Perform extra tasks after hiding a SECTION."
-  (jj-after-hide (oref section value) section))
+(define-advice magit-section-hide (:before (section) jj--magit-section-before-hide)
+  "Perform extra tasks before hiding a SECTION."
+  (jj-before-hide (oref section value) section))
 
-(cl-defgeneric jj-after-hide (value section)
-  "Operation to perform after hiding SECTION, which has VALUE.")
-(cl-defmethod jj-after-hide (_value _section)
-  "Nothing to do after hiding SECTION.")
+(cl-defgeneric jj-before-hide (value section)
+  "Operation to perform before hiding SECTION, which has VALUE.")
+(cl-defmethod jj-before-hide (_value _section)
+  "Nothing to do before hiding SECTION.")
 ;; section utils:1 ends here
 
 ;; command-log section writer
@@ -587,13 +590,13 @@ corresponding labeled string starts and ends."
                   :ovl-args ovl-args)))))
      value)))
 
-(cl-defmethod jj-after-show ((value jj--process-log-entry) _section)
+(cl-defmethod jj-before-show ((value jj--process-log-entry) _section)
   "Show the default arguments in a process log entry."
   (with-slots (ovl-args)
       value
     (overlay-put ovl-args 'display nil)))
 
-(cl-defmethod jj-after-hide ((value jj--process-log-entry) _section)
+(cl-defmethod jj-before-hide ((value jj--process-log-entry) _section)
   "Hide the default arguments in a process log entry."
   (with-slots (ovl-args)
       value
@@ -2275,9 +2278,9 @@ If the line is an elided entry, returns a single string, which is the prefix bef
     (elided)
     (jj-insert elided-graph)))
 
-;; (cl-defmethod jj-after-show ((value jj-log-header) section)
+;; (cl-defmethod jj-before-show ((value jj-log-header) section)
 ;;   )
-;; (cl-defmethod jj-after-hide ((value jj-log-header) section)
+;; (cl-defmethod jj-before-hide ((value jj-log-header) section)
 ;;   )
 
 (defmacro jj-insert-section-lines (n-lines section-type value content)
