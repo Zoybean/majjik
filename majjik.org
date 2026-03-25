@@ -873,15 +873,21 @@ this might not actually work. I'm big sus actually.
     (delete-region (point-min) (point-max)))
 
   (defun replace-buffer-contents-and-properties (source &optional max-secs max-costs)
-    (let ((buf (current-buffer)))
+    (let ((buf (current-buffer))
+          (dest-min (point-min)))
       (replace-buffer-contents source max-secs max-costs)
       (with-current-buffer source
-        (cl-loop for start = (point-min) then pos
+        (cl-loop with src-min = (point-min)
+                 for start = (point-min) then pos
                  for pos = (next-property-change start)
                  for end = (or pos
                                (point-max))
                  for props = (text-properties-at start)
-                 do (set-text-properties start end props buf)
+                 do (set-text-properties
+                     ;; adjust for possibly-narrowed buffers
+                     (+ dest-min (- start src-min))
+                     (+ dest-min (- end src-min))
+                     props buf)
                  while pos))))
 
   (defun jj--entitize-newlines (string)
@@ -2221,9 +2227,6 @@ this might not actually work. I'm big sus actually.
              do (progn (insert tail)
                        (forward-line 1))))
 
-  ;; (defclass jj-log-entry-section (magit-section)
-  ;;   ((data :initarg :data)))
-
   (defun jj-insert-annotated-log (graph header)
     (save-excursion (jj-insert header))
     (insert-jj-log-graph-prefix graph)
@@ -2245,17 +2248,61 @@ this might not actually work. I'm big sus actually.
     "Insert a graph-prefixed log entry section."
     (let* ((header (jj-log-entry-header entry))
            (graph (jj-log-entry-graph entry))
-           (n (1+ (length (jj-log-graph-mandatory-segments graph)))))
-      (jj-insert-section-lines
-       ;; always at least 2 header lines
-       ;; maybe more if there's more mandatory segments
-       ;; this will need to change a bit if I want to properly truncate
-       ;; the description to 1 line regardless of graph length
-       (max 2 n) jj-log-entry-section
-       entry
-       (with-temp-buffer
-         (jj-insert-annotated-log graph header)
-         (s-chomp (buffer-string))))))
+           (n (1+ (length (jj-log-graph-mandatory-segments graph))))
+           (nlines (max 2 n))
+           (header-min (with-temp-buffer
+                         (jj-insert-annotated-log-short graph header)
+                         (replace-regexp-in-string
+                          (rx (+ line-end anychar) string-end)
+                          ""
+                          (buffer-string)
+                          nil
+                          :lit)))
+           (header-max (with-temp-buffer
+                         (jj-insert-annotated-log graph header)
+                         (replace-regexp-in-string
+                          (rx (+ line-end anychar) string-end)
+                          ""
+                          (buffer-string)
+                          nil
+                          :lit)))
+           (lines (s-split "\n" header-max))
+           ;; always at least 2 header lines
+           ;; maybe more if there's more mandatory segments
+           ;; this will need to change a bit if I want to properly truncate
+           ;; the description to 1 line regardless of graph length
+           (first (take nlines lines))
+           (h0 (concat header-min "\n"))
+           (h1 (concat (s-join "\n" first) "\n"))
+           (rest (nthcdr nlines lines))
+           (content (when rest
+                      (concat (s-join "\n" rest) "\n"))))
+      (cond ((and content
+                  (not (string= h0 h1)))
+             ;; when there's both something to collapse, and a difference between the headers,
+             ;; then use a modal heading. I suspect this is a very rare case - one example is when the graft marker commit has a long message
+             (jj--insert-modal-section entry h0 h1 content))
+            (:else
+             (magit-insert-section sec
+               (magit-section entry nil)
+               
+               (magit-insert-heading h1)
+               (when content
+                 (magit-insert-section-body
+                   (insert content))))))))
+
+  (defun jj--insert-modal-section (val h0 h1 content &optional hide)
+    (declare (indent 1))
+    (magit-insert-section sec
+      (jj-modal-section val hide)
+      
+      (oset sec h0 h0)
+      (oset sec h1 h1)
+      (oset sec cont content)
+      
+      (magit-insert-heading (if hide h0 h1))
+      (magit-insert-section-body
+        (insert content))))
 
   (cl-defmethod jj-insert-section ((elided-graph jj-log-graph))
     "Insert a graph-prefixed elided log entry section."
@@ -2263,26 +2310,105 @@ this might not actually work. I'm big sus actually.
       (elided)
       (jj-insert elided-graph)))
 
-  ;; (cl-defmethod jj-before-show ((value jj-log-header) section)
-  ;;   )
-  ;; (cl-defmethod jj-before-hide ((value jj-log-header) section)
-  ;;   )
+  (defun jj--simple-replace (string &optional beg end)
+    (save-excursion
+      (let ((end (copy-marker (or end (point-max)))))
+        (goto-char (or beg (point-min)))
+        (insert string)
+        (delete-region (point) end))))
 
-  (defmacro jj-insert-section-lines (n-lines section-type value content)
-    "Insert a section containing the first N-LINES of CONTENT as the header and the rest as the body."
-    `(let* ((lines (s-split "\n" ,content))
-            (first (take ,n-lines lines))
-            (rest (nthcdr ,n-lines lines)))
-       (magit-insert-section sec
-         (,section-type ,value)
-         ;; (oset sec data entry)
-         (magit-insert-heading (concat (s-join "\n" first)
-                                       "\n"))
-         (when rest
-           (magit-insert-section-body
-             (dolist (line rest)
-               (insert line "\n")))))))
+  (defun replace-region-contents-and-properties (beg end replace-fn &optional max-secs max-costs)
+    (save-excursion
+      (save-restriction
+        (narrow-to-region beg end)
+        (goto-char (point-min))
+        (let ((repl (funcall replace-fn)))
+  	(if (bufferp repl)
+  	    (replace-buffer-contents-and-properties repl max-secs max-costs)
+  	  (let ((source-buffer (current-buffer)))
+  	    (with-temp-buffer
+  	      (insert repl)
+  	      (let ((tmp-buffer (current-buffer)))
+  		(set-buffer source-buffer)
+  		(replace-buffer-contents-and-properties tmp-buffer max-secs max-costs)))))))))
+
+  (defclass jj-modal-section (magit-section)
+    (h0
+     h1
+     cont)
+    :documentation "Section which displays different headings depending if it is collapsed or expanded.")
+
+  (cl-defmethod jj-before-show :before (value (section jj-modal-section))
+    (with-slots
+        (h1)
+        section
+      (jj--modify-section-header section
+        (lambda ()
+          (replace-region-contents-and-properties
+           (point-min) (point-max)
+           (lambda () h1))))))
+
+  (cl-defmethod jj-before-hide :before (value (section jj-modal-section))
+    (with-slots
+        (h0)
+        section
+      (jj--modify-section-header section
+        (lambda ()
+          (replace-region-contents-and-properties
+           (point-min) (point-max)
+           (lambda () h0))))))
 #+end_src
+*** COMMENT modal section header
+#+begin_src elisp
+
+
+  (defclass jj-modal-section (magit-section)
+    (h0
+     h1
+     cont))
+
+  (defun jj/insert-modal-section (h0 h1 content &optional hide)
+    (let ((sec (magit-insert-section sec
+                 (jj-modal-section nil hide)
+                 
+                 (oset sec h0 (propertize h0 'font-lock-face 'magit-section-heading))
+                 (oset sec h1 (propertize h1 'font-lock-face 'magit-section-heading))
+                 (oset sec cont content)
+                 
+                 (magit-insert-heading (if hide h0 h1))
+                 (magit-insert-section-body
+                   (insert content)))))))
+
+  (cl-defmethod jj-before-show :before (value (section jj-modal-section))
+    (with-slots
+        (h1)
+        section
+      (jj--modify-section-header section
+        (lambda ()
+          (replace-region-contents-and-properties
+           (point-min) (point-max)
+           (lambda () h1))))))
+
+  (cl-defmethod jj-before-hide :before (value (section jj-modal-section))
+    (with-slots
+        (h0)
+        section
+      (jj--modify-section-header section
+        (lambda ()
+          (replace-region-contents-and-properties
+           (point-min) (point-max)
+           (lambda () h0))))))
+
+  (progn (ignore-errors (kill-buffer "foo"))
+         (with-current-buffer (get-buffer-create "foo")
+           (let ((inhibit-read-only t))
+             (erase-buffer)
+             (magit-insert-section (root)
+               (jj/insert-modal-section "header\nfoo\n" "header\nfoobar\n" "bar\nbaz\nqux\n"))
+             (magit-section-mode)
+             (pop-to-buffer (current-buffer)))))
+#+end_src
+
 *** log format
 #+begin_src elisp
   (define-jj-data jj-log-header
