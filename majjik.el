@@ -2285,115 +2285,154 @@ If the line is an elided entry, returns a single string, which is the prefix bef
 ;; log format
 
 ;; [[file:majjik.org::*log format][log format:1]]
-(define-jj-format jj-log-header
+(define-jj-data jj-log-header
   (change-id-min
-   :face (lambda (off ent)
-           (cond ((jj-log-header-divergent ent)
-                  ;; if both commit and desc are empty, they're both green
-                  '(ansi-color-bold (:foreground "red")))
-                 ((jj-log-header-hidden ent)
-                  ;; if just desc is empty, it's gold
-                  '(:foreground "grey"))
-                 (:else
-                  '(ansi-color-bold (:foreground "light pink")))))
    :form (:chain self (.change_id) (.shortest 8) (.prefix)))
   (change-id-tail
-   :separator ""
-   :face '(:foreground "dim gray")
    :form (:chain self (.change_id) (.shortest 8) (.rest)))
   (change-offset
-   :separator ""
-   :face (lambda (off ent)
-           (cond ((jj-log-header-divergent ent)
-                  ;; if both commit and desc are empty, they're both green
-                  '(ansi-color-bold (:foreground "red")))
-                 ((jj-log-header-hidden ent)
-                  ;; if just desc is empty, it's gold
-                  '(:foreground "grey"))))
-   :printer (lambda (off ent)
-              (when (or (jj-log-header-hidden ent)
-                        (jj-log-header-divergent ent))
-                (format "/%s" off)))
    :form (:chain self (.change_offset)))
   (change-id
-   :printer (cl-constantly nil)
    :form (:chain self (.change_id) (.short 16)))
   (author
-   :face '(:foreground "gold")
    :parser #'json-parse-string
    :form (:chain self (.author) (.email) (stringify) (.escape_json)))
   (timestamp
-   :face '(:foreground "dark turquoise")
    :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
   (bookmarks
-   :face '(:foreground "medium orchid")
    :parser (jj--make-list-parser " ")
-   :printer (jj--make-list-printer " ")
    :form (:chain self (.bookmarks)))
   (tags
-   :face '(:foreground "goldenrod")
    :parser (jj--make-list-parser " ")
-   :printer (jj--make-list-printer " ")
    :form (:chain self (.tags)))
   (working-copies
-   :face '(:foreground "green")
    :parser (jj--make-list-parser " ")
-   :printer (jj--make-list-printer " ")
    :form (:chain self (.working_copies)))
   (commit-id-min
-   :face '(ansi-color-bold (:foreground "dodger blue"))
    :form (:chain self (.commit_id) (.shortest 8) (.prefix)))
   (commit-id-tail
-   :separator ""
-   :face '(:foreground "dim gray")
    :form (:chain self (.commit_id) (.shortest 8) (.rest)))
   (commit-id
-   :printer (cl-constantly nil)
    :form (:chain self (.commit_id) (.short 16)))
   (divergent
-   :face '(:foreground "red")
    :parser (-compose (jj--make-opt-resolver :divergent) #'s-presence)
-   :printer (jj--make-opt-resolver "(divergent)")
    :form (if (:chain self (.divergent)) "divergent"))
   (conflict
-   :face '(:foreground "red")
    :parser (-compose (jj--make-opt-resolver :conflict) #'s-presence)
-   :printer (jj--make-opt-resolver "(conflict)")
    :form (if (:chain self (.conflict)) "conflict"))
   (current-working-copy
    :parser (-compose (jj--make-opt-resolver :current-wc) #'s-presence)
-   :printer (cl-constantly nil)
    :form (if (:chain self (.current_working_copy)) "@"))
   (hidden
-   :printer (cl-constantly nil)
    :parser (-compose (jj--make-opt-resolver :hidden) #'s-presence)
    :form (if (:chain self (.hidden)) "hidden"))
-  (nil
-   ;; empty non-field element for splitting the header from the desc and empty markers
-   :parser #'s-presence
-   :printer (cl-constantly "\n"))
   (empty
-   :first t
-   :face '(ansi-color-bold (:foreground "medium sea green"))
    :parser (-compose (jj--make-opt-resolver :empty) #'s-presence)
-   :printer (jj--make-opt-resolver "(empty)")
    :form (if (:chain self (.empty)) "empty"))
   (description
    :parser (-compose #'s-presence #'s-chomp #'json-parse-string)
-   :face (lambda (desc ent)
-           (cond (desc
-                  ;; present description is unformatted
-                  nil)
-                 ((jj-log-header-empty ent)
-                  ;; if both commit and desc are empty, they're both green
-                  '(ansi-color-bold (:foreground "medium sea green")))
-                 (:else
-                  ;; if just desc is empty, it's gold
-                  '(:foreground "gold"))))
-   :printer (jj--make-opt-resolver
-             nil
-             "(no description)")
    :form (:chain self (.description) (.escape_json))))
+
+(cl-defmethod jj-insert ((header jj-log-header))
+  "Insert the log header, fully expanded."
+  (with-slots (description
+               change-id-min
+               change-id-tail
+               change-offset
+               author
+               timestamp
+               bookmarks
+               tags
+               working-copies
+               commit-id-min
+               commit-id-tail
+               commit-id
+               divergent
+               conflict
+               current-working-copy
+               hidden
+               empty)
+      header
+    (let ((first t))
+      (cl-macrolet ((f-prop (field-name &key face format)
+                      `(propertize (pcase-exhaustive ,format
+                                     ((pred stringp)
+                                      ,format)
+                                     ((pred functionp)
+                                      (funcall ,format ,field-name))
+                                     ('nil
+                                      ,field-name))
+                                   'jj-field ',field-name
+                                   ,@(when face `('font-lock-face ,face)))))
+        (cl-labels ((s-insert (&rest objects)
+                      "Insert with leading space if not first on line."
+                      (when objects
+                        (cond (first
+                               (setq first nil))
+                              (:else
+                               (insert " ")))
+                        (apply #'insert (-filter #'identity objects))))
+                    (s-newline ()
+                      (insert "\n")
+                      (setq first t)))
+          (s-insert (f-prop change-id-min
+                            :face (cond (divergent
+                                         '(ansi-color-bold (:foreground "red")))
+                                        (hidden
+                                         '(:foreground "grey"))
+                                        (:else
+                                         '(ansi-color-bold (:foreground "light pink")))))
+                    (f-prop change-id-tail
+                            :face '(:foreground "dim gray"))
+                    (when (or hidden divergent)
+                      (f-prop change-offset
+                              :format (apply-partially #'format "/%s")
+                              :face (cond (divergent
+                                           '(ansi-color-bold (:foreground "red")))
+                                          (hidden
+                                           '(:foreground "grey"))))))
+          
+          (s-insert (f-prop author
+                            :face '(:foreground "gold")))
+          (s-insert (f-prop timestamp
+                            :face '(:foreground "dark turquoise")))
+          (when bookmarks
+            (s-insert (f-prop bookmarks
+                              :format (apply-partially #'s-join " ")
+                              :face '(:foreground "medium orchid"))))
+          (when tags
+            (s-insert (f-prop tags
+                              :format (apply-partially #'s-join " ")
+                              :face '(:foreground "goldenrod"))))
+          (when working-copies
+            (s-insert (f-prop working-copies
+                              :format (apply-partially #'s-join " ")
+                              :face '(:foreground "green"))))
+          (s-insert (f-prop commit-id-min
+                            :face '(ansi-color-bold (:foreground "dodger blue")))
+                    (f-prop commit-id-tail
+                            :face '(:foreground "dim gray")))
+          (when divergent
+            (s-insert (f-prop divergent
+                              :format "(divergent)"
+                              :face '(:foreground "red"))))
+          (when conflict
+            (s-insert (f-prop conflict
+                              :format "(conflict)"
+                              :face '(:foreground "red"))))
+          (s-newline)
+          (when empty
+            (s-insert (f-prop empty
+                              :format "(empty)"
+                              :face '(ansi-color-bold (:foreground "medium sea green")))))
+          (s-insert (or description
+                        (f-prop description
+                                :format "(no description)"
+                                :face (if empty
+                                          ;; if both commit and desc are empty, they're both green
+                                          '(ansi-color-bold (:foreground "medium sea green"))
+                                        ;; if just desc is empty, it's gold
+                                        '(:foreground "gold"))))))))))
 
 
 (defun jj-augment-template-for-graph (edge-delim tail-lines log-template)
