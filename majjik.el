@@ -2191,42 +2191,6 @@ If repo already existed, just return its path (as a singleton list)."
       (goto-char marker))))
 ;; Dashboard buffer:1 ends here
 
-;; jj-show for status section
-;; the ~jj status~ command itself is not very machine-readable, but turns out i can show most of what I want from ~jj status~ via ~jj show~.
-;; so far, the only significant differences in parity that I'm aware of, are:
-;; - I cannot count the sides of a file conflict
-;; - I can only show ref conflicts for the current commit, not the whole repo. but I can probably just call jj bookmark list -c for that.
-
-
-;; [[file:majjik.org::*jj-show for status section][jj-show for status section:1]]
-
-;; jj-show for status section:1 ends here
-
-;; jj-file for untracked files
-
-
-;; [[file:majjik.org::*jj-file for untracked files][jj-file for untracked files:1]]
-(defun start-jj-file-untracked ()
-  "Make a jj file-untracked in the current buffer, without setting up modes or keymaps. For use with jj-status in an indirect buffer."
-  (let ((inhibit-read-only t))
-    (erase-accessible-buffer))
-  (let* ((err (generate-new-buffer "*jj-file-untracked-stderr*"))
-         (sentinel (make-jj-simple-sentinel err))
-         (filter (make-sticky-process-filter :sticky)))
-    (make-process
-     :name "jj-file-untracked"
-     :buffer (current-buffer)
-     :stderr err
-     :filter filter
-     :sentinel sentinel
-     :noquery t
-     :command `("jj" "file" "list-untracked"
-                "-T" ,(jj-status-file-untracked-template 'self)
-                ,@jj-global-default-args
-                ,@(and jj-do-debug jj-global-debug-args)
-                ,@jj-parsing-default-args))))
-;; jj-file for untracked files:1 ends here
-
 ;; jj-file for tracked, set ops for untracked
 
 ;; [[file:majjik.org::*jj-file for tracked, set ops for untracked][jj-file for tracked, set ops for untracked:1]]
