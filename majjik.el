@@ -1757,6 +1757,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts the following keys:
 - `:printer' specifies how to print the data out to a buffer. It should be a function of 2 arguments, with the first being the field and the second the entire structure.
 - `:face' specifies the face to use for formatting this entry in the log buffer. This is applied to the result of PRINTER if supplied.
+- `:oneline', if non-nil, specifies that newlines should be entitised in the printed value, except the separator.
 - `:separator' the separator to insert before this field, rather than a space (or empty for the first field). Only inserted if the value is present."
   (declare (indent 1))
   (jj--define-inserter-for type-name field-specs))
@@ -1823,7 +1824,7 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                    `(,(intern (format "%s-%s" type-name name-sym))
                      entry)))
        `(with-insert-temp-buffer
-         (cl-loop for (field-name val printer face first sep) in (list ,@(cl-loop  
+         (cl-loop for (field-name val printer oneline face first sep) in (list ,@(cl-loop  
                                                                           for (field-name . props) in field-specs
                                                                           for first = (if-let ((c (plist-member props :first)))
                                                                                           ;; if it's explicitly set (even nil), use that
@@ -1833,12 +1834,14 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                                                                           ;; otherwise, it's not first, so unset it
                                                                           then (plist-get props :first)
                                                                           for sep = (plist-get props :separator)
+                                                                          for oneline = (plist-get props :oneline)
                                                                           for face = (plist-get props :face)
                                                                           for printer = (plist-get props :printer)
                                                                           collect `(list
                                                                                     ',field-name
                                                                                     ,(and field-name (field field-name))
                                                                                     ,printer
+                                                                                    ,oneline
                                                                                     ,face
                                                                                     ,first
                                                                                     ,sep)))
@@ -1858,10 +1861,13 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
                                               (funcall printer val entry)
                                             val))))
                        (setq effective-first nil)
-                       (insert sep (apply #'propertize
-                                          `(,printed
-                                            help-echo ,(symbol-name field-name)
-                                            ,@(jj--if-arg face #'identity 'font-lock-face))))))
+                       (let ((formatted (apply #'propertize
+                                               `(,printed
+                                                 help-echo ,(symbol-name field-name)
+                                                 ,@(jj--if-arg face #'identity 'font-lock-face)))))
+                         (when oneline
+                           (setq formatted (jj--entitize-newlines formatted)))
+                         (insert sep formatted))))
          ;; ensure commit text ends on a newline
          (unless (bolp)
            (insert "\n"))
@@ -2307,7 +2313,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
     (cond ((and content
                 (not (string= h0 h1)))
            ;; when there's both something to collapse, and a difference between the headers,
-           ;; then use a modal heading. I suspect this is a very rare case - one example is when the graft marker commit has a long message
+           ;; then use a modal heading. I suspect this is a very rare case - one example is when the very first commit has a long message
            (jj--insert-modal-section entry h0 h1 content))
           (:else
            (magit-insert-section sec
@@ -2991,6 +2997,7 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
 (define-jj-format jj-status-file-conflict
   (path
    :face '(:foreground "red")
+   :oneline t
    :parser #'json-parse-string
    :form (:chain f (.path) (.display) (.escape_json)))
   ;; (num-sides) ;; todo once it's representable in a template. for now, always unknown.
@@ -2999,6 +3006,7 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
 (define-jj-format jj-status-file-untracked
   (path
    :face '(:foreground "magenta")
+   :oneline t
    :parser #'json-parse-string
    :form (++ (:chain self (.display t) (.escape_json)) "\n")))
 
