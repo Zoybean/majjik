@@ -3549,7 +3549,7 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
 
 
 (defun jj-untracked-files-async (root-dir)
-  "List untracked (non-ignored) files in repository ROOT-DIR."
+  "List untracked (non-ignored) files in colocated repository ROOT-DIR."
   (let ((p-tracked (jj-tracked-files-async)))
     (promise-chain p-tracked
       (then (lambda (tracked)
@@ -3733,14 +3733,14 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                           do (magit-insert-section sec
                                (jj-status-wc-change change)
                                (insert
-                                 (propertize
-                                  (concat
-                                   (jj--entitize-newlines
-                                    (propertize (concat list-prefix
-                                                        (mapconcat #'identity elems " "))
-                                                'font-lock-face `(:foreground ,(symbol-name color))))
-                                   "\n")
-                                  'jj-object change))
+                                (propertize
+                                 (concat
+                                  (jj--entitize-newlines
+                                   (propertize (concat list-prefix
+                                                       (mapconcat #'identity elems " "))
+                                               'font-lock-face `(:foreground ,(symbol-name color))))
+                                  "\n")
+                                 'jj-object change))
                                ))))
               (t (magit-insert-heading "Working copy unchanged\n"))))
       (magit-insert-section sec
@@ -3776,16 +3776,20 @@ When ABSOLUTE-PATHS, return fully expanded file names. Otherwise, return paths r
                           (jj-status-bookmark-conflict conflict)
                           (insert list-prefix)
                           (jj-insert conflict))))))
-      (when files-untracked
-        (magit-insert-section sec
-          (jj-status-files-untracked files-untracked)
-          (magit-insert-heading "Untracked files:\n")
-          (magit-insert-section-body
-            (cl-loop for file in files-untracked
-                     do (magit-insert-section sec
-                          (jj-status-file-untracked file)
-                          (insert list-prefix)
-                          (jj-insert file)))))))))
+      (cond (files-untracked
+             (magit-insert-section sec
+               (jj-status-files-untracked files-untracked)
+               (magit-insert-heading "Untracked files:\n")
+               (magit-insert-section-body
+                 (cl-loop for file in files-untracked
+                          do (magit-insert-section sec
+                               (jj-status-file-untracked file)
+                               (insert list-prefix)
+                               (jj-insert file))))))
+            ((not (jj-colocated-p))
+             (magit-insert-section sec
+               (jj-status-files-untracked :absent)
+               (magit-insert-heading "Untracked files unavailable in non-colocated repo\n")))))))
 
 (ert-deftest jj-test-insert-status ()
   (with-temp-buffer
@@ -3831,10 +3835,13 @@ Untracked files:
 ;; status piping fns
 
 ;; [[file:majjik.org::*status piping fns][status piping fns:1]]
+(defun jj-colocated-p ()
+  (file-exists-p ".git"))
 (defun jj-get-status-async ()
   (promise-then
    (promise-all `[,(jj--status-main-status)
-                  ,(jj-untracked-files-async default-directory)
+                  ,(when (jj-colocated-p)
+                     (jj-untracked-files-async default-directory))
                   ,(jj--status-bookmark-conflicts)])
    (-lambda ([main utck b-cnfl])
      (apply #'make-jj-status :files-untracked (mapcar (lambda (f)
