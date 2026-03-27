@@ -4792,12 +4792,12 @@ Does not use `process-mark', but instead manages internal alist of markers per b
           (do-full buf proc string))))))
 
 (defun jj-cmd--with-standard-args (cmd)
-  "Return CMD with added arguments for using emacs as editor, and all the applicable configured arguments for a logging command."
+  "Return current dynamic arguments, and all the applicable configured arguments for a logging command."
   `(,@(jj-cmd--standard-args)
     ,@cmd))
 
 (defun jj-cmd--standard-args ()
-  "Return CMD with added arguments for using emacs as editor, and all the applicable configured arguments for a logging command."
+  "Return CMD with added dynamic arguments, and all the applicable configured arguments for a logging command."
   `(,@jj-current-dynamic-args
     ,@jj-global-default-args
     ,@(and jj-do-debug jj-global-debug-args)
