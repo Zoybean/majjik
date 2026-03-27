@@ -2317,15 +2317,13 @@ If the line is an elided entry, returns a single string, which is the prefix bef
          (rest (nthcdr nlines lines))
          (content (when rest
                     (concat (s-join "\n" rest) "\n"))))
-    (cond ((and content
-                (not (string= h0 h1)))
-           ;; when there's both something to collapse, and a difference between the headers,
+    (cond ((not (string= h0 h1))
+           ;; when there's a difference between the headers,
            ;; then use a modal heading. I suspect this is a very rare case - one example is when the very first commit has a long message
            (jj--insert-modal-section entry h0 h1 content))
           (:else
            (magit-insert-section sec
              (magit-section entry nil)
-             
              (magit-insert-heading h1)
              (when content
                (magit-insert-section-body
@@ -2341,8 +2339,9 @@ If the line is an elided entry, returns a single string, which is the prefix bef
     (oset sec cont content)
     
     (magit-insert-heading (if hide h0 h1))
-    (magit-insert-section-body
-      (insert content))))
+    (when (or content hide)
+      (magit-insert-section-body
+        (insert (or content "\n"))))))
 
 (cl-defmethod jj-insert-section ((elided-graph jj-log-graph))
   "Insert a graph-prefixed elided log entry section."
@@ -2380,23 +2379,33 @@ If the line is an elided entry, returns a single string, which is the prefix bef
 
 (cl-defmethod jj-before-show :before (value (section jj-modal-section))
   (with-slots
-      (h1)
+      (h1 cont)
       section
     (jj--modify-section-header section
       (lambda ()
         (replace-region-contents-and-properties
          (point-min) (point-max)
-         (lambda () h1))))))
+         (lambda () h1))))
+    (unless cont
+      (jj--modify-section-body section
+        (lambda ()
+          (jj--simple-replace ""))
+        :no-ref))))
 
 (cl-defmethod jj-before-hide :before (value (section jj-modal-section))
   (with-slots
-      (h0)
+      (h0 cont)
       section
     (jj--modify-section-header section
       (lambda ()
         (replace-region-contents-and-properties
          (point-min) (point-max)
-         (lambda () h0))))))
+         (lambda () h0))))
+    (unless cont
+      (jj--modify-section-body section
+        (lambda ()
+          (jj--simple-replace ""))
+        :no-ref))))
 ;; plumbing:1 ends here
 
 ;; log format
