@@ -3286,7 +3286,8 @@ This is concatenated with an identifier for the repository to define the buffer 
   "f t" #'jj-file-track-dwim
   "f u" #'jj-file-untrack-dwim
   "f k" #'jj-file-delete-dwim
-  "$" #'jj-pop-to-command-log)
+  "$" #'jj-pop-to-command-log
+  "j @" #'jj-nav-log-@)
 
 (keymap-global-set "C-x j" #'jj-dash--async)
 ;; Keymaps:1 ends here
@@ -6844,6 +6845,27 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
                                      (jj--transient-args)))
                   (jj--git-clone url path args)))])
 ;; clone:1 ends here
+
+;; Navigation
+
+;; [[file:majjik.org::*Navigation][Navigation:1]]
+(defun jj-nav-log-@ ()
+  "Jump to the @ commit in the log section."
+  (interactive)
+  (goto-char (point-min))
+  (if-let ((match (text-property-search-forward
+                   'jj-object
+                   nil
+                   (lambda (_ p)
+                     (and (jj-log-header-p p)
+                          (eq :current-wc
+                              (jj-log-header-current-working-copy p)))))))
+      (cl-loop with pos = (prop-match-beginning match)
+               for section = (magit-section-at pos) then (oref section parent)
+               while section
+               do (magit-section-show section))
+    (user-error "No @ commit in the current log view.")))
+;; Navigation:1 ends here
 
 ;; Provide
 

@@ -3332,7 +3332,8 @@
     "f t" #'jj-file-track-dwim
     "f u" #'jj-file-untrack-dwim
     "f k" #'jj-file-delete-dwim
-    "$" #'jj-pop-to-command-log)
+    "$" #'jj-pop-to-command-log
+    "j @" #'jj-nav-log-@)
 
   (keymap-global-set "C-x j" #'jj-dash--async)
 #+end_src
@@ -7344,7 +7345,25 @@ could I have the server call the (plugin) startup function, which returns a list
             (bury-buffer)))
       (bury-buffer)))
 #+end_src
-    
+** Navigation
+#+begin_src elisp
+  (defun jj-nav-log-@ ()
+    "Jump to the @ commit in the log section."
+    (interactive)
+    (goto-char (point-min))
+    (if-let ((match (text-property-search-forward
+                     'jj-object
+                     nil
+                     (lambda (_ p)
+                       (and (jj-log-header-p p)
+                            (eq :current-wc
+                                (jj-log-header-current-working-copy p)))))))
+        (cl-loop with pos = (prop-match-beginning match)
+                 for section = (magit-section-at pos) then (oref section parent)
+                 while section
+                 do (magit-section-show section))
+      (user-error "No @ commit in the current log view.")))
+#+end_src
 * Provide
 #+begin_src elisp
   (provide 'majjik)
