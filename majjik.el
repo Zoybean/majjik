@@ -704,52 +704,59 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
 ;; sentinels and filters:1 ends here
 
 ;; promise utils
-;; this might not actually work. I'm big sus actually.
 
 ;; [[file:majjik.org::*promise utils][promise utils:1]]
+(defun jj--promise-parallel (arr)
+  "Like `promise-all', but always succeeds. Allows each promise to succeed or fail in isolation, and returns for each a cons (:ok . VAL) or (:err . ERR)."
+  (promise-all (apply #'vector
+                      (cl-loop for prom across arr
+                               collect (promise-then
+                                        prom
+                                        (lambda (ok)
+                                          `(:ok . ,ok))
+                                        (lambda (err)
+                                          `(:err . ,err)))))))
+
 (defun jj--promise-wait-sync (promise)
-  "Sit until PROMISE completes, and return:
+  "Start a `recursive-edit' that ends when PROMISE completes, and return:
 - (:ok . VAL) if it succeeded
 - (:err . REASON) if it failed
-- (:fault . DATA) if it had some esoteric failure."
-  (unless (promise-class-p promise)
-    (error "not a promise: %s" promise))
-  (let ((state :run)
-        (result))
-    (promise-chain promise
-      (then (lambda (val)
-              (setq state :ok)
-              (setq result val)))
-      (catch (lambda (err)
-               (setq state :err)
-               (setq result err)))
-      (finally (lambda ()
-                 (if (eq state :run)
-                     (setq state :fault)))))
-    (with-local-quit
-      ;; ensure it can't hijack user input
-      (while (eq :run state)
-        (sit-for 0.1)))
-    `(,state . ,result)))
+- :cancel if the `recursive-edit' was exited early by other means 
+- nil if PROMISE was nil."
+  (when promise
+    (unless (promise-class-p promise)
+      (error "not a promise: %s" promise))
+    (let ((res :cancel))
+      (cl-block nil
+        (promise-all `[,(promise-then
+                         promise
+                         (lambda (val)
+                           (setq res `(:ok . ,val))
+                           (cl-return))
+                         (lambda (err)
+                           (setq res `(:err . ,err))
+                           (cl-return)))
+                       ,(recursive-edit)]))
+      res)))
 
 (ert-deftest jj-test-promise-wait-sync ()
   (should (equal '(:ok . foo)
-                 (promise-wait-sync
+                 (jj--promise-wait-sync
                   (promise-new (lambda (res rej)
                                  (sit-for 0.5)
                                  (funcall res 'foo))))))
   (should (equal '(:ok)
-                 (promise-wait-sync
+                 (jj--promise-wait-sync
                   (promise-new (lambda (res rej)
                                  (sit-for 0.5)
                                  (funcall res nil))))))
   (should (equal '(:err . bar)
-                 (promise-wait-sync
+                 (jj--promise-wait-sync
                   (promise-new (lambda (res rej)
                                  (sit-for 0.5)
                                  (funcall rej 'bar))))))
   (should (equal '(:err)
-                 (promise-wait-sync
+                 (jj--promise-wait-sync
                   (promise-new (lambda (res rej)
                                  (sit-for 0.5)
                                  (funcall rej nil)))))))
@@ -3837,6 +3844,7 @@ Untracked files:
 ;; [[file:majjik.org::*status piping fns][status piping fns:1]]
 (defun jj-colocated-p ()
   (file-exists-p ".git"))
+
 (defun jj-get-status-async ()
   (promise-then
    (promise-all `[,(jj--status-main-status)
