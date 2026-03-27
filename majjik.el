@@ -6357,7 +6357,7 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 ;; [[file:majjik.org::*delete][delete:1]]
 (defun jj-file-delete-dwim (file &optional noconfirm)
   "Delete FILE."
-  (interactive (list (jj-get-file-dwim "File to untrack")
+  (interactive (list (jj-get-file-dwim "File to delete")
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "delete file %s?" file)))
     (user-error "cancelled"))
