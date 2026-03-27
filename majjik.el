@@ -6858,8 +6858,7 @@ This table is annotated assuming the options are valid for `jj--annotate-refs'."
                    nil
                    (lambda (_ p)
                      (and (jj-log-header-p p)
-                          (eq :current-wc
-                              (jj-log-header-current-working-copy p)))))))
+                          (jj-log-header-current-working-copy p))))))
       (cl-loop with pos = (prop-match-beginning match)
                for section = (magit-section-at pos) then (oref section parent)
                while section
