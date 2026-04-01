@@ -307,402 +307,6 @@ If ARG is nil, returns nil. Otherwise returns the list containing FLAG (if provi
                              "--no-args-flag"))))
 ;; argument utils:1 ends here
 
-;; sync processes
-
-;; [[file:majjik.org::*sync processes][sync processes:1]]
-(defun call-cmd (cmd &optional infile destination display noerror)
-  "Call CMD via `call-process', with some changes.
-If DESTINATION is `:string', include the program output in the return value and any error messages, and ignore DISPLAY.
-If NOERROR is nil and the process has a nonzero exit code, signal an error, citing the exit code.
-If NOERROR is non-nil, include the exit code in the return value.
-When returning both a string result and an exit code, they are returned as a cons (CODE . OUTPUT)."
-  (pcase destination
-    (:string
-     (let ((dir default-directory))
-       (with-temp-buffer
-         (-let* ((default-directory dir)
-                 ((prog . args) cmd)
-                 (res (apply #'call-process prog infile t nil args))
-                 (out (buffer-string)))
-           (if noerror
-               (cons res out)
-             (unless (= res 0)
-               (error "process exited with nonzero exit code %d: %s" res out))
-             out)))))
-    (_
-     (-let* (((prog . args) cmd)
-             (res (apply #'call-process prog infile destination display args)))
-       (if noerror
-           res
-         (unless (= res 0)
-           (error "process exited with nonzero exit code %d" res)))))))
-;; sync processes:1 ends here
-
-;; command-log management 
-
-;; [[file:majjik.org::*command-log management][command-log management:1]]
-(define-fringe-bitmap 'jj-fringe-bitmap>
-  [#b01100000
-   #b00110000
-   #b00011000
-   #b00001100
-   #b00011000
-   #b00110000
-   #b01100000
-   #b00000000])
-
-(define-fringe-bitmap 'jj-fringe-bitmapv
-  [#b00000000
-   #b10000010
-   #b11000110
-   #b01101100
-   #b00111000
-   #b00010000
-   #b00000000
-   #b00000000])
-
-(cl-defstruct jj--process-log-entry
-  "The buffers representing the various sections of a jj process' output"
-  (process
-   nil
-   :type process
-   :documentation "The process object itself.")
-  (name
-   nil
-   :type string
-   :documentation "Description of the process, e.g. the command line used to invoke it.")
-  (buf-code
-   nil
-   :type buffer
-   :documentation "Buffer containing only the area where exit code of the process will be written.")
-  (buf-stdout
-   nil
-   :type buffer
-   :documentation "Buffer for process standard output.")
-  (buf-stderr
-   nil
-   :type buffer
-   :documentation "Buffer for process standard error.")
-  (ovl-control
-   nil
-   :type overlay
-   :documentation "Overlay for the area through which the user may interact with the process.")
-  (ovl-args
-   nil
-   :type overlay
-   :documentation "Overlay for the default args string, which should be hidden when collapsed.")
-  (ovl-collapse
-   nil
-   :type overlay
-   :documentation "Overlay for the area which should be collapsible.")
-  (ovl-err
-   nil
-   :type overlay
-   :documentation "Overlay for the process standard error.")
-  (verbosity
-   nil
-   :type '(member critical error user system debug)
-   :documentation "Verbosity level for the log entry. User settings can show or hide entries by verbosity.")
-  (section
-   nil
-   :type magit-section
-   :documentation "Corresponding `magit-section' object in the log buffer."))
-
-(defun jj--set-initial-run-status ()
-  (let ((inhibit-read-only t))
-    (replace-region-contents
-     (point-min) (point-max)
-     (lambda () (propertize "run" 'font-lock-face '(:foreground "yellow"))))))
-
-(defun jj--make-update-exit-code-sentinel (section code-buf)
-  "Process sentinel to update the contents of CODE-BUF (a buffer) within SECTION (a magit-section) with the exit status of the process."
-  (lambda (proc event)
-    (jj--modify-section-header section
-      (lambda ()
-        (with-current-buffer code-buf
-          (let ((inhibit-read-only t))
-            (replace-region-contents
-             (point-min) (point-max)
-             (lambda ()
-               (cond ((process-live-p proc)
-                      ;; process is still running
-                      ;; what's it doing?
-                      (propertize
-                       (format "%s" (process-status proc))
-                       'font-lock-face `(:foreground
-                                         "yellow")))
-                     (t
-                      ;; process is done. how'd it exit?
-                      (let ((code (process-exit-status proc)))
-                        (propertize
-                         (format "%3d" code)
-                         'font-lock-face `(:foreground
-                                           ,(pcase code
-                                              (0 "green")
-                                              (_ "red")))))))))))))))
-;; command-log management:1 ends here
-
-;; section utils
-
-;; [[file:majjik.org::*section utils][section utils:1]]
-(defun jj--modify-section-header (sec fun)
-  "Update the heading of SEC by running FUN narrowed to the section's body.
-Update the properties and markers appropriately to expand the header to the new contents."
-  (declare (indent 1))
-  (let ((buf (marker-buffer (oref sec start))))
-    (with-current-buffer buf
-      (save-excursion
-        (with-restriction (oref sec start) (oref sec content)
-          (let* ((l (magit-section-lineage sec t))
-                 (inhibit-read-only t))
-            ;; function to be called with appropriate marker movement scheme
-            (dolist (s l)
-              (set-marker-insertion-type (oref s end) t)
-              (when-let ((c (oref s content)))
-                (set-marker-insertion-type c t)))
-            (funcall fun)
-            ;; marker movement types reset
-            (dolist (s l)
-              (set-marker-insertion-type (oref s end) nil)
-              (when-let ((c (oref s content)))
-                (set-marker-insertion-type c nil)))
-            (jj--propertize-buffer-for-section sec)))))))
-
-(defun jj--modify-section-body (sec fun &optional no-refresh)
-  "Update the body of SEC by running FUN narrowed to the section's body.
-Update the properties and markers appropriately to expand the body to the new contents."
-  (declare (indent 1))
-  (let ((buf (marker-buffer (oref sec start))))
-    (with-current-buffer buf
-      (save-excursion
-        (with-restriction (oref sec content) (oref sec end)
-          (let* ((l (magit-section-lineage sec t))
-                 (inhibit-read-only t))
-            ;; function to be called with appropriate marker movement scheme
-            (dolist (s l)
-              (set-marker-insertion-type (oref s end) t))
-            (funcall fun)
-            ;; marker movement types reset
-            (dolist (s l)
-              (set-marker-insertion-type (oref s end) nil))
-            (jj--propertize-buffer-for-section sec)
-            (when (and (not no-refresh)
-                       (oref sec hidden))
-              (magit-section-hide sec))))))))
-
-(defun jj--propertize-buffer-for-section (sec)
-  "Apply SEC as the `magit-section' property for all of the accessible buffer that does not already have a `magit-section'"
-  (cl-loop for start = (point-min) then pos
-           for pos = (next-property-change start)
-           for end = (or pos
-                         (point-max))
-           for sec-here = (or (get-text-property start 'magit-section)
-                              sec)
-           do (put-text-property start end 'magit-section sec-here)
-           while pos))
-
-(defun jj--insert-sectioned-heading (header-parts)
-  "Insert all of HEADER-PARTS as a magit section heading.
-Returns an alist of buffer regions. For each LABEL, the returned alist contains an
-entry (LABEL START . END) where START and END are markers to where the
-corresponding labeled string starts and ends."
-  (jj--insert-sectioned header-parts
-                        #'magit-insert-heading))
-
-(define-advice magit-section-show (:before (section) jj--magit-section-before-show)
-  "Perform extra tasks after showing a SECTION."
-  (jj-before-show (oref section value) section))
-
-(cl-defgeneric jj-before-show (value section)
-  "Operation to perform before showing SECTION, which has VALUE.")
-(cl-defmethod jj-before-show (_value _section)
-  "Nothing to do before showing SECTION.")
-
-(define-advice magit-section-hide (:before (section) jj--magit-section-before-hide)
-  "Perform extra tasks before hiding a SECTION."
-  (jj-before-hide (oref section value) section))
-
-(cl-defgeneric jj-before-hide (value section)
-  "Operation to perform before hiding SECTION, which has VALUE.")
-(cl-defmethod jj-before-hide (_value _section)
-  "Nothing to do before hiding SECTION.")
-;; section utils:1 ends here
-
-;; command-log section writer
-
-;; [[file:majjik.org::*command-log section writer][command-log section writer:1]]
-(defun jj--make-process-log-entry (name cmd &optional hide-args)
-  "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, HIDE-ARGS is majjik's default arguments as applied to CMD. They are hidden when the entry is collapsed."
-  ;; ensure there is a root section
-  (unless magit-root-section
-    (goto-char (point-min))
-    (let ((inhibit-read-only t))
-      (magit-insert-section (root))))
-  ;; act as if nested within the root section 
-  (let ((magit-insert-section--current magit-root-section)
-        (magit-insert-section--parent magit-root-section)
-        (magit-insert-section--oldroot magit-root-section)
-        (inhibit-read-only t)
-        (display-name (jj--replace-newlines name))
-        ;; pretending to be a zero-width-space
-        (inv (propertize " " 'display ""))
-        ;; real zero-width-space
-        (zws "\u200B"))
-    (goto-char (point-max))
-    (oref
-     ;; get the log entry
-     (magit-insert-section sec
-       (jj-proc-log-section nil :hidden)
-       (map-let (:start
-                 :code 
-                 :args
-                 :cmd
-                 :content
-                 :stdout
-                 :stderr
-                 :end)
-           `(,@(jj--insert-sectioned-heading
-                `(:start
-                  ,zws
-                  (:code . "   ")
-                  "> jj "
-                  (:args . ,(propertize (jj--replace-newlines
-                                         (mapconcat #'shell-quote-argument hide-args " "))
-                                        'font-lock-face 'shadow))
-                  " "
-                  (:cmd . ,(jj--replace-newlines
-                            (mapconcat #'shell-quote-argument cmd " ")))
-                  "\n"
-                  :content))
-             ,@(jj--insert-sectioned
-                `(:stdout
-                  ,inv
-                  :stderr
-                  "\n"
-                  :end)))
-         (let* ((buf-code (jj--make-narrowed-indirect (format "*code-section %s*" display-name) (car code) (cdr code)))
-                (stdout (jj--make-narrowed-indirect (format "*stdout-section %s*" display-name) stdout stdout))
-                (stderr (jj--make-narrowed-indirect (format "*stderr-section %s*" display-name) stderr stderr))
-                ;; these need to be overlays,
-                ;; so we can toggle their properties as a unit
-                (ovl-args (make-overlay (car args) (cdr args)))
-                (ovl-collapse (make-overlay content end))
-                ;; these all also need to be overlays,
-                ;; so they keep applying as text is added
-                (ovl-control (make-overlay start end)))
-           (oset sec value
-                 (make-jj--process-log-entry
-                  :name name
-                  :section sec
-                  :buf-code buf-code
-                  :buf-stdout stdout
-                  :buf-stderr stderr
-                  :ovl-control ovl-control
-                  :ovl-collapse ovl-collapse
-                  :ovl-args ovl-args)))))
-     value)))
-
-(cl-defmethod jj-before-show ((value jj--process-log-entry) _section)
-  "Show the default arguments in a process log entry."
-  (with-slots (ovl-args)
-      value
-    (overlay-put ovl-args 'display nil)))
-
-(cl-defmethod jj-before-hide ((value jj--process-log-entry) _section)
-  "Hide the default arguments in a process log entry."
-  (with-slots (ovl-args)
-      value
-    (overlay-put ovl-args 'display (propertize "..." 'face 'shadow))))
-;; command-log section writer:1 ends here
-
-;; sentinels and filters
-
-;; [[file:majjik.org::*sentinels and filters][sentinels and filters:1]]
-(defun jj--sticky-insert (marker insert-fn sticky-top)
-  "Move to MARKER, call INSERT-FN, update the marker, and move point if it's at the marker. If STICKY-TOP and point is at the beginning of the buffer, it will not move even if it is at the marker."
-  (let ((moving (and (= (point) marker)
-                     (not (and sticky-top (bobp))))))
-    (save-excursion
-      (goto-char marker)
-      (let ((inhibit-read-only t))
-        (funcall insert-fn))
-      (set-marker marker (point)))
-    (when moving (goto-char marker))))
-
-(defun make-sticky-process-filter (&optional initially-stay)
-  "Make a process filter that outputs to buffer without moving point.
-If INITIALLY-STAY is non-nil, point stays in place if it is at `bobp' even if this is also the position of the `process-mark'"
-  (lambda (proc string)
-    (:documentation (format "Process filter that outputs to buffer without moving point. If point %s, it follows the insertion. Otherwise it stays in place."
-                            (if initially-stay
-                                "is at the position that text is inserted, and is not at the beginning of the buffer"
-                              "is at the position that text is inserted")))
-    (when (buffer-live-p (process-buffer proc))
-      (with-current-buffer (process-buffer proc)
-        (jj--sticky-insert (process-mark proc)
-                           (lambda () (insert string))
-                           initially-stay)))))
-(defun jj--insert-crash-event (stderr-buf event)
-  "Insert into STDERR-BUF the final EVENT after the corresponding process crashed."
-  (with-current-buffer stderr-buf
-    (goto-char (point-max))
-    (let ((inhibit-read-only t))
-      (unless (bolp)
-        (insert "\n"))
-      (insert
-       (propertize (s-chomp event) 'font-lock-face '(:foreground "red"))
-       "\n"))))
-
-(defun jj--make-print-status-sentinel (buffer)
-  (lambda (proc event)
-    (unless (process-live-p proc)
-      (when (buffer-live-p buffer)
-        (unless (= (process-exit-status proc) 0)
-          ;; exited abnormally
-          (jj--insert-crash-event buffer event))))))
-
-(defun jj--make-cleanup-sentinel (&rest buffers)
-  "Kill BUFFERS if process is no longer live."
-  (lambda (proc event)
-    (unless (process-live-p proc)
-      (mapcar #'kill-buffer buffers))))
-
-(defun make-jj-simple-sentinel (error-buffer &rest other-buffers)
-  "Make a simple process sentinel, to insert ERROR-BUFFER's contents if the process ends unexpectedly, then kill it and all OTHER-BUFFERS."
-  (let ((status (jj--make-print-status-sentinel error-buffer))
-        (cleanup (apply #'jj--make-cleanup-sentinel error-buffer other-buffers)))
-    (lambda (proc event)
-      (funcall status proc event)
-      (funcall cleanup proc event))))
-
-(defun make-jj-callback-sentinel (end-callback)
-  "Make a simple process sentinel, to call END-CALLBACK with 2 arguments: the exit code and end event."
-  (lambda (proc event)
-    (funcall end-callback
-             (process-exit-status proc)
-             event)))
-
-(defun make-jj-generic-buffered-filter (intermediate-buffer read-next callback)
-  "Make a process filter for an arbitrary process.
-Every time there is new output, the filter adds it to the INTERMEDIATE-BUFFER, then calls READ-NEXT from the buffer beginning until it returns nil, then calls CALLBACK with the list of new non-nil values, and deletes the text before point (i.e. the text that was read).
-
-READ-NEXT should be a function that reads forward from `point', and moves `point' past whatever has been read.
-CALLBACK should be a function of one argument - the list of non-nil values returned by READ-NEXT."
-  (lambda (proc string)
-    (:documentation (format "This filter adds output to its intermediate buffer, then calls `%s' until it returns nil, then calls `%s' with the list of new non-nil values, and deletes the text before point (i.e. the text that was read)." read-next callback))
-    (when (buffer-live-p (process-buffer proc))
-      (with-current-buffer intermediate-buffer
-        (insert (ansi-color-apply string))
-        ;; process any new entries
-        (save-excursion
-          (goto-char (point-min))
-          ;; check if we have any new full entries in the buffer
-          (when-let ((news (collect-repeat (funcall read-next))))
-            ;; delete them and send the list to the callback
-            (funcall callback news)
-            (delete-region (point-min) (point))))))))
-;; sentinels and filters:1 ends here
-
 ;; promise utils
 
 ;; [[file:majjik.org::*promise utils][promise utils:1]]
@@ -896,6 +500,29 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
 (defun erase-accessible-buffer ()
   ;; erase while respecting narrowing
   (delete-region (point-min) (point-max)))
+
+(defun jj--simple-replace (string &optional beg end)
+  "Replace the region BEG to END with STRING, trying to avoid confusing markers on either side of the region, but without all the smarts of `replace-buffer-contents'."
+  (save-excursion
+    (let ((end (copy-marker (or end (point-max)))))
+      (goto-char (or beg (point-min)))
+      (insert string)
+      (delete-region (point) end))))
+
+(defun replace-region-contents-and-properties (beg end replace-fn &optional max-secs max-costs)
+  (save-excursion
+    (save-restriction
+      (narrow-to-region beg end)
+      (goto-char (point-min))
+      (let ((repl (funcall replace-fn)))
+	(if (bufferp repl)
+	    (replace-buffer-contents-and-properties repl max-secs max-costs)
+	  (let ((source-buffer (current-buffer)))
+	    (with-temp-buffer
+	      (insert repl)
+	      (let ((tmp-buffer (current-buffer)))
+		(set-buffer source-buffer)
+		(replace-buffer-contents-and-properties tmp-buffer max-secs max-costs)))))))))
 
 (defun replace-buffer-contents-and-properties (source &optional max-secs max-costs)
   (let ((buf (current-buffer))
@@ -1195,6 +822,128 @@ Also see `read-string-from-buffer'."
                  (message "%s" (cadr err))
                (message "transient--recursive-edit: %S" err))))))
 ;; string-edit:1 ends here
+
+;; show-hide hooks
+
+;; [[file:majjik.org::*show-hide hooks][show-hide hooks:1]]
+(define-advice magit-section-show (:before (section) jj--magit-section-before-show)
+  "Perform extra tasks after showing a SECTION."
+  (jj-before-show (oref section value) section))
+
+(cl-defgeneric jj-before-show (value section)
+  "Operation to perform before showing SECTION, which has VALUE.")
+(cl-defmethod jj-before-show (_value _section)
+  "Nothing to do before showing SECTION.")
+
+(define-advice magit-section-hide (:before (section) jj--magit-section-before-hide)
+  "Perform extra tasks before hiding a SECTION."
+  (jj-before-hide (oref section value) section))
+
+(cl-defgeneric jj-before-hide (value section)
+  "Operation to perform before hiding SECTION, which has VALUE.")
+(cl-defmethod jj-before-hide (_value _section)
+  "Nothing to do before hiding SECTION.")
+;; show-hide hooks:1 ends here
+
+;; section utils
+
+;; [[file:majjik.org::*section utils][section utils:1]]
+(defun jj--modify-section-header (sec fun)
+  "Update the heading of SEC by running FUN narrowed to the section's body.
+Update the properties and markers appropriately to expand the header to the new contents."
+  (declare (indent 1))
+  (let ((buf (marker-buffer (oref sec start))))
+    (with-current-buffer buf
+      (save-excursion
+        (with-restriction (oref sec start) (oref sec content)
+          (let* ((l (magit-section-lineage sec t))
+                 (inhibit-read-only t))
+            ;; function to be called with appropriate marker movement scheme
+            (dolist (s l)
+              (set-marker-insertion-type (oref s end) t)
+              (when-let ((c (oref s content)))
+                (set-marker-insertion-type c t)))
+            (funcall fun)
+            ;; marker movement types reset
+            (dolist (s l)
+              (set-marker-insertion-type (oref s end) nil)
+              (when-let ((c (oref s content)))
+                (set-marker-insertion-type c nil)))
+            (jj--propertize-buffer-for-section sec)))))))
+
+(defun jj--modify-section-body (sec fun &optional no-refresh)
+  "Update the body of SEC by running FUN narrowed to the section's body.
+Update the properties and markers appropriately to expand the body to the new contents."
+  (declare (indent 1))
+  (let ((buf (marker-buffer (oref sec start))))
+    (with-current-buffer buf
+      (save-excursion
+        (with-restriction (oref sec content) (oref sec end)
+          (let* ((l (magit-section-lineage sec t))
+                 (inhibit-read-only t))
+            ;; function to be called with appropriate marker movement scheme
+            (dolist (s l)
+              (set-marker-insertion-type (oref s end) t))
+            (funcall fun)
+            ;; marker movement types reset
+            (dolist (s l)
+              (set-marker-insertion-type (oref s end) nil))
+            (jj--propertize-buffer-for-section sec)
+            (when (and (not no-refresh)
+                       (oref sec hidden))
+              (magit-section-hide sec))))))))
+
+(defun jj--propertize-buffer-for-section (sec)
+  "Apply SEC as the `magit-section' property for all of the accessible buffer that does not already have a `magit-section'"
+  (cl-loop for start = (point-min) then pos
+           for pos = (next-property-change start)
+           for end = (or pos
+                         (point-max))
+           for sec-here = (or (get-text-property start 'magit-section)
+                              sec)
+           do (put-text-property start end 'magit-section sec-here)
+           while pos))
+;; section utils:1 ends here
+
+;; modal
+
+;; [[file:majjik.org::*modal][modal:1]]
+(defclass jj-modal-section (magit-section)
+  (h0
+   h1
+   cont)
+  :documentation "Section which displays different headings depending if it is collapsed or expanded. It can always be collapsed, even when there is no content other than the headings.")
+
+(cl-defmethod jj-before-show :before (value (section jj-modal-section))
+  (with-slots
+      (h1 cont)
+      section
+    (jj--modify-section-header section
+      (lambda ()
+        (replace-region-contents-and-properties
+         (point-min) (point-max)
+         (lambda () h1))))
+    (unless cont
+      (jj--modify-section-body section
+        (lambda ()
+          (jj--simple-replace ""))
+        :no-ref))))
+
+(cl-defmethod jj-before-hide :before (value (section jj-modal-section))
+  (with-slots
+      (h0 cont)
+      section
+    (jj--modify-section-header section
+      (lambda ()
+        (replace-region-contents-and-properties
+         (point-min) (point-max)
+         (lambda () h0))))
+    (unless cont
+      (jj--modify-section-body section
+        (lambda ()
+          (jj--simple-replace ""))
+        :no-ref))))
+;; modal:1 ends here
 
 ;; Fileset
 
@@ -1826,61 +1575,61 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 (defun jj--define-inserter-for (type-name field-specs)
   "Return an expression defining an inserter-function of one parameter, the ENTRY of type TYPE-NAME to insert, with the given FIELD-SPECS defining names and properties of the fields."
   `(cl-defmethod jj-insert ((entry ,type-name))
-    ,(format "Insert the ENTRY, formatted as a `%s' entry." type-name)
-    ,(cl-labels ((field (name-sym)
-                   `(,(intern (format "%s-%s" type-name name-sym))
-                     entry)))
-       `(with-insert-temp-buffer
-         (cl-loop for (field-name val printer oneline face first sep) in (list ,@(cl-loop  
-                                                                          for (field-name . props) in field-specs
-                                                                          for first = (if-let ((c (plist-member props :first)))
-                                                                                          ;; if it's explicitly set (even nil), use that
-                                                                                          (car c)
-                                                                                        ;; otherwise, it's the first, so set it
-                                                                                        t)
-                                                                          ;; otherwise, it's not first, so unset it
-                                                                          then (plist-get props :first)
-                                                                          for sep = (plist-get props :separator)
-                                                                          for oneline = (plist-get props :oneline)
-                                                                          for face = (plist-get props :face)
-                                                                          for printer = (plist-get props :printer)
-                                                                          collect `(list
-                                                                                    ',field-name
-                                                                                    ,(and field-name (field field-name))
-                                                                                    ,printer
-                                                                                    ,oneline
-                                                                                    ,face
-                                                                                    ,first
-                                                                                    ,sep)))
-                  with effective-first
-                  do (when first
-                       (setq effective-first t))
-                  for sep = (or sep
-                                (cond
-                                 (effective-first "")
-                                 (t " ")))
-                  for face = (cond ((functionp face)
-                                    (funcall face val entry))
-                                   (:else
-                                    face))
-                  do (when-let ((printed (s-presence
-                                          (if printer
-                                              (funcall printer val entry)
-                                            val))))
-                       (setq effective-first nil)
-                       (let ((formatted (apply #'propertize
-                                               `(,printed
-                                                 help-echo ,(symbol-name field-name)
-                                                 ,@(jj--if-arg face #'identity 'font-lock-face)))))
-                         (when oneline
-                           (setq formatted (jj--entitize-newlines formatted)))
-                         (insert sep formatted))))
-         ;; ensure commit text ends on a newline
-         (unless (bolp)
-           (insert "\n"))
-         ;; add field to all the commit text (including newlines)
-         ;; pointing to the entry struct
-         (add-text-properties (point-min) (point-max) `(jj-object ,entry))))))
+     ,(format "Insert the ENTRY, formatted as a `%s' entry." type-name)
+     ,(cl-labels ((field (name-sym)
+                    `(,(intern (format "%s-%s" type-name name-sym))
+                      entry)))
+        `(with-insert-temp-buffer
+          (cl-loop for (field-name val printer oneline face first sep) in (list ,@(cl-loop  
+                                                                                   for (field-name . props) in field-specs
+                                                                                   for first = (if-let ((c (plist-member props :first)))
+                                                                                                   ;; if it's explicitly set (even nil), use that
+                                                                                                   (car c)
+                                                                                                 ;; otherwise, it's the first, so set it
+                                                                                                 t)
+                                                                                   ;; otherwise, it's not first, so unset it
+                                                                                   then (plist-get props :first)
+                                                                                   for sep = (plist-get props :separator)
+                                                                                   for oneline = (plist-get props :oneline)
+                                                                                   for face = (plist-get props :face)
+                                                                                   for printer = (plist-get props :printer)
+                                                                                   collect `(list
+                                                                                             ',field-name
+                                                                                             ,(and field-name (field field-name))
+                                                                                             ,printer
+                                                                                             ,oneline
+                                                                                             ,face
+                                                                                             ,first
+                                                                                             ,sep)))
+                   with effective-first
+                   do (when first
+                        (setq effective-first t))
+                   for sep = (or sep
+                                 (cond
+                                  (effective-first "")
+                                  (t " ")))
+                   for face = (cond ((functionp face)
+                                     (funcall face val entry))
+                                    (:else
+                                     face))
+                   do (when-let ((printed (s-presence
+                                           (if printer
+                                               (funcall printer val entry)
+                                             val))))
+                        (setq effective-first nil)
+                        (let ((formatted (apply #'propertize
+                                                `(,printed
+                                                  help-echo ,(symbol-name field-name)
+                                                  ,@(jj--if-arg face #'identity 'font-lock-face)))))
+                          (when oneline
+                            (setq formatted (jj--entitize-newlines formatted)))
+                          (insert sep formatted))))
+          ;; ensure commit text ends on a newline
+          (unless (bolp)
+            (insert "\n"))
+          ;; add field to all the commit text (including newlines)
+          ;; pointing to the entry struct
+          (add-text-properties (point-min) (point-max) `(jj-object ,entry))))))
 ;; generic format macro:1 ends here
 
 ;; Log graph format
@@ -1888,15 +1637,15 @@ Accepts a list of FIELDS in the form (FIELD-NAME . PLIST), where PLIST accepts t
 ;; [[file:majjik.org::*Log graph format][Log graph format:1]]
 (eval-and-compile
   (defconst jj--count-graph-lines 4
-  "Number of lines of graph to sample for each commit in the log output. Fewer lines will give scrappier output, but 4 should be enough for any graph configuration.
+    "Number of lines of graph to sample for each commit in the log output. Fewer lines will give scrappier output, but 4 should be enough for any graph configuration.
 I've hardcoded other areas to expect exactly 4, so changing this will not break anything but the output will change slightly, specifically in which lines are considered mandatory."))
 (eval-and-compile
   (defconst jj--major-delim "\x1E"
-  "Delimiter for separating the graph from the records in the jj-log template.
+    "Delimiter for separating the graph from the records in the jj-log template.
   By default, this is the ascii record separator character."))
 (eval-and-compile
   (defconst jj--delim "\x1F"
-  "Delimiter for separating fields in the jj-log template.
+    "Delimiter for separating fields in the jj-log template.
   By default, this is the ascii unit separator character."))
 
 (cl-defstruct jj-log-entry
@@ -1987,19 +1736,19 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
     (should (equal entry
                    #s(jj-log-entry
                       #s(jj-log-header "puvwmkxr"
-                                   "zoeyhewll@gmail.com"
-                                   "2025-12-18 18:07:32"
-                                   ""
-                                   ""
-                                   ""
-                                   "f610054a"
-                                   ""
-                                   "bic\n*big\nmultiline\nmessage\nwith\nhonestly,\ntoo much \ntext\nright here\n")
+                                       "zoeyhewll@gmail.com"
+                                       "2025-12-18 18:07:32"
+                                       ""
+                                       ""
+                                       ""
+                                       "f610054a"
+                                       ""
+                                       "bic\n*big\nmultiline\nmessage\nwith\nhonestly,\ntoo much \ntext\nright here\n")
                       #s(jj-log-graph "" "@" "  "
-                                  ("│  "
-                                   "~  "
-                                   "   ")
-                                  nil))))
+                                      ("│  "
+                                       "~  "
+                                       "   ")
+                                      nil))))
     (with-temp-buffer
       (jj-insert entry)
       (should (string= (substring-no-properties (buffer-string))
@@ -2014,19 +1763,19 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
     (should (equal entry
                    #s(jj-log-entry
                       #s(jj-log-header "puvwmkxr"
-                                   "zoeyhewll@gmail.com"
-                                   "2025-12-18 18:07:32"
-                                   ""
-                                   ""
-                                   ""
-                                   "f610054a"
-                                   ""
-                                   "")
+                                       "zoeyhewll@gmail.com"
+                                       "2025-12-18 18:07:32"
+                                       ""
+                                       ""
+                                       ""
+                                       "f610054a"
+                                       ""
+                                       "")
                       #s(jj-log-graph "" "@" "  "
-                                  ("│  "
-                                   "~  "
-                                   "   ")
-                                  nil))))
+                                      ("│  "
+                                       "~  "
+                                       "   ")
+                                      nil))))
     (with-temp-buffer
       (jj-insert entry)
       (should (string= (substring-no-properties (buffer-string))
@@ -2040,17 +1789,17 @@ I've hardcoded other areas to expect exactly 4, so changing this will not break 
     (should (equal entry
                    #s(jj-log-entry
                       #s(jj-log-header "puvwmkxr"
-                                   "zoeyhewll@gmail.com"
-                                   "2025-12-18 18:07:32"
-                                   ""
-                                   ""
-                                   ""
-                                   "f610054a"
-                                   ""
-                                   "")
+                                       "zoeyhewll@gmail.com"
+                                       "2025-12-18 18:07:32"
+                                       ""
+                                       ""
+                                       ""
+                                       "f610054a"
+                                       ""
+                                       "")
                       #s(jj-log-graph "" "@" "  "
-                                  ()
-                                  "│  "))))
+                                      ()
+                                      "│  "))))
     (with-temp-buffer
       (jj-insert entry)
       (should (string= (substring-no-properties (buffer-string))
@@ -2348,64 +2097,6 @@ If the line is an elided entry, returns a single string, which is the prefix bef
   (magit-insert-section sec
     (elided)
     (jj-insert elided-graph)))
-
-(defun jj--simple-replace (string &optional beg end)
-  (save-excursion
-    (let ((end (copy-marker (or end (point-max)))))
-      (goto-char (or beg (point-min)))
-      (insert string)
-      (delete-region (point) end))))
-
-(defun replace-region-contents-and-properties (beg end replace-fn &optional max-secs max-costs)
-  (save-excursion
-    (save-restriction
-      (narrow-to-region beg end)
-      (goto-char (point-min))
-      (let ((repl (funcall replace-fn)))
-	(if (bufferp repl)
-	    (replace-buffer-contents-and-properties repl max-secs max-costs)
-	  (let ((source-buffer (current-buffer)))
-	    (with-temp-buffer
-	      (insert repl)
-	      (let ((tmp-buffer (current-buffer)))
-		(set-buffer source-buffer)
-		(replace-buffer-contents-and-properties tmp-buffer max-secs max-costs)))))))))
-
-(defclass jj-modal-section (magit-section)
-  (h0
-   h1
-   cont)
-  :documentation "Section which displays different headings depending if it is collapsed or expanded.")
-
-(cl-defmethod jj-before-show :before (value (section jj-modal-section))
-  (with-slots
-      (h1 cont)
-      section
-    (jj--modify-section-header section
-      (lambda ()
-        (replace-region-contents-and-properties
-         (point-min) (point-max)
-         (lambda () h1))))
-    (unless cont
-      (jj--modify-section-body section
-        (lambda ()
-          (jj--simple-replace ""))
-        :no-ref))))
-
-(cl-defmethod jj-before-hide :before (value (section jj-modal-section))
-  (with-slots
-      (h0 cont)
-      section
-    (jj--modify-section-header section
-      (lambda ()
-        (replace-region-contents-and-properties
-         (point-min) (point-max)
-         (lambda () h0))))
-    (unless cont
-      (jj--modify-section-body section
-        (lambda ()
-          (jj--simple-replace ""))
-        :no-ref))))
 ;; plumbing:1 ends here
 
 ;; log format
@@ -2640,69 +2331,69 @@ If the line is an elided entry, returns a single string, which is the prefix bef
                             while n
                             collect n)
                    '((:entry #s(jj-log-entry
-                      #s(jj-log-header "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil)
-                      #s(jj-log-graph "" "@" "    "
-                       ("├─╮  ") "│ │  ")))
+                                #s(jj-log-header "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil)
+                                #s(jj-log-graph "" "@" "    "
+                                                ("├─╮  ") "│ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "tqqxztyu" "zoeyhewll@gmail.com" "2025-12-24 18:48:22"
-                                      ("main??")
-                                      nil nil "1ae95f23" nil nil "long
+                                #s(jj-log-header "tqqxztyu" "zoeyhewll@gmail.com" "2025-12-24 18:48:22"
+                                                 ("main??")
+                                                 nil nil "1ae95f23" nil nil "long
 multiline
 message
 here
 and
 here
 ")
-                      #s(jj-log-graph "│ " "o" "  "
-                       () "│ │  ")))
+                                #s(jj-log-graph "│ " "o" "  "
+                                                () "│ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "zsrpuxsq/0" "zoeyhewll@gmail.com" "2026-01-11 18:58:04" nil nil nil "d4b4e2fc" "conflict" nil "diverge 2
+                                #s(jj-log-header "zsrpuxsq/0" "zoeyhewll@gmail.com" "2026-01-11 18:58:04" nil nil nil "d4b4e2fc" "conflict" nil "diverge 2
 ")
-                      #s(jj-log-graph "" "×" " │  "
-                       () "│ │  ")))
+                                #s(jj-log-graph "" "×" " │  "
+                                                () "│ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "zsrpuxsq/9" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "c33a9601" nil nil "diverge 1
+                                #s(jj-log-header "zsrpuxsq/9" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "c33a9601" nil nil "diverge 1
 ")
-                      #s(jj-log-graph "│ │ " "o" "  "
-                       ("├───╯  ") "│ │    ")))
+                                #s(jj-log-graph "│ │ " "o" "  "
+                                                ("├───╯  ") "│ │    ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "znpwrszt" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "a2fd03ad" "conflict" "empty" nil)
-                      #s(jj-log-graph "" "×" " │    "
-                       ("├───╮  ") "│ │ │  ")))
+                                #s(jj-log-header "znpwrszt" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "a2fd03ad" "conflict" "empty" nil)
+                                #s(jj-log-graph "" "×" " │    "
+                                                ("├───╮  ") "│ │ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "uwoorszk" "zoeyhewll@gmail.com" "2025-12-29 22:14:35" nil nil nil "3c9908cd" nil nil "foo
+                                #s(jj-log-header "uwoorszk" "zoeyhewll@gmail.com" "2025-12-29 22:14:35" nil nil nil "3c9908cd" nil nil "foo
 ")
-                      #s(jj-log-graph "│ │ " "o" "  "
-                       () "│ │ │  ")))
+                                #s(jj-log-graph "│ │ " "o" "  "
+                                                () "│ │ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "nqzyvomm" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "0c0b58a0" nil nil "foo
+                                #s(jj-log-header "nqzyvomm" "zoeyhewll@gmail.com" "2025-12-29 22:14:42" nil nil nil "0c0b58a0" nil nil "foo
 ")
-                      #s(jj-log-graph "" "o" " │ │  "
-                       () "│ │ │  ")))
+                                #s(jj-log-graph "" "o" " │ │  "
+                                                () "│ │ │  ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "oqnyxnnn" "zoeyhewll@gmail.com" "2025-12-26 23:28:34" nil nil nil "52c23b7f" nil "empty" "foo sample commit to edit
+                                #s(jj-log-header "oqnyxnnn" "zoeyhewll@gmail.com" "2025-12-26 23:28:34" nil nil nil "52c23b7f" nil "empty" "foo sample commit to edit
 ")
-                      #s(jj-log-graph "" "o" " │ │  "
-                       ("├───╯  ") "│ │    ")))
+                                #s(jj-log-graph "" "o" " │ │  "
+                                                ("├───╯  ") "│ │    ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "wuvynqqs" "zoeyhewll@gmail.com" "2025-03-26 14:08:11"
-                                      ("main??" "main@origin")
-                                      nil nil "ba86ecc3" nil nil "add basic restart-case and handler-case
+                                #s(jj-log-header "wuvynqqs" "zoeyhewll@gmail.com" "2025-03-26 14:08:11"
+                                                 ("main??" "main@origin")
+                                                 nil nil "ba86ecc3" nil nil "add basic restart-case and handler-case
 ")
-                      #s(jj-log-graph "" "+" " │  "
-                       () "│ │  ")))
+                                #s(jj-log-graph "" "+" " │  "
+                                                () "│ │  ")))
                      (:elided #s(jj-log-graph "" "!" " │  "
-                       ("├─╯") nil))
+                                              ("├─╯") nil))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "zwxrqwwv" "zoeyhewll@gmail.com" "2025-12-21 22:36:01"
-                                      ("foo")
-                                      nil nil "087ec1fb" nil "empty" nil)
-                      #s(jj-log-graph "│ " "o" "  "
-                       ("├─╯  ") "│    ")))
+                                #s(jj-log-header "zwxrqwwv" "zoeyhewll@gmail.com" "2025-12-21 22:36:01"
+                                                 ("foo")
+                                                 nil nil "087ec1fb" nil "empty" nil)
+                                #s(jj-log-graph "│ " "o" "  "
+                                                ("├─╯  ") "│    ")))
                      (:entry #s(jj-log-entry
-                      #s(jj-log-header "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)
-                      #s(jj-log-graph "" "+" "  "
-                       () "   "))))))))
+                                #s(jj-log-header "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)
+                                #s(jj-log-graph "" "+" "  "
+                                                () "   "))))))))
 
 (ert-deftest jj-test-header-log-parsing ()
   (with-temp-buffer
@@ -2735,8 +2426,8 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
                       #s(jj-log-header "uorrwztk" "zoeyhewll@gmail.com" "2026-02-22 14:23:10" nil nil nil "f831a9ed" "conflict" "empty" nil))
                      (:entry
                       #s(jj-log-header "tqqxztyu" "zoeyhewll@gmail.com" "2025-12-24 18:48:22"
-                                      ("main??")
-                                      nil nil "1ae95f23" nil nil "long
+                                       ("main??")
+                                       nil nil "1ae95f23" nil nil "long
 multiline
 message
 here
@@ -2762,15 +2453,15 @@ here
 "))
                      (:entry
                       #s(jj-log-header "wuvynqqs" "zoeyhewll@gmail.com" "2025-03-26 14:08:11"
-                                      ("main??" "main@origin")
-                                      nil nil "ba86ecc3" nil nil "add basic restart-case and handler-case
+                                       ("main??" "main@origin")
+                                       nil nil "ba86ecc3" nil nil "add basic restart-case and handler-case
 "))
                      (:elided
                       "(elided revisions)")
                      (:entry
                       #s(jj-log-header "zwxrqwwv" "zoeyhewll@gmail.com" "2025-12-21 22:36:01"
-                                      ("foo")
-                                      nil nil "087ec1fb" nil "empty" nil))
+                                       ("foo")
+                                       nil nil "087ec1fb" nil "empty" nil))
                      (:entry
                       #s(jj-log-header "zzzzzzzz" "" "1970-01-01 08:00:00" nil nil nil "00000000" nil "empty" nil)))))))
 
@@ -2839,40 +2530,40 @@ here
                             collect n)
                    '((:entry
                       #s(jj-log-graph "" "@" "    "
-                       ("├─╮  ") "│ │  "))
+                                      ("├─╮  ") "│ │  "))
                      (:entry
                       #s(jj-log-graph "│ " "o" "  "
-                       () "│ │  "))
+                                      () "│ │  "))
                      (:entry
                       #s(jj-log-graph "" "×" " │  "
-                       () "│ │  "))
+                                      () "│ │  "))
                      (:entry
                       #s(jj-log-graph "│ │ " "o" "  "
-                       ("├───╯  ") "│ │    "))
+                                      ("├───╯  ") "│ │    "))
                      (:entry
                       #s(jj-log-graph "" "×" " │    "
-                       ("├───╮  ") "│ │ │  "))
+                                      ("├───╮  ") "│ │ │  "))
                      (:entry
                       #s(jj-log-graph "│ │ " "o" "  "
-                       () "│ │ │  "))
+                                      () "│ │ │  "))
                      (:entry
                       #s(jj-log-graph "" "o" " │ │  "
-                       () "│ │ │  "))
+                                      () "│ │ │  "))
                      (:entry
                       #s(jj-log-graph "" "o" " │ │  "
-                       ("├───╯  ") "│ │    "))
+                                      ("├───╯  ") "│ │    "))
                      (:entry
                       #s(jj-log-graph "" "+" " │  "
-                       () "│ │  "))
+                                      () "│ │  "))
                      (:elided
                       #s(jj-log-graph "" "!" " │  "
-                       ("├─╯") nil))
+                                      ("├─╯") nil))
                      (:entry
                       #s(jj-log-graph "│ " "o" "  "
-                       ("├─╯  ") "│    "))
+                                      ("├─╯  ") "│    "))
                      (:entry
                       #s(jj-log-graph "" "+" "  "
-                       () "   ")))))
+                                      () "   ")))))
     (should (string=
              (buffer-string)
              "log-headeruorrwztk\"zoeyhewll@gmail.com\"2026-02-22 14:23:10f831a9edconflictempty\"\"
@@ -3041,9 +2732,9 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    :form (++ (:chain self (.remote)) "\n")))
 ;; Status format:1 ends here
 
-;; Command log
+;; proc log buffer and verbosity
 
-;; [[file:majjik.org::*Command log][Command log:1]]
+;; [[file:majjik.org::*proc log buffer and verbosity][proc log buffer and verbosity:1]]
 (defvar jj--cmd-log-buf-name-prefix "jj-command-log"
   "Tag to use to identify jj command-log buffers.
 This is concatenated with an identifier for the repository to define the buffer name for the command log. Let-bind this in order to temporarily use a different buffer for a particular log entry.")
@@ -3103,13 +2794,327 @@ This is concatenated with an identifier for the repository to define the buffer 
   (let ((buf (get-buffer-create (format "*%s:%s*" jj--cmd-log-buf-name-prefix (expand-file-name repo-dir)))))
     (with-current-buffer buf
       (unless (derived-mode-p 'jj-process-mode)
-        (jj-process-mode)
-        ;; for now this ruins colours in the process log buffer
-        ;; as my colours are not set via font-lock
-        ;; which is enabled in magit-section mode.
-        (cursor-intangible-mode t)))
+        (jj-process-mode)))
     buf))
-;; Command log:1 ends here
+;; proc log buffer and verbosity:1 ends here
+
+;; command-log management 
+
+;; [[file:majjik.org::*command-log management][command-log management:1]]
+(define-fringe-bitmap 'jj-fringe-bitmap>
+  [#b01100000
+   #b00110000
+   #b00011000
+   #b00001100
+   #b00011000
+   #b00110000
+   #b01100000
+   #b00000000])
+
+(define-fringe-bitmap 'jj-fringe-bitmapv
+  [#b00000000
+   #b10000010
+   #b11000110
+   #b01101100
+   #b00111000
+   #b00010000
+   #b00000000
+   #b00000000])
+
+(cl-defstruct jj--process-log-entry
+  "The buffers representing the various sections of a jj process' output"
+  (process
+   nil
+   :type process
+   :documentation "The process object itself.")
+  (name
+   nil
+   :type string
+   :documentation "Description of the process, e.g. the command line used to invoke it.")
+  (buf-code
+   nil
+   :type buffer
+   :documentation "Buffer containing only the area where exit code of the process will be written.")
+  (buf-stdout
+   nil
+   :type buffer
+   :documentation "Buffer for process standard output.")
+  (buf-stderr
+   nil
+   :type buffer
+   :documentation "Buffer for process standard error.")
+  (ovl-control
+   nil
+   :type overlay
+   :documentation "Overlay for the area through which the user may interact with the process.")
+  (ovl-args
+   nil
+   :type overlay
+   :documentation "Overlay for the default args string, which should be hidden when collapsed.")
+  (ovl-collapse
+   nil
+   :type overlay
+   :documentation "Overlay for the area which should be collapsible.")
+  (ovl-err
+   nil
+   :type overlay
+   :documentation "Overlay for the process standard error.")
+  (verbosity
+   nil
+   :type '(member critical error user system debug)
+   :documentation "Verbosity level for the log entry. User settings can show or hide entries by verbosity.")
+  (section
+   nil
+   :type magit-section
+   :documentation "Corresponding `magit-section' object in the log buffer."))
+
+(defun jj--set-initial-run-status ()
+  (let ((inhibit-read-only t))
+    (replace-region-contents
+     (point-min) (point-max)
+     (lambda () (propertize "run" 'font-lock-face '(:foreground "yellow"))))))
+
+(defun jj--make-update-exit-code-sentinel (section code-buf)
+  "Process sentinel to update the contents of CODE-BUF (a buffer) within SECTION (a magit-section) with the exit status of the process."
+  (lambda (proc event)
+    (jj--modify-section-header section
+      (lambda ()
+        (with-current-buffer code-buf
+          (let ((inhibit-read-only t))
+            (replace-region-contents
+             (point-min) (point-max)
+             (lambda ()
+               (cond ((process-live-p proc)
+                      ;; process is still running
+                      ;; what's it doing?
+                      (propertize
+                       (format "%s" (process-status proc))
+                       'font-lock-face `(:foreground
+                                         "yellow")))
+                     (t
+                      ;; process is done. how'd it exit?
+                      (let ((code (process-exit-status proc)))
+                        (propertize
+                         (format "%3d" code)
+                         'font-lock-face `(:foreground
+                                           ,(pcase code
+                                              (0 "green")
+                                              (_ "red")))))))))))))))
+;; command-log management:1 ends here
+
+;; command-log section writer
+
+;; [[file:majjik.org::*command-log section writer][command-log section writer:1]]
+(defun jj--insert-sectioned-heading (header-parts)
+  "Insert all of HEADER-PARTS as a magit section heading.
+Returns an alist of buffer regions. For each LABEL, the returned alist contains an
+entry (LABEL START . END) where START and END are markers to where the
+corresponding labeled string starts and ends."
+  (jj--insert-sectioned header-parts
+                        #'magit-insert-heading))
+
+(defun jj--make-process-log-entry (name cmd &optional hide-args)
+  "Return a `jj--process-log-entry' for indirectly writing to the jj log buffer for the current repo. CODE contains the process status info, and STDOUT and STDERR the respective streams. If provided, HIDE-ARGS is majjik's default arguments as applied to CMD. They are hidden when the entry is collapsed."
+  ;; ensure there is a root section
+  (unless magit-root-section
+    (goto-char (point-min))
+    (let ((inhibit-read-only t))
+      (magit-insert-section (root))))
+  ;; act as if nested within the root section 
+  (let ((magit-insert-section--current magit-root-section)
+        (magit-insert-section--parent magit-root-section)
+        (magit-insert-section--oldroot magit-root-section)
+        (inhibit-read-only t)
+        (display-name (jj--replace-newlines name))
+        ;; pretending to be a zero-width-space
+        (inv (propertize " " 'display ""))
+        ;; real zero-width-space
+        (zws "\u200B"))
+    (goto-char (point-max))
+    (oref
+     ;; get the log entry
+     (magit-insert-section sec
+       (jj-proc-log-section nil :hidden)
+       (map-let (:start
+                 :code 
+                 :args
+                 :cmd
+                 :content
+                 :stdout
+                 :stderr
+                 :end)
+           `(,@(jj--insert-sectioned-heading
+                `(:start
+                  ,zws
+                  (:code . "   ")
+                  "> jj "
+                  (:args . ,(propertize (jj--replace-newlines
+                                         (mapconcat #'shell-quote-argument hide-args " "))
+                                        'font-lock-face 'shadow))
+                  " "
+                  (:cmd . ,(jj--replace-newlines
+                            (mapconcat #'shell-quote-argument cmd " ")))
+                  "\n"
+                  :content))
+             ,@(jj--insert-sectioned
+                `(:stdout
+                  ,inv
+                  :stderr
+                  "\n"
+                  :end)))
+         (let* ((buf-code (jj--make-narrowed-indirect (format "*code-section %s*" display-name) (car code) (cdr code)))
+                (stdout (jj--make-narrowed-indirect (format "*stdout-section %s*" display-name) stdout stdout))
+                (stderr (jj--make-narrowed-indirect (format "*stderr-section %s*" display-name) stderr stderr))
+                ;; these need to be overlays,
+                ;; so we can toggle their properties as a unit
+                (ovl-args (make-overlay (car args) (cdr args)))
+                (ovl-collapse (make-overlay content end))
+                ;; these all also need to be overlays,
+                ;; so they keep applying as text is added
+                (ovl-control (make-overlay start end)))
+           (oset sec value
+                 (make-jj--process-log-entry
+                  :name name
+                  :section sec
+                  :buf-code buf-code
+                  :buf-stdout stdout
+                  :buf-stderr stderr
+                  :ovl-control ovl-control
+                  :ovl-collapse ovl-collapse
+                  :ovl-args ovl-args)))))
+     value)))
+
+(cl-defmethod jj-before-show ((value jj--process-log-entry) _section)
+  "Show the default arguments in a process log entry."
+  (with-slots (ovl-args)
+      value
+    (overlay-put ovl-args 'display nil)))
+
+(cl-defmethod jj-before-hide ((value jj--process-log-entry) _section)
+  "Hide the default arguments in a process log entry."
+  (with-slots (ovl-args)
+      value
+    (overlay-put ovl-args 'display (propertize "..." 'face 'shadow))))
+;; command-log section writer:1 ends here
+
+;; sync processes
+
+;; [[file:majjik.org::*sync processes][sync processes:1]]
+(defun call-cmd (cmd &optional infile destination display noerror)
+  "Call CMD via `call-process', with some changes.
+If DESTINATION is `:string', include the program output in the return value and any error messages, and ignore DISPLAY.
+If NOERROR is nil and the process has a nonzero exit code, signal an error, citing the exit code.
+If NOERROR is non-nil, include the exit code in the return value.
+When returning both a string result and an exit code, they are returned as a cons (CODE . OUTPUT)."
+  (pcase destination
+    (:string
+     (let ((dir default-directory))
+       (with-temp-buffer
+         (-let* ((default-directory dir)
+                 ((prog . args) cmd)
+                 (res (apply #'call-process prog infile t nil args))
+                 (out (buffer-string)))
+           (if noerror
+               (cons res out)
+             (unless (= res 0)
+               (error "process exited with nonzero exit code %d: %s" res out))
+             out)))))
+    (_
+     (-let* (((prog . args) cmd)
+             (res (apply #'call-process prog infile destination display args)))
+       (if noerror
+           res
+         (unless (= res 0)
+           (error "process exited with nonzero exit code %d" res)))))))
+;; sync processes:1 ends here
+
+;; sentinels and filters
+
+;; [[file:majjik.org::*sentinels and filters][sentinels and filters:1]]
+(defun jj--sticky-insert (marker insert-fn sticky-top)
+  "Move to MARKER, call INSERT-FN, update the marker, and move point if it's at the marker. If STICKY-TOP and point is at the beginning of the buffer, it will not move even if it is at the marker."
+  (let ((moving (and (= (point) marker)
+                     (not (and sticky-top (bobp))))))
+    (save-excursion
+      (goto-char marker)
+      (let ((inhibit-read-only t))
+        (funcall insert-fn))
+      (set-marker marker (point)))
+    (when moving (goto-char marker))))
+
+(defun make-sticky-process-filter (&optional initially-stay)
+  "Make a process filter that outputs to buffer without moving point.
+If INITIALLY-STAY is non-nil, point stays in place if it is at `bobp' even if this is also the position of the `process-mark'"
+  (lambda (proc string)
+    (:documentation (format "Process filter that outputs to buffer without moving point. If point %s, it follows the insertion. Otherwise it stays in place."
+                            (if initially-stay
+                                "is at the position that text is inserted, and is not at the beginning of the buffer"
+                              "is at the position that text is inserted")))
+    (when (buffer-live-p (process-buffer proc))
+      (with-current-buffer (process-buffer proc)
+        (jj--sticky-insert (process-mark proc)
+                           (lambda () (insert string))
+                           initially-stay)))))
+(defun jj--insert-crash-event (stderr-buf event)
+  "Insert into STDERR-BUF the final EVENT after the corresponding process crashed."
+  (with-current-buffer stderr-buf
+    (goto-char (point-max))
+    (let ((inhibit-read-only t))
+      (unless (bolp)
+        (insert "\n"))
+      (insert
+       (propertize (s-chomp event) 'font-lock-face '(:foreground "red"))
+       "\n"))))
+
+(defun jj--make-print-status-sentinel (buffer)
+  (lambda (proc event)
+    (unless (process-live-p proc)
+      (when (buffer-live-p buffer)
+        (unless (= (process-exit-status proc) 0)
+          ;; exited abnormally
+          (jj--insert-crash-event buffer event))))))
+
+(defun jj--make-cleanup-sentinel (&rest buffers)
+  "Kill BUFFERS if process is no longer live."
+  (lambda (proc event)
+    (unless (process-live-p proc)
+      (mapcar #'kill-buffer buffers))))
+
+(defun make-jj-simple-sentinel (error-buffer &rest other-buffers)
+  "Make a simple process sentinel, to insert ERROR-BUFFER's contents if the process ends unexpectedly, then kill it and all OTHER-BUFFERS."
+  (let ((status (jj--make-print-status-sentinel error-buffer))
+        (cleanup (apply #'jj--make-cleanup-sentinel error-buffer other-buffers)))
+    (lambda (proc event)
+      (funcall status proc event)
+      (funcall cleanup proc event))))
+
+(defun make-jj-callback-sentinel (end-callback)
+  "Make a simple process sentinel, to call END-CALLBACK with 2 arguments: the exit code and end event."
+  (lambda (proc event)
+    (funcall end-callback
+             (process-exit-status proc)
+             event)))
+
+(defun make-jj-generic-buffered-filter (intermediate-buffer read-next callback)
+  "Make a process filter for an arbitrary process.
+Every time there is new output, the filter adds it to the INTERMEDIATE-BUFFER, then calls READ-NEXT from the buffer beginning until it returns nil, then calls CALLBACK with the list of new non-nil values, and deletes the text before point (i.e. the text that was read).
+
+READ-NEXT should be a function that reads forward from `point', and moves `point' past whatever has been read.
+CALLBACK should be a function of one argument - the list of non-nil values returned by READ-NEXT."
+  (lambda (proc string)
+    (:documentation (format "This filter adds output to its intermediate buffer, then calls `%s' until it returns nil, then calls `%s' with the list of new non-nil values, and deletes the text before point (i.e. the text that was read)." read-next callback))
+    (when (buffer-live-p (process-buffer proc))
+      (with-current-buffer intermediate-buffer
+        (insert (ansi-color-apply string))
+        ;; process any new entries
+        (save-excursion
+          (goto-char (point-min))
+          ;; check if we have any new full entries in the buffer
+          (when-let ((news (collect-repeat (funcall read-next))))
+            ;; delete them and send the list to the callback
+            (funcall callback news)
+            (delete-region (point-min) (point))))))))
+;; sentinels and filters:1 ends here
 
 ;; Default args
 
