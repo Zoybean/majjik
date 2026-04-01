@@ -1080,7 +1080,7 @@ Update the properties and markers appropriately to expand the body to the new co
 ;; modal
 
 ;; [[file:majjik.org::*modal][modal:1]]
-(defclass jj-modal-section (magit-section)
+(defclass jj-modal-section (jj-markable-section)
   (h0
    h1
    cont)
@@ -2244,7 +2244,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
            (jj--insert-modal-section entry h0 h1 content))
           (:else
            (magit-insert-section sec
-             (magit-section entry nil)
+             (jj-markable-section entry nil)
              (magit-insert-heading h1)
              (when content
                (magit-insert-section-body
@@ -3338,8 +3338,16 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
              (cmt (jj--get-commit thing)))
     (list chg cmt (jj--get-bookmarks thing))))
 
+(defun jj--list-marked-revisions ()
+  "List only marked revisions."
+  (cl-loop for (cm ci . bms) in (jj-marked-revisions-annotated)
+           when cm collect `(,cm ,cm ,ci ,bms)
+           when ci collect `(,ci ,cm ,ci ,bms)
+           nconc (cl-loop for bm in bms
+                          collect `(,bm ,cm ,ci ,bms))))
+
 (defun jj--list-relevant-revisions (&optional rev-at-pt)
-  "List all revisions, as well as all bookmarks. if REV-AT-PT is provided, it should be a list of a change id and commit id for the commit at point."
+  "List all marked revisions, or all revisions, as well as all bookmarks. if REV-AT-PT is provided, it should be a list of a change id and commit id for the commit at point."
   `(,@(opt rev-at-pt)
     ("@" ,@(jj-wc-revision))
     ,@(cl-loop for (cm ci . bms) in (jj-match-revisions-annotated)
@@ -3370,7 +3378,8 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
          (pt-ann (jj--rev-at-point-option thing))
          (answer (completing-read
                   prompt (jj--annotated-ref-table
-                          (jj--list-relevant-revisions pt-ann))
+                          (or (jj--list-marked-revisions)
+                              (jj--list-relevant-revisions pt-ann)))
                   nil nil initial-input history)))
     (pcase answer
       ("^" rev-pt)
@@ -3385,7 +3394,8 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
            (pt-ann (jj--rev-at-point-option thing))
            (answers (completing-read-multiple
                      prompt (jj--annotated-ref-table
-                             (jj--list-relevant-revisions pt-ann))
+                             (or (jj--list-marked-revisions)
+                                 (jj--list-relevant-revisions pt-ann)))
                      nil nil initial-input history)))
       (mapcar (lambda (ans)
                 (pcase ans
@@ -3464,7 +3474,11 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
   "f u" #'jj-file-untrack-dwim
   "f k" #'jj-file-delete-dwim
   "$" #'jj-pop-to-command-log
-  "j @" #'jj-nav-log-@)
+  "j @" #'jj-nav-log-@
+  "m m" #'jj-mark-dwim
+  "m t" #'jj-toggle-mark-section
+  "m u" #'jj-unmark-dwim
+  "m U" #'jj-unmark-all-sections)
 
 (keymap-global-set "C-x j" #'jj-dash--async)
 ;; Keymaps:1 ends here
@@ -4164,9 +4178,9 @@ Also sets `jj--current-status' in the initial buffer when the status process com
   (jj-template
    (cl-subst self 'self
              `(++ (join " "
-                            (:chain self (format_short_change_id_with_change_offset))
-                            (:chain self (.commit_id))
-                            (:chain self (.bookmarks) (.join " ")))
+                        (:chain self (format_short_change_id_with_change_offset))
+                        (:chain self (.commit_id))
+                        (:chain self (.bookmarks) (.join " ")))
                   "\n"))))
 
 (defun jj-name-list-template (self)
@@ -4304,6 +4318,17 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                                "-T" ,(jj-rev-list-template 'self))
                              :no-revert)
                 :omit))
+
+(defun jj-marked-revisions-annotated ()
+  "List all marked revisions, as a list of (CHG-ID CMT-ID . BOOKMARKS)."
+  (let ((mk))
+    (jj-map-marked-sections (lambda (sec)
+                              (let ((val (oref sec value)))
+                                (push `(,(jj--get-change val)
+                                        ,(jj--get-commit val)
+                                        ,@(jj--get-bookmarks val))
+                                      mk))))
+    mk))
 
 (defun jj-match-revisions-annotated (&optional revset)
   "List all revisions matching REVSET, or all visible by default, as a list of (CHG-ID CMT-ID . BOOKMARKS)."
