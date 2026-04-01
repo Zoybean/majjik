@@ -282,6 +282,15 @@ If ARG is nil, returns nil. Otherwise returns the list containing FLAG (if provi
          ,@(opt (and formatter
                      (funcall formatter arg))))))
 
+(defun jj--if-args (arg formatter &optional flag)
+  "Helper for building command-line arguments.
+
+If ARG is nil, returns nil. Otherwise returns the list containing FLAG (if provided) spliced with the result of calling FORMATTER on ARG. If formatter is nil or returns nil, the ARG is omitted from the return value."
+  (and arg
+       `(,@(opt flag)
+         ,@(and formatter
+                (funcall formatter arg)))))
+
 (ert-deftest jj--test-if-arg ()
   (should (equal `("--" "foo-bar")
                  (jj--if-arg "foo"
@@ -303,6 +312,34 @@ If ARG is nil, returns nil. Otherwise returns the list containing FLAG (if provi
                              "--no-args-flag")))
   (should (equal `("--no-args-flag")
                  (jj--if-arg t
+                             nil
+                             "--no-args-flag"))))
+
+(ert-deftest jj--test-if-args ()
+  (should (equal `("--" "foo-bar" "bar-bar")
+                 (jj--if-args '("foo" "bar")
+                             (lambda (xs)
+                               (mapcar (lambda (x)
+                                         (format "%s-bar" x))
+                                       xs))
+                             "--")))
+  (should (equal `()
+                 (jj--if-args nil
+                             (lambda (x)
+                               (error "should not be called for nil arg"))
+                             "--")))
+  (should (equal `("foo-bar" "bar-bar")
+                 (jj--if-args '("foo" "bar")
+                             (lambda (xs)
+                               (mapcar (lambda (x)
+                                         (format "%s-bar" x))
+                                       xs)))))
+  (should (equal `("--no-args-flag")
+                 (jj--if-args t
+                             #'ignore
+                             "--no-args-flag")))
+  (should (equal `("--no-args-flag")
+                 (jj--if-args t
                              nil
                              "--no-args-flag"))))
 ;; argument utils:1 ends here
@@ -1244,7 +1281,7 @@ See URL `https://docs.jj-vcs.dev/latest/filesets/' for more info."
 
 ;; [[file:majjik.org::*Revset][Revset:1]]
 (defun jj-revs-as-revset (&rest revs)
-  "Returns a revset that matches all the given REVS. No globbing is applied, and all are considered relative to cwd."
+  "Returns a revset that matches all the given REVS. No globbing is applied."
   (jj-revset `(or ,@revs)))
 
 (defmacro jj-compile-revset (sexp)
@@ -3451,12 +3488,16 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
   "C-x u" #'jj-undo
   "C" #'jj-commit-entry-prefix
   "c e" #'jj-edit-dwim
-  "c n" #'jj-new-on-dwim
+  "c n n" #'jj-new-on-dwim
+  "c n a" #'jj-new-after-dwim
+  "c n b" #'jj-new-before-dwim
   "c k" #'jj-drop-dwim
   "c w" #'jj-desc-dwim
   "c a" #'jj-amend-into-dwim
   "c s" #'jj-squash-down-dwim
-  "d" #'jj-diff-entry-prefix
+  "d d" #'jj-diff-dwim
+  "d i" #'jj-interdiff-dwim
+  "D" #'jj-diff-entry-prefix
   "F" #'jj-git-fetch-prefix
   "P" #'jj-git-push-prefix
   "B" #'jj-bookmark-prefix
@@ -4319,6 +4360,15 @@ Also sets `jj--current-status' in the initial buffer when the status process com
                              :no-revert)
                 :omit))
 
+(defun jj-marked-revisions (&optional revset)
+  "List all marked revisions."
+  (let ((mk))
+    (jj-map-marked-sections (lambda (sec)
+                              (let ((val (oref sec value)))
+                                (push (jj--get-change val)
+                                      mk))))
+    mk))
+
 (defun jj-marked-revisions-annotated ()
   "List all marked revisions, as a list of (CHG-ID CMT-ID . BOOKMARKS)."
   (let ((mk))
@@ -4368,14 +4418,14 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 
 ;; [[file:majjik.org::*generic][generic:1]]
 (cl-defgeneric jj--get-revset (thing &optional default)
-  "Get a revision or revset from THING, or use DEFAULT if not available."
+  "Get a revset from THING, or use DEFAULT if not available."
   default)
 (cl-defmethod jj--get-revset ((cmt jj-log-entry) &optional default)
-  (jj-log-header-change-id (jj-log-entry-header cmt)))
+  (list (jj-log-header-change-id (jj-log-entry-header cmt))))
 (cl-defmethod jj--get-revset ((cmt jj-log-header) &optional default)
-  (jj-log-header-change-id cmt))
+  (list (jj-log-header-change-id cmt)))
 (cl-defmethod jj--get-revset ((lin jj-status-lineage-entry) &optional default)
-  (jj-status-lineage-entry-change-id lin))
+  (list (jj-status-lineage-entry-change-id lin)))
 
 (cl-defgeneric jj--get-change (thing &optional default)
   "Get a change id from THING, or use DEFAULT if not available."
@@ -5527,17 +5577,50 @@ Returns the raw process, not the combined handler."
 ;; jj diff
 
 ;; [[file:majjik.org::*jj diff][jj diff:1]]
+(defun jj-diff-dwim ()
+  "View the diff for the commits you meant.
+If a commit is marked and point is at a commit, diff from the marked commit, to the point commit. If no commits are marked, diff the changes in the point commit, or prompt for a commit to diff its changes."
+  (interactive)
+  (let ((marks (jj-marked-revisions)))
+    (pcase marks
+      ('nil
+       (jj-diff :at (jj-get-revision-dwim "commit to diff: ")))
+      (`(,mark)
+       (jj-diff :from mark :to (jj-get-revision-dwim "new commit: ")))
+      (_ (user-error "Too many marks for diff. Mark at most one FROM revision. Marked %d." (length marks))))))
+
+(cl-defun jj-interdiff-dwim ()
+  "View the interdiff for the commits you meant.
+If a commit is marked, interdiff from the marked commit, or prompt for a commit to use. If point is at a commit, interdiff to the point commit, or prompt for a commit to use."
+  (interactive)
+  (let ((marks (jj-marked-revisions)))
+    (pcase marks
+      ('nil
+       (jj-interdiff :from (jj-read-revision "from commit: ") :to (jj-get-revision-dwim "to commit: ")))
+      (`(,mark)
+       (jj-interdiff :from mark :to (jj-get-revision-dwim "new commit: ")))
+      (_ (user-error "Too many marks for interdiff. Mark at most one FROM revision. Marked %d." (length marks))))))
+
 (cl-defun jj-diff (&key at from to fileset)
   "View the diff for AT, or between FROM and TO, optionally limited to files in FILESET."
   (jj-cmd-async-view
-   `("diff"
-     "--git"
-     ,@(jj--if-arg at #'identity "--revisions")
-     ,@(jj--if-arg from #'identity "--from")
-     ,@(jj--if-arg to #'identity "--to")
-     "--"
-     ,@(jj--if-arg fileset #'identity nil))
-   :no-revert))
+      `("diff"
+        "--git"
+        ,@(jj--if-arg at #'identity "--revisions")
+        ,@(jj--if-arg from #'identity "--from")
+        ,@(jj--if-arg to #'identity "--to")
+        ,@(jj--if-args fileset #'identity "--"))
+    :no-revert))
+
+(cl-defun jj-interdiff (&key from to fileset)
+  "View the diff for AT, or between FROM and TO, optionally limited to files in FILESET."
+  (jj-cmd-async-view
+      `("interdiff"
+        "--git"
+        ,@(jj--if-arg from #'identity "--from")
+        ,@(jj--if-arg to #'identity "--to")
+        ,@(jj--if-args fileset #'identity "--"))
+    :no-revert))
 
 (defun jj-diff-at (revset &optional fileset)
   "View the diff for REVISION, optionally limited to files in FILESET."
@@ -5551,7 +5634,7 @@ Returns the raw process, not the combined handler."
 ;; jj show
 
 ;; [[file:majjik.org::*jj show][jj show:1]]
-(cl-defun jj-show (commit &optional fileset)
+(defun jj-show (commit &optional fileset)
   "View COMMIT, optionally limited to files in FILESET."
   (jj-cmd-async-view
    `("show"
@@ -5602,7 +5685,7 @@ Will likely fail for any interactive command."
 ;; jj undo
 
 ;; [[file:majjik.org::*jj undo][jj undo:1]]
-(cl-defun jj-undo ()
+(defun jj-undo ()
   (interactive)
   (jj-cmd-async-view `("undo")))
 ;; jj undo:1 ends here
@@ -5610,7 +5693,7 @@ Will likely fail for any interactive command."
 ;; jj redo
 
 ;; [[file:majjik.org::*jj redo][jj redo:1]]
-(cl-defun jj-redo ()
+(defun jj-redo ()
   (interactive)
   (jj-cmd-async-view `("redo")))
 ;; jj redo:1 ends here
@@ -6045,51 +6128,66 @@ Will likely fail for any interactive command."
 ;; jj new
 
 ;; [[file:majjik.org::*jj new][jj new:1]]
-(cl-defun jj-new (&key rev before after message no-edit)
-  (when (and rev (or before after))
-    (user-error "cannot supply REV with BEFORE or AFTER"))
-  (unless (or rev before after)
-    (user-error "must supply at least one of REV, BEFORE, or AFTER"))
+(cl-defun jj-new (&key on before after message no-edit)
+  (when (and on (or before after))
+    (user-error "cannot supply ON with BEFORE or AFTER"))
+  (unless (or on before after)
+    (user-error "must supply at least one of ON, BEFORE, or AFTER"))
   (jj-cmd-async-view
       `("new"
-        ,@(jj--if-arg rev #'identity "-r")
-        ,@(jj--if-arg before #'identity "--before")
-        ,@(jj--if-arg after #'identity "--after")
+        ,@(mapcan (lambda (rev)
+                    `("-o" ,rev))
+                  on)
+        ,@(mapcan (lambda (rev)
+                      `("-B" ,rev))
+                    before)
+        ,@(mapcan (lambda (rev)
+                      `("-A" ,rev))
+                    after)
         ,@(jj--if-arg no-edit nil "--no-edit")
         ,@(jj--if-arg message #'identity "-m"))))
 
-(cl-defun jj-new-on-dwim (parents-revset &key message no-edit)
-  "Create a new commit after the chosen PARENTS-REVSET, with no children."
-  (interactive (list (jj-get-revset-dwim "parent revs: ")))
-  (jj-new :rev parents-revset :message message :no-edit no-edit))
+(cl-defun jj-new-on-dwim ()
+  "Create a new commit on the parents you meant.
+If any commits are marked, use those as the parents. If no commits are marked, but point is at a commit, use that commit. Otherwise, prompt for a set of parent commits."
+  (interactive)
+  (let* ((marks (jj-marked-revisions))
+         (revs (or marks (jj-get-revset-dwim "parent commits: "))))
+    (jj-new :on revs)))
 
 (cl-defun jj-new-on-bookmark (bookmark-name &key message no-edit)
   "Create a new commit after the chosen BOOKMARK-NAME, with no children."
   (interactive (list (completing-read "New on bookmark: " (jj-list-bookmarks))))
-  (jj-new :rev bookmark-name :message message :no-edit no-edit))
+  (jj-new :on bookmark-name :message message :no-edit no-edit))
 
-(cl-defun jj-new-before-dwim (children-revset &key message no-edit)
-  "Insert a new commit before the chosen CHILDREN-REVSET, and after its parents."
-  (interactive (list (jj-get-revset-dwim "child revs: ")))
-  (jj-new :before children-revset :message message :no-edit no-edit))
+(cl-defun jj-new-before-dwim ()
+  "Insert a new commit before the commits you meant.
+If any commits are marked, use those. If no commits are marked, but point is at a commit, use that commit. Otherwise, prompt for a set of commits."
+  (interactive)
+  (let* ((marks (jj-marked-revisions))
+         (revs (or marks (jj-get-revset-dwim "before commits: "))))
+    (jj-new :before revs)))
 
-(cl-defun jj-new-after-dwim (parents-revset &key message no-edit)
-  "Insert a new commit after the chosen PARENTS-REVSET, and before its children."
-  (interactive (list (jj-get-revset-dwim "parent revs: ")))
-  (jj-new :after parents-revset :message message :no-edit no-edit))
+(cl-defun jj-new-after-dwim ()
+  "Insert a new commit after the commits you meant.
+If any commits are marked, use those. If no commits are marked, but point is at a commit, use that commit. Otherwise, prompt for a set of commits."
+  (interactive)
+  (let* ((marks (jj-marked-revisions))
+         (revs (or marks (jj-get-revset-dwim "before commits: "))))
+    (jj-new :after revs)))
 
-(cl-defun jj-new-insert (children-revset parents-revset &key message no-edit)
+(cl-defun jj-new-insert (children parents &key message no-edit)
   "Insert a new commit before the chosen CHILDREN-REVSET, and after the chosen PARENTS-REVSET."
   (interactive (list (jj-read-multi-revision "parent revs: ")
                      (jj-read-multi-revision "child revs: ")))
-  (jj-new :before children-revset :after parents-revset :message message :no-edit no-edit))
+  (jj-new :before children :after parents :message message :no-edit no-edit))
 ;; jj new:1 ends here
 
 ;; jj edit
 
 ;; [[file:majjik.org::*jj edit][jj edit:1]]
 (cl-defun jj-edit-dwim (rev &optional ignore-immutable)
-  (interactive (list (jj-get-revset-dwim "edit: ")))
+  (interactive (list (jj-get-revision-dwim "edit: ")))
   (jj-cmd-async-view
       `("edit"
         "-r" ,rev
@@ -6104,7 +6202,9 @@ Will likely fail for any interactive command."
                      (read-string "message: ")))
   (jj-cmd-async-view
    `("describe"
-     "-r" ,revset
+     ,@(mapcan (lambda (rev)
+                      `("-r" ,rev))
+                    revset)
      ,(concat "--message=" message))))
 
 (defun jj-desc-dwim (revset)
@@ -6112,19 +6212,27 @@ Will likely fail for any interactive command."
   (jj-with-editor
    (jj-cmd-async-view
     `("describe"
-      "-r" ,revset))))
+      ,@(mapcan (lambda (rev)
+                      `("-r" ,rev))
+                    revset)))))
 ;; jj desc:1 ends here
 
 ;; jj drop
 
 ;; [[file:majjik.org::*jj drop][jj drop:1]]
-(defun jj-drop-dwim (revset &optional noconfirm)
-  (interactive (list (jj-get-revset-dwim "revs to abandon: ")))
-  (unless (or noconfirm (yes-or-no-p (format "abandon %s?" revset)))
-    (user-error "cancelled"))
-  (jj-cmd-async-view
-      `("abandon"
-        "-r" ,revset)))
+(defun jj-drop-dwim (&optional noconfirm)
+  "Drop the commits you meant.
+If any commits are marked, drop those. If no commits are marked, but point is at a commit, drop that commit. Otherwise, prompt for a set of commits to drop."
+  (interactive (list current-prefix-arg))
+  (let* ((marks (jj-marked-revisions))
+         (revs (or marks (jj-get-revset-dwim "revs to abandon: "))))
+    (unless (or noconfirm (yes-or-no-p (format "abandon %s?" revs)))
+      (user-error "cancelled"))
+    (jj-cmd-async-view
+        `("abandon"
+          ,@(mapcan (lambda (rev)
+                    `("-r" ,rev))
+                  revs)))))
 ;; jj drop:1 ends here
 
 ;; simple
@@ -6570,31 +6678,35 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
 ;; jj squash/amend
 
 ;; [[file:majjik.org::*jj squash/amend][jj squash/amend:1]]
+(defun jj-amend-into-dwim (&optional noconfirm ignore-immutable)
+  "Squash changes from the commits you meant, into the chosen revision.
+If any commits are marked, squash those commits. Otherwise, squash the @ commit. Commits are squashed into the commit at point, or prompt for a commit."
+  (interactive (list nil current-prefix-arg))
+  (let ((dest (jj-get-revision-dwim "squash into rev: "))
+        (source (or (jj-marked-revisions) "@")))
+    (unless (or noconfirm (yes-or-no-p (format "squash %s into %s?" source dest)))
+      (user-error "cancelled"))
+    (jj-with-editor
+     (jj-cmd-async-message
+         `("squash"
+           ,@(mapcan (lambda (rev)
+                    `("-f" ,rev))
+                  source)
+           "--into" ,dest
+           ,@(jj--if-arg ignore-immutable nil "--ignore-immutable"))))))
+
 (cl-defun jj-squash-down-dwim (rev &optional noconfirm ignore-immutable)
-  "Squash changes from REV into its single parent."
+  "Squash changes from REV into its single parent. Ignores marks."
   (interactive (list (jj-get-revision-dwim "squash rev: ")
                      nil
                      current-prefix-arg))
   (unless (or noconfirm (yes-or-no-p (format "squash %s into its parent?" rev)))
     (user-error "cancelled"))
   (jj-with-editor
-    (jj-cmd-async-message
-        `("squash"
-          "-r" ,rev
-          ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
-
-(cl-defun jj-amend-into-dwim (rev &optional noconfirm ignore-immutable)
-  "Squash changes from @ into the chosen revision."
-  (interactive (list (jj-get-revision-dwim "squash into rev: ")
-                     nil
-                     current-prefix-arg))
-  (unless (or noconfirm (yes-or-no-p (format "squash @ into %s?" rev)))
-    (user-error "cancelled"))
-  (jj-with-editor
-    (jj-cmd-async-message
-        `("squash"
-          "--into" ,rev
-          ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
+   (jj-cmd-async-message
+       `("squash"
+         "-r" ,rev
+         ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
 ;; jj squash/amend:1 ends here
 
 ;; simple
