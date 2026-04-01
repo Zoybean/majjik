@@ -892,6 +892,174 @@
              while pos))
 #+end_src
 *** section types
+**** markable
+#+begin_src elisp
+  (defclass jj-markable-section (magit-section)
+    ((marked :initform nil))
+    :documentation "Section which can be marked and unmarked, changing its appearance and providing functions to query for a list of marked sections.")
+
+  (defun jj-list-marked-sections (&optional sec)
+    "List all sections in the current buffer that are marked. If SEC is non-nil, only list marked sections among it and its children."
+    (let ((marked nil))
+      (jj-map-marked-sections
+       (lambda (sec)
+         (push sec marked))
+       sec)
+      marked))
+
+  (defun jj-map-marked-sections (fn &optional sec)
+    "Call FN with each section, in a depth-first post-order traversal. If SEC is provided, traverse it and its children only."
+    (magit-map-sections
+     (lambda (sec)
+       (when (and sec
+                  (jj-markable-section-p sec)
+                  (oref sec marked))
+         (funcall fn sec)))
+     sec))
+
+  (defun jj-toggle-mark-section (sec)
+    "Toggle whether section SEC is marked. Interactively, the section at point."
+    (interactive (list (magit-section-at))) 
+    (when (or (and sec
+                   (jj-markable-section-p sec))
+              (user-error "Not a markable section"))
+      (prog1 (oset sec marked (not (oref sec marked)))
+        (run-hook-with-args
+         'jj-after-section-mark-change-hook
+         sec))))
+
+  (defun jj-mark-section (sec)
+    "Mark section SEC. Interactively, the section at point."
+    (interactive (list (magit-section-at))) 
+    (when (and (or (and sec
+                        (jj-markable-section-p sec))
+                   (user-error "Not a markable section"))
+               (not (oref sec marked)))
+      (prog1 (oset sec marked t)
+        (run-hook-with-args
+         'jj-after-section-mark-change-hook
+         sec))))
+
+  (defun jj-unmark-section (sec)
+    "Unmark section SEC. Interactively, the section at point."
+    (interactive (list (magit-section-at))) 
+    (when (and (or (and sec
+                        (jj-markable-section-p sec))
+                   (user-error "Not a markable section"))
+               (oref sec marked))
+      (prog1 (oset sec marked nil)
+        (run-hook-with-args
+         'jj-after-section-mark-change-hook
+         sec))))
+
+  (defun jj-mark-sections-region (beg end)
+    "Mark sections within region from BEG to END."
+    (interactive "r")
+    (save-excursion
+      (cl-loop for pos = (point-min) then (next-single-property-change pos 'magit-section)
+               while pos
+               while (<= pos end)
+               for sec = (magit-section-at pos)
+               do (ignore-errors
+                    (jj-mark-section sec)))))
+
+  (defun jj-unmark-sections-region (beg end)
+    "Unmark sections within region from BEG to END."
+    (interactive "r")
+    (save-excursion
+      (cl-loop for pos = (point-min) then (next-single-property-change pos 'magit-section)
+               while pos
+               for sec = (magit-section-at pos)
+               do (ignore-errors
+                    (jj-unmark-section sec)))))
+
+  (defun jj-mark-dwim ()
+    (interactive)
+    (if (use-region-p)
+        (call-interactively #'jj-mark-sections-region)
+      (call-interactively #'jj-mark-section)))
+  (defun jj-unmark-dwim ()
+    (interactive)
+    (cond ((use-region-p)
+           (call-interactively #'jj-unmark-sections-region))
+          (:else
+           (call-interactively #'jj-unmark-section))))
+
+  (defun jj-unmark-all-sections (&optional sec)
+    (interactive)
+    "Unmark all child sections of SEC, or all sections if SEC is not provided."
+    (jj-map-marked-sections #'jj-unmark-section sec))
+#+end_src
+***** kludge to highlight marks
+#+begin_src elisp
+  (defface jj-mark-section-face
+    '((((class color) (background light))
+       :extend t
+       :background "PaleTurquoise1")
+      (((class color) (background  dark))
+       :extend t
+       :background "RoyalBlue4"))
+    "Face for marked section headings."
+    :group 'magit-section-faces)
+
+  (defvar jj-after-section-mark-change-hook ()
+    "Hook called after a section is marked or unmarked.")
+
+  (defun jj-repaint-mark-section (sec)
+    (setq magit-section-highlight-force-update t))
+
+  (add-hook 'jj-after-section-mark-change-hook #'jj-repaint-mark-section)
+
+
+  (define-advice magit-section-update-highlight (:override (&optional force) jj/magit-section-update-highlight)
+    "Highlight as usual, but also highlight marked sections."
+    (let ((section (magit-current-section))
+          (focused (magit-focused-sections))
+          (marked (jj-list-marked-sections)))
+      (cond
+       ((or force
+            marked
+            magit-section-highlight-force-update
+            (xor magit-section-pre-command-region-p (region-active-p))
+            (not (eq magit-section-pre-command-section section)))
+        (let ((inhibit-read-only t)
+              (deactivate-mark nil)
+              (selection (magit-region-sections)))
+          (mapc #'delete-overlay magit-section-highlight-overlays)
+          (mapc #'delete-overlay magit-section-selection-overlays)
+          (setq magit-section-highlight-overlays nil)
+          (setq magit-section-selection-overlays nil)
+          (cond ((magit-section--maybe-enable-long-lines-shortcuts))
+                ((eq section magit-root-section))
+                ((not magit-section-highlight-current)
+                 (when selection
+                   (magit-section-highlight-selection selection)))
+                ((not selection)
+                 (magit-section-highlight section))
+                (t
+                 (mapc #'magit-section-highlight selection)
+                 (magit-section-highlight-selection selection)))
+          (dolist (section (cl-union magit-section-highlighted-sections focused))
+            (when (slot-boundp section 'painted)
+              (magit-section-update-paint section focused)))
+          (dolist (mark marked)
+            (with-slots (start content end) mark
+              (let ((ov (make-overlay start (or content end) nil t)))
+                (overlay-put ov 'font-lock-face 'jj-mark-section-face)
+                (overlay-put ov 'evaporate t)
+                (overlay-put ov 'priority '(nil . 9))
+                (push ov magit-section-selection-overlays)
+                ov)))
+          (restore-buffer-modified-p nil)))
+       ((and (eq magit-section-pre-command-section section)
+             magit-section-selection-overlays
+             (region-active-p)
+             (not (magit-region-sections)))
+        (mapc #'delete-overlay magit-section-selection-overlays)
+        (setq magit-section-selection-overlays nil)))
+      (setq magit-section-highlight-force-update nil)
+      (magit-section-maybe-paint-visibility-ellipses)))
+#+end_src
 **** modal
 #+begin_src elisp
   (defclass jj-modal-section (magit-section)
