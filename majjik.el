@@ -3980,14 +3980,14 @@ Also sets `jj--current-status' in the initial buffer when the status process com
 (defun jj-rev-list-template (self)
   (jj-template
    (cl-subst self 'self
-             `(++ (:chain self (.change_id))
+             `(++ (:chain self (format_short_change_id_with_change_offset))
                   "\n"))))
 
 (defun jj-rev-list-verbose-template (self)
   (jj-template
    (cl-subst self 'self
              `(++ (join " "
-                            (:chain self (.change_id))
+                            (:chain self (format_short_change_id_with_change_offset))
                             (:chain self (.commit_id))
                             (:chain self (.bookmarks) (.join " ")))
                   "\n"))))
