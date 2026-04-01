@@ -686,6 +686,25 @@ entry (LABEL . POS) where POS is a marker."
         (narrow-to-region start end)))))
 ;; rendering utils:1 ends here
 
+;; recursive-edit utils
+;; Minor mode for general recursive-edit operations with a standard keymap.
+
+;; [[file:majjik.org::*recursive-edit utils][recursive-edit utils:1]]
+(defvar jj-recursive-edit-confirm-function
+  nil
+  "Function to call when confirming a recursive edit.")
+
+(define-minor-mode jj-recursive-edit-mode
+  "Mode for exiting a recursive edit with C-c C-c to confirm or C-c C-k to cancel."
+  :keymap (define-keymap
+            "C-c C-c" #'jj-recursive-edit-confirm
+            "C-c C-k" #'abort-recursive-edit))
+
+(defun jj-recursive-edit-confirm ()
+  (interactive)
+  (throw 'exit jj-recursive-edit-confirm-function))
+;; recursive-edit utils:1 ends here
+
 ;; string-edit
 
 ;; [[file:majjik.org::*string-edit][string-edit:1]]
@@ -942,9 +961,9 @@ Update the properties and markers appropriately to expand the body to the new co
            while pos))
 ;; section utils:1 ends here
 
-;; markable
+;; core logic
 
-;; [[file:majjik.org::*markable][markable:1]]
+;; [[file:majjik.org::*core logic][core logic:1]]
 (defclass jj-markable-section (magit-section)
   ((marked :initform nil))
   :documentation "Section which can be marked and unmarked, changing its appearance and providing functions to query for a list of marked sections.")
@@ -1041,7 +1060,7 @@ Update the properties and markers appropriately to expand the body to the new co
   (interactive)
   "Unmark all child sections of SEC, or all sections if SEC is not provided."
   (jj-map-marked-sections #'jj-unmark-section sec))
-;; markable:1 ends here
+;; core logic:1 ends here
 
 ;; kludge to highlight marks
 
@@ -1114,6 +1133,32 @@ Update the properties and markers appropriately to expand the body to the new co
     (setq magit-section-highlight-force-update nil)
     (magit-section-maybe-paint-visibility-ellipses)))
 ;; kludge to highlight marks:1 ends here
+
+;; recursive-edit for marking
+
+;; [[file:majjik.org::*recursive-edit for marking][recursive-edit for marking:1]]
+(defun jj-interactive-get-marked (&optional prompt point-if-no-mark)
+  "Enter a recursive edit to mark a set of sections. Returns the list of marked sections. If POINT-IF-NO-MARK, and no sections are marked, return the section at point (if any)."
+  (let ((old-marks (jj-list-marked-sections)))
+    (jj-unmark-all-sections)
+    (let ((marked nil))
+      (unwind-protect
+          (let ((jj-recursive-edit-confirm-function
+                 (lambda ()
+                   (setq marked (or (jj-list-marked-sections)
+                                    (and point-if-no-mark
+                                         (list (magit-section-at)))))
+                   (jj-recursive-edit-mode -1))))
+            (jj-recursive-edit-mode)
+            (message "%s%s" (if prompt
+                                (concat prompt ". ")
+                              "")
+                     (substitute-command-keys "Press \\<jj-recursive-edit-mode-map>\\[jj-recursive-edit-confirm] to confirm marked selection, or \\<jj-recursive-edit-mode-map>\\[abort-recursive-edit] to cancel"))
+            (recursive-edit))
+        (jj-unmark-all-sections)
+        (mapcar #'jj-mark-section old-marks))
+      marked)))
+;; recursive-edit for marking:1 ends here
 
 ;; modal
 
@@ -3492,6 +3537,10 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
   "c n n" #'jj-new-on-dwim
   "c n a" #'jj-new-after-dwim
   "c n b" #'jj-new-before-dwim
+  "c r r" #'jj-rebase-onto-dwim
+  "c r a" #'jj-rebase-after-dwim
+  "c r b" #'jj-rebase-before-dwim
+  "c r i" #'jj-rebase-insert-dwim
   "c k" #'jj-drop-dwim
   "c w" #'jj-desc-dwim
   "c a" #'jj-amend-into-dwim
@@ -6183,6 +6232,80 @@ If any commits are marked, use those. If no commits are marked, but point is at 
                      (jj-read-multi-revision "child revs: ")))
   (jj-new :before children :after parents :message message :no-edit no-edit))
 ;; jj new:1 ends here
+
+;; jj rebase
+
+;; [[file:majjik.org::*jj rebase][jj rebase:1]]
+(cl-defun jj-rebase (revs &key on before after message no-edit)
+  (when (and on (or before after))
+    (user-error "cannot supply ON with BEFORE or AFTER"))
+  (unless (or on before after)
+    (user-error "must supply at least one of ON, BEFORE, or AFTER"))
+  (jj-cmd-async-view
+      `("rebase"
+        ,@(mapcan (lambda (rev)
+                    `("-r" ,rev))
+                  revs)
+        ,@(mapcan (lambda (rev)
+                    `("-o" ,rev))
+                  on)
+        ,@(mapcan (lambda (rev)
+                      `("-B" ,rev))
+                    before)
+        ,@(mapcan (lambda (rev)
+                      `("-A" ,rev))
+                    after)
+        ,@(jj--if-arg no-edit nil "--no-edit")
+        ,@(jj--if-arg message #'identity "-m"))))
+
+(defun jj-get-mark-revset (&optional prompt point-if-no-mark)
+  "Prompt for the user to mark a set of revisions. Return the marked revisions."
+  (mapcan (lambda (sec)
+            (jj--get-revset (oref sec value)))
+          (jj-interactive-get-marked prompt point-if-no-mark)))
+
+(cl-defun jj-rebase-onto-dwim ()
+  "Rebase the marked commits onto a second set of marked commits.
+If no commits are marked, use the commit at point, or prompt for a set of commits. For the second set of commits, enter a recursive edit and wait until the user presses C-c C-c or C-c C-k."
+  (interactive)
+  (let* ((from (or (jj-marked-revisions)
+                   (jj-get-revset-dwim "rebase commits: ")))
+         (onto (or (jj-get-mark-revset "Mark commits to rebase onto" :or-pt)
+                   (user-error "no commits selected"))))
+    (jj-rebase from :on onto)))
+
+(cl-defun jj-rebase-before-dwim ()
+  "Rebase the marked commits before a second set of marked commits.
+If no commits are marked, use the commit at point, or prompt for a set of commits. For the second set of commits, enter a recursive edit and wait until the user presses C-c C-c or C-c C-k."
+  (interactive)
+  (let* ((from (or (jj-marked-revisions)
+                   (jj-get-mark-revset "rebase commits: ")))
+         (before (or (jj-get-mark-revset "Mark commits to rebase before" :or-pt)
+                     (user-error "no commits selected"))))
+    (jj-rebase from :before before)))
+
+(cl-defun jj-rebase-after-dwim ()
+  "Rebase the marked commits after a second set of marked commits.
+If any commits are marked, use those. If no commits are marked, but point is at a commit, use that commit. Otherwise, prompt for a set of commits."
+  (interactive)
+  (let* ((from (or (jj-marked-revisions)
+                   (jj-get-revset-dwim "rebase commits: ")))
+         (after (or (jj-get-mark-revset "Mark commits to rebase after" :or-pt)
+                    (user-error "no commits selected"))))
+    (jj-rebase from :after after)))
+
+(cl-defun jj-rebase-insert-dwim ()
+  "Rebase the marked commits. Prompts to mark commits to rebase before, then to rebase after.
+If any commits are already marked, rebase those. If no commits are marked, but point is at a commit, rebase that commit. Otherwise, prompt for a set of commits to rebase."
+  (interactive)
+  (let* ((from (or (jj-marked-revisions)
+                   (jj-get-revset-dwim "rebase commits: ")))
+         (before (or (jj-get-mark-revset "Mark commits to rebase before" :or-pt)
+                    (user-error "no commits selected")))
+         (after (or (jj-get-mark-revset "Mark commits to rebase after" :or-pt)
+                    (user-error "no commits selected"))))
+    (jj-rebase from :before before :after after)))
+;; jj rebase:1 ends here
 
 ;; jj edit
 
