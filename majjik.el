@@ -2234,14 +2234,14 @@ If the line is an elided entry, returns a single string, which is the prefix bef
                 (unless (bolp)
                   (insert "\n")))))
 
-(defun insert-jj-log-graph-prefix (graph)
-  "Add the GRAPH prefix to the entry starting at point. assume that the buffer is narrowed so as to end at the end of the entry."
+(defun insert-jj-log-graph-prefix (graph &optional node-face)
+  "Add the GRAPH prefix to the entry starting at point. assume that the buffer is narrowed so as to end at the end of the entry. If NODE-FACE is non-nil, use that face for the graph node itself."
   ;; insert the mandatory graph prefix segments
   ;; these will add new lines if there arent enough already
   (cl-loop initially (progn
                        (insert (jj-log-graph-first-line-prefix graph)
                                (propertize (jj-log-graph-first-line-node graph)
-                                           'font-lock-face '(:foreground "cyan"))
+                                           'font-lock-face (or node-face '(:foreground "cyan")))
                                (jj-log-graph-first-line-suffix graph))
                        (forward-line 1))
            for (prefix . rest) on (jj-log-graph-mandatory-segments graph)
@@ -2271,9 +2271,41 @@ If the line is an elided entry, returns a single string, which is the prefix bef
            do (progn (insert tail)
                      (forward-line 1))))
 
+(defun jj--decide-log-node-face (header)
+  (with-slots (description
+               change-id-min
+               change-id-tail
+               change-offset
+               author
+               timestamp
+               bookmarks-display
+               tags
+               working-copies
+               commit-id-min
+               commit-id-tail
+               commit-id
+               divergent
+               conflict
+               current-working-copy
+               hidden
+               immutable
+               empty)
+      header
+    (cond ((or conflict divergent)
+           '(:foreground "red"))
+          (hidden
+           '(:foreground "gray"))
+          (current-working-copy
+           '(:foreground "green"))
+          (immutable
+           '(:foreground "cyan"))
+          (:else
+           '(:foreground "white")))))
+
 (defun jj-insert-annotated-log (graph header)
   (save-excursion (jj-insert header))
-  (insert-jj-log-graph-prefix graph)
+  (let ((face (jj--decide-log-node-face header)))
+    (insert-jj-log-graph-prefix graph face))
   (add-text-properties (point-min) (point-max) `(jj-object ,header)))
 
 (defun jj-insert-annotated-log-short (graph header)
@@ -2282,7 +2314,8 @@ If the line is an elided entry, returns a single string, which is the prefix bef
     (goto-char (point-min))
     (forward-line 2)
     (delete-region (point) (point-max)))
-  (insert-jj-log-graph-prefix graph)
+  (let ((face (jj--decide-log-node-face header)))
+    (insert-jj-log-graph-prefix graph face))
   (add-text-properties (point-min) (point-max) `(jj-object ,header)))
 
 (cl-defgeneric jj-insert-section (obj)
@@ -2409,6 +2442,9 @@ If the line is an elided entry, returns a single string, which is the prefix bef
   (empty
    :parser (-compose (jj--make-opt-resolver :empty) #'s-presence)
    :form (if (:chain self (.empty)) "empty"))
+  (immutable
+   :parser (-compose (jj--make-opt-resolver :immutable) #'s-presence)
+   :form (if (:chain self (.immutable)) "immutable"))
   (description
    :parser (-compose #'s-presence #'s-chomp #'json-parse-string)
    :form (:chain self (.description) (.escape_json))))
@@ -2910,7 +2946,7 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
   (working-copies
    :face '(:foreground "green")
    :parser (jj--make-list-parser " ")
-   :printer (jj--make-list-printer " ")
+   :printer (cl-constantly nil)
    :form (:chain self (.working_copies)))
   (commit-id-min
    :face '(ansi-color-bold (:foreground "dodger blue"))
@@ -2945,6 +2981,10 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    :parser (-compose (jj--make-opt-resolver :empty) #'s-presence)
    :printer (jj--make-opt-resolver "(empty)")
    :form (if (:chain self (.empty)) "empty"))
+  (immutable
+   :parser (-compose (jj--make-opt-resolver :immutable) #'s-presence)
+   :printer (cl-constantly nil)
+   :form (if (:chain self (.immutable)) "immutable"))
   (description
    :parser (lambda (s)
              (s-presence (json-parse-string s)))
