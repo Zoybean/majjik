@@ -4537,10 +4537,10 @@ Also sets `jj--current-status' in the initial buffer when the status process com
       ,(jj-status-lineage-entry-commit-id stat)
       ,@(jj-status-lineage-entry-bookmarks stat))))
 
-(defun jj-get-revision-dwim (&optional prompt mutable)
-  "Get a revision based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT. If MUTABLE, only include mutable commits in the completion options."
+(defun jj-get-revision-dwim (&optional prompt)
+  "Get a revision based on context. E.g. from around point. If no contextual value is apparent, prompt the user explicitly with PROMPT."
   (or (jj--get-change (jj-thing-at-point))
-      (jj-read-revision prompt (when mutable "~immutable()"))))
+      (jj-read-single-revision prompt nil nil)))
 ;; single revision:1 ends here
 
 ;; rev is wc
