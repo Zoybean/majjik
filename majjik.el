@@ -2527,7 +2527,11 @@ If the line is an elided entry, returns a single string, which is the prefix bef
           (s-insert (f-prop commit-id-min
                             :face '(ansi-color-bold (:foreground "dodger blue")))
                     (f-prop commit-id-tail
-                            :face '(:foreground "dim gray")))
+                            :face '(:foreground "dim grey")))
+          (when hidden
+            (s-insert (f-prop hidden
+                              :format "(hidden)"
+                              :face '(:foreground "grey"))))
           (when divergent
             (s-insert (f-prop divergent
                               :format "(divergent)"

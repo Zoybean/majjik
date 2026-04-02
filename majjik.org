@@ -2547,7 +2547,11 @@ Minor mode for general recursive-edit operations with a standard keymap.
             (s-insert (f-prop commit-id-min
                               :face '(ansi-color-bold (:foreground "dodger blue")))
                       (f-prop commit-id-tail
-                              :face '(:foreground "dim gray")))
+                              :face '(:foreground "dim grey")))
+            (when hidden
+              (s-insert (f-prop hidden
+                                :format "(hidden)"
+                                :face '(:foreground "grey"))))
             (when divergent
               (s-insert (f-prop divergent
                                 :format "(divergent)"
