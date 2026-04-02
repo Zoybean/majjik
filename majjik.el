@@ -2373,6 +2373,14 @@ If the line is an elided entry, returns a single string, which is the prefix bef
    :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
   (bookmarks
    :parser (jj--make-list-parser " ")
+   :form (:chain self (.bookmarks)
+                 (.map (lambda (b)
+                         (separate
+                          "@"
+                          (:chain b (.name))
+                          (:chain b (.remote)))))))
+  (bookmarks-display
+   :parser (jj--make-list-parser " ")
    :form (:chain self (.bookmarks)))
   (tags
    :parser (jj--make-list-parser " ")
@@ -2413,7 +2421,7 @@ If the line is an elided entry, returns a single string, which is the prefix bef
                change-offset
                author
                timestamp
-               bookmarks
+               bookmarks-display
                tags
                working-copies
                commit-id-min
@@ -2468,8 +2476,8 @@ If the line is an elided entry, returns a single string, which is the prefix bef
                             :face '(:foreground "gold")))
           (s-insert (f-prop timestamp
                             :face '(:foreground "dark turquoise")))
-          (when bookmarks
-            (s-insert (f-prop bookmarks
+          (when bookmarks-display
+            (s-insert (f-prop bookmarks-display
                               :format (apply-partially #'s-join " ")
                               :face '(:foreground "medium orchid"))))
           (when tags
@@ -2880,6 +2888,16 @@ log-headerzzzzzzzz\"\"1970-01-01 08:00:0000000000empty\"\"
    :printer (cl-constantly nil)
    :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
   (bookmarks
+   :face '(:foreground "medium orchid")
+   :parser (jj--make-list-parser " ")
+   :printer (cl-constantly nil)
+   :form (:chain self (.bookmarks)
+                 (.map (lambda (b)
+                         (separate
+                          "@"
+                          (:chain b (.name))
+                          (:chain b (.remote)))))))
+  (bookmarks-display
    :face '(:foreground "medium orchid")
    :parser (jj--make-list-parser " ")
    :printer (jj--make-list-printer " ")
@@ -3437,8 +3455,7 @@ CALLBACK should be a function of one argument - the list of non-nil values retur
                collect `(,cm ,cm ,ci ,bms)
                collect `(,ci ,cm ,ci ,bms)
                nconc (cl-loop for bm in bms
-                              collect `(,bm ,cm ,ci ,bms)))
-    ))
+                              collect `(,bm ,cm ,ci ,bms)))))
 
 (defun jj--annotated-ref-table (options)
   "Return an annotated completion table for OPTIONS"
@@ -4271,7 +4288,14 @@ Also sets `jj--current-status' in the initial buffer when the status process com
              `(++ (join " "
                         (:chain self (format_short_change_id_with_change_offset))
                         (:chain self (.commit_id))
-                        (:chain self (.bookmarks) (.join " ")))
+                        (:chain self
+                                (.bookmarks)
+                                (.map (lambda (b)
+                                        (separate
+                                         "@"
+                                         (:chain b (.name))
+                                         (:chain b (.remote)))))
+                                (.join " ")))
                   "\n"))))
 
 (defun jj-name-list-template (self)

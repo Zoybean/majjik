@@ -2393,6 +2393,14 @@ Minor mode for general recursive-edit operations with a standard keymap.
      :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
     (bookmarks
      :parser (jj--make-list-parser " ")
+     :form (:chain self (.bookmarks)
+                   (.map (lambda (b)
+                           (separate
+                            "@"
+                            (:chain b (.name))
+                            (:chain b (.remote)))))))
+    (bookmarks-display
+     :parser (jj--make-list-parser " ")
      :form (:chain self (.bookmarks)))
     (tags
      :parser (jj--make-list-parser " ")
@@ -2433,7 +2441,7 @@ Minor mode for general recursive-edit operations with a standard keymap.
                  change-offset
                  author
                  timestamp
-                 bookmarks
+                 bookmarks-display
                  tags
                  working-copies
                  commit-id-min
@@ -2488,8 +2496,8 @@ Minor mode for general recursive-edit operations with a standard keymap.
                               :face '(:foreground "gold")))
             (s-insert (f-prop timestamp
                               :face '(:foreground "dark turquoise")))
-            (when bookmarks
-              (s-insert (f-prop bookmarks
+            (when bookmarks-display
+              (s-insert (f-prop bookmarks-display
                                 :format (apply-partially #'s-join " ")
                                 :face '(:foreground "medium orchid"))))
             (when tags
@@ -2928,6 +2936,16 @@ Minor mode for general recursive-edit operations with a standard keymap.
      :printer (cl-constantly nil)
      :form (:chain self (.committer) (.timestamp) (.local) (.format "%Y-%m-%d %H:%M:%S")))
     (bookmarks
+     :face '(:foreground "medium orchid")
+     :parser (jj--make-list-parser " ")
+     :printer (cl-constantly nil)
+     :form (:chain self (.bookmarks)
+                   (.map (lambda (b)
+                           (separate
+                            "@"
+                            (:chain b (.name))
+                            (:chain b (.remote)))))))
+    (bookmarks-display
      :face '(:foreground "medium orchid")
      :parser (jj--make-list-parser " ")
      :printer (jj--make-list-printer " ")
@@ -3480,8 +3498,7 @@ Minor mode for general recursive-edit operations with a standard keymap.
                  collect `(,cm ,cm ,ci ,bms)
                  collect `(,ci ,cm ,ci ,bms)
                  nconc (cl-loop for bm in bms
-                                collect `(,bm ,cm ,ci ,bms)))
-      ))
+                                collect `(,bm ,cm ,ci ,bms)))))
 
   (defun jj--annotated-ref-table (options)
     "Return an annotated completion table for OPTIONS"
@@ -4374,7 +4391,14 @@ need error handling in these. but I do like them being synchronous i think.
                `(++ (join " "
                           (:chain self (format_short_change_id_with_change_offset))
                           (:chain self (.commit_id))
-                          (:chain self (.bookmarks) (.join " ")))
+                          (:chain self
+                                  (.bookmarks)
+                                  (.map (lambda (b)
+                                          (separate
+                                           "@"
+                                           (:chain b (.name))
+                                           (:chain b (.remote)))))
+                                  (.join " ")))
                     "\n"))))
 
   (defun jj-name-list-template (self)
