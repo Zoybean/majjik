@@ -6375,7 +6375,8 @@ If any commits are already marked, rebase those. If no commits are marked, but p
 
 ;; [[file:majjik.org::*jj edit][jj edit:1]]
 (cl-defun jj-edit-dwim (rev &optional ignore-immutable)
-  (interactive (list (jj-get-revision-dwim "edit: ")))
+  (interactive (list (jj-get-revision-dwim "edit: ")
+                     current-prefix-arg))
   (jj-cmd-async-view
       `("edit"
         "-r" ,rev
@@ -6408,10 +6409,10 @@ If any commits are already marked, rebase those. If no commits are marked, but p
 ;; jj drop
 
 ;; [[file:majjik.org::*jj drop][jj drop:1]]
-(defun jj-drop-dwim (&optional noconfirm)
+(defun jj-drop-dwim (&optional noconfirm ignore-immutable)
   "Drop the commits you meant.
 If any commits are marked, drop those. If no commits are marked, but point is at a commit, drop that commit. Otherwise, prompt for a set of commits to drop."
-  (interactive (list current-prefix-arg))
+  (interactive (list nil current-prefix-arg))
   (let* ((marks (jj-marked-revisions))
          (revs (or marks (jj-get-revset-dwim "revs to abandon: "))))
     (unless (or noconfirm (yes-or-no-p (format "abandon %s?" revs)))
@@ -6420,7 +6421,8 @@ If any commits are marked, drop those. If no commits are marked, but point is at
         `("abandon"
           ,@(mapcan (lambda (rev)
                     `("-r" ,rev))
-                  revs)))))
+                  revs)
+          ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
 ;; jj drop:1 ends here
 
 ;; simple

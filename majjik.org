@@ -6593,7 +6593,8 @@ I just need a way to optionally persist this now, so arguments are set once for 
 ***** jj edit
 #+begin_src elisp
   (cl-defun jj-edit-dwim (rev &optional ignore-immutable)
-    (interactive (list (jj-get-revision-dwim "edit: ")))
+    (interactive (list (jj-get-revision-dwim "edit: ")
+                       current-prefix-arg))
     (jj-cmd-async-view
         `("edit"
           "-r" ,rev
@@ -6622,10 +6623,10 @@ I just need a way to optionally persist this now, so arguments are set once for 
 #+end_src
 ***** jj drop
 #+begin_src elisp
-  (defun jj-drop-dwim (&optional noconfirm)
+  (defun jj-drop-dwim (&optional noconfirm ignore-immutable)
     "Drop the commits you meant.
   If any commits are marked, drop those. If no commits are marked, but point is at a commit, drop that commit. Otherwise, prompt for a set of commits to drop."
-    (interactive (list current-prefix-arg))
+    (interactive (list nil current-prefix-arg))
     (let* ((marks (jj-marked-revisions))
            (revs (or marks (jj-get-revset-dwim "revs to abandon: "))))
       (unless (or noconfirm (yes-or-no-p (format "abandon %s?" revs)))
@@ -6634,7 +6635,8 @@ I just need a way to optionally persist this now, so arguments are set once for 
           `("abandon"
             ,@(mapcan (lambda (rev)
                       `("-r" ,rev))
-                    revs)))))
+                    revs)
+            ,@(jj--if-arg ignore-immutable nil "--ignore-immutable")))))
 #+end_src
 ***** jj git init
 ****** simple
