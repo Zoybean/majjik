@@ -1143,17 +1143,22 @@ Update the properties and markers appropriately to expand the body to the new co
     (jj-unmark-all-sections)
     (let ((marked nil))
       (unwind-protect
+          ;; force the instantiation of a buffer-local binding
+          ;; so the subsequent let-binding is buffer-local
+          ;; not sure why this is necessary - it's already auto-local
+          (setq header-line-format header-line-format)
           (let ((jj-recursive-edit-confirm-function
                  (lambda ()
                    (setq marked (or (jj-list-marked-sections)
                                     (and point-if-no-mark
                                          (list (magit-section-at)))))
-                   (jj-recursive-edit-mode -1))))
+                   (jj-recursive-edit-mode -1)))
+                (header-line-format
+                 (substitute-command-keys
+                  "Mark sections, then press \\<jj-recursive-edit-mode-map>\\[jj-recursive-edit-confirm] to confirm marked selection, or \\<jj-recursive-edit-mode-map>\\[abort-recursive-edit] to cancel")))
             (jj-recursive-edit-mode)
-            (message "%s%s" (if prompt
-                                (concat prompt ". ")
-                              "")
-                     (substitute-command-keys "Press \\<jj-recursive-edit-mode-map>\\[jj-recursive-edit-confirm] to confirm marked selection, or \\<jj-recursive-edit-mode-map>\\[abort-recursive-edit] to cancel"))
+            (when prompt
+              (message "%s" prompt))
             (recursive-edit))
         (jj-unmark-all-sections)
         (mapcar #'jj-mark-section old-marks))
@@ -6876,8 +6881,8 @@ Can be used to recreate a deleted bookmark, unlike `jj-bookmark-move-dwim' and `
   "Squash changes from the commits you meant, into the chosen revision.
 If any commits are marked, squash those commits. Otherwise, squash the @ commit. Commits are squashed into the commit at point, or prompt for a commit."
   (interactive (list nil current-prefix-arg))
-  (let ((dest (jj-get-revision-dwim "squash into rev: "))
-        (source (or (jj-marked-revisions) "@")))
+  (let ((source (or (jj-marked-revisions) (list "@")))
+        (dest (jj-get-revision-dwim "squash into rev: ")))
     (unless (or noconfirm (yes-or-no-p (format "squash %s into %s?" source dest)))
       (user-error "cancelled"))
     (jj-with-editor
