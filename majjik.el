@@ -1007,7 +1007,7 @@ Update the properties and markers appropriately to expand the body to the new co
   "Mark sections within region from BEG to END."
   (interactive "r")
   (save-excursion
-    (cl-loop for pos = (point-min) then (next-single-property-change pos 'magit-section)
+    (cl-loop for pos = beg then (next-single-property-change pos 'magit-section)
              while pos
              while (<= pos end)
              for sec = (magit-section-at pos)
@@ -1018,8 +1018,9 @@ Update the properties and markers appropriately to expand the body to the new co
   "Unmark sections within region from BEG to END."
   (interactive "r")
   (save-excursion
-    (cl-loop for pos = (point-min) then (next-single-property-change pos 'magit-section)
+    (cl-loop for pos = beg then (next-single-property-change pos 'magit-section)
              while pos
+             while (<= pos end)
              for sec = (magit-section-at pos)
              do (ignore-errors
                   (jj-unmark-section sec)))))
