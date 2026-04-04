@@ -3740,7 +3740,8 @@ If repo already existed, just return its path (as a singleton list)."
          (setup-buf-promise))
        (lambda (_ok)
          (message "jj dash ok")
-         (pop-to-buffer main-buf))
+         (pop-to-buffer main-buf)
+         main-buf)
        (lambda (err)
          (message "error: %s" err))))))
 

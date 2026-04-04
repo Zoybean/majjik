@@ -3778,7 +3778,8 @@ Minor mode for general recursive-edit operations with a standard keymap.
            (setup-buf-promise))
          (lambda (_ok)
            (message "jj dash ok")
-           (pop-to-buffer main-buf))
+           (pop-to-buffer main-buf)
+           main-buf)
          (lambda (err)
            (message "error: %s" err))))))
 
