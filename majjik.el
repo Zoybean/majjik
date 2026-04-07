@@ -6263,11 +6263,11 @@ Will likely fail for any interactive command."
                     `("-o" ,rev))
                   on)
         ,@(mapcan (lambda (rev)
-                      `("-B" ,rev))
-                    before)
+                    `("-B" ,rev))
+                  before)
         ,@(mapcan (lambda (rev)
-                      `("-A" ,rev))
-                    after)
+                    `("-A" ,rev))
+                  after)
         ,@(jj--if-arg no-edit nil "--no-edit")
         ,@(jj--if-arg message #'identity "-m"))))
 
@@ -6279,10 +6279,13 @@ If any commits are marked, use those as the parents. If no commits are marked, b
          (revs (or marks (jj-get-revset-dwim "parent commits: "))))
     (jj-new :on revs)))
 
-(cl-defun jj-new-on-bookmark (bookmark-name &key message no-edit)
-  "Create a new commit after the chosen BOOKMARK-NAME, with no children."
-  (interactive (list (completing-read "New on bookmark: " (jj-list-bookmarks))))
-  (jj-new :on bookmark-name :message message :no-edit no-edit))
+(cl-defun jj-new-on-bookmark (bookmark-names &key message no-edit)
+  "Create a new commit after the chosen BOOKMARK-NAMES, with no children."
+  (interactive (list (let ((crm-separator (rx (* blank)
+                                              (any ", ")
+                                              (* blank))))
+                       (completing-read-multiple "New on bookmark: " (jj-list-bookmarks)))))
+  (jj-new :on bookmark-names :message message :no-edit no-edit))
 
 (cl-defun jj-new-before-dwim ()
   "Insert a new commit before the commits you meant.
